@@ -24,11 +24,11 @@ class Market(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    delivery_area = models.ForeignKey(
-    "locations.DeliveryArea",
-    on_delete=models.PROTECT,
-    related_name="markets",
-)
+    delivery_areas = models.ManyToManyField(
+        "locations.DeliveryArea",
+        related_name="markets",
+        blank=True,
+    )
 
     def __str__(self):
         return self.name
