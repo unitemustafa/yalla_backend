@@ -97,6 +97,35 @@ class AuthenticationAPITests(APITestCase):
             ["This username is already taken."],
         )
 
+    def test_registration_rejects_whitespace_in_signup_fields(self):
+        payload = self.registration_payload()
+        payload["first_name"] = "Ya lla"
+        payload["username"] = "yalla customer"
+        payload["email"] = "customer @example.com"
+        payload["phone"] = "+213 555000001"
+        payload["password"] = "Strong Password123!"
+
+        response = self.client.post(f"{AUTH_BASE}/signup", payload)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["first_name"],
+            ["Spaces are not allowed in this field."],
+        )
+        self.assertIn(
+            "Spaces are not allowed in this field.",
+            response.data["username"],
+        )
+        self.assertIn("email", response.data)
+        self.assertEqual(
+            response.data["phone"],
+            ["Spaces are not allowed in this field."],
+        )
+        self.assertEqual(
+            response.data["password"],
+            ["Spaces are not allowed in this field."],
+        )
+
     def test_registration_enforces_password_complexity(self):
         payload = self.registration_payload()
         payload["password"] = "password"

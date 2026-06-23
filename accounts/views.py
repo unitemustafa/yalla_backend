@@ -25,6 +25,7 @@ from .serializers import (
     ResetPasswordSerializer,
     UserUpdateSerializer,
     UserSerializer,
+    phone_candidates,
 )
 from .services import issue_otp, otp_response_data, verify_otp
 
@@ -248,7 +249,7 @@ class CheckPhoneView(APIView):
     def get(self, request):
         phone = request.query_params.get("phone", "").strip()
         registered = bool(phone) and User.objects.filter(
-            phone=phone,
+            phone__in=phone_candidates(phone),
             deleted_at__isnull=True,
         ).exists()
         return Response({"available": not registered, "registered": registered})

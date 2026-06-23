@@ -17,6 +17,40 @@ from .services import normalize_email, verify_otp
 User = get_user_model()
 
 
+def contains_whitespace(value):
+    return bool(re.search(r"\s", value or ""))
+
+
+def reject_whitespace(value):
+    if contains_whitespace(value):
+        raise serializers.ValidationError("Spaces are not allowed in this field.")
+    return value
+
+
+def no_whitespace_validator(value):
+    reject_whitespace(value)
+
+
+def phone_candidates(value):
+    digits = re.sub(r"\D", "", value or "")
+    if len(digits) < 10:
+        return []
+
+    candidates = {(value or "").strip(), digits, f"+{digits}"}
+    if digits.startswith("0"):
+        candidates.add(f"+20{digits[1:]}")
+        candidates.add(f"20{digits[1:]}")
+    elif digits.startswith("20"):
+        candidates.add(f"+{digits}")
+        candidates.add(f"0{digits[2:]}")
+    elif len(digits) == 10 and digits.startswith("1"):
+        candidates.add(f"+20{digits}")
+        candidates.add(f"20{digits}")
+        candidates.add(f"0{digits}")
+
+    return list(candidates)
+
+
 class RequiredFieldMessagesMixin:
     def get_fields(self):
         fields = super().get_fields()
@@ -56,6 +90,8 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
 
 class PasswordValidationMixin:
     def validate_password(self, value):
+        reject_whitespace(value)
+
         errors = []
         if len(value) < 8:
             errors.append("Password must be at least 8 characters.")
@@ -84,7 +120,7 @@ class RegisterSerializer(
     last_name = serializers.CharField(max_length=150)
     username = serializers.CharField(
         max_length=150,
-        validators=[UnicodeUsernameValidator()],
+        validators=[no_whitespace_validator, UnicodeUsernameValidator()],
     )
     email = serializers.EmailField()
     phone = serializers.CharField(max_length=30)
@@ -92,7 +128,14 @@ class RegisterSerializer(
     password_confirm = serializers.CharField(write_only=True, trim_whitespace=False)
     terms_accepted = serializers.BooleanField()
 
+    def validate_first_name(self, value):
+        return reject_whitespace(value)
+
+    def validate_last_name(self, value):
+        return reject_whitespace(value)
+
     def validate_email(self, value):
+        reject_whitespace(value)
         email = normalize_email(value)
         user = User.objects.filter(
             email__iexact=email,
@@ -103,6 +146,7 @@ class RegisterSerializer(
         return email
 
     def validate_username(self, value):
+        reject_whitespace(value)
         username = value.strip()
         email = normalize_email(self.initial_data.get("email", ""))
         user = User.objects.filter(
@@ -114,9 +158,10 @@ class RegisterSerializer(
         return username
 
     def validate_phone(self, value):
+        reject_whitespace(value)
         phone = value.strip()
         user = User.objects.filter(
-            phone=phone,
+            phone__in=phone_candidates(phone),
             deleted_at__isnull=True,
         ).first()
         email = normalize_email(self.initial_data.get("email", ""))
@@ -150,15 +195,18 @@ class EmailOTPSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
 
 
 class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
-    email = serializers.EmailField()
+    email = serializers.CharField(required=False)
+    identifier = serializers.CharField(required=False, write_only=True)
     password = serializers.CharField(write_only=True, trim_whitespace=False)
 
     def validate(self, attrs):
-        email = normalize_email(attrs["email"])
-        user = User.objects.filter(
-            email__iexact=email,
-            deleted_at__isnull=True,
-        ).first()
+        identifier = (attrs.get("identifier") or attrs.get("email") or "").strip()
+        if not identifier:
+            raise serializers.ValidationError(
+                {"email": "Email, username, or phone number is required."}
+            )
+
+        user = self._find_user(identifier)
 
         if user is None or not user.check_password(attrs["password"]):
             raise AuthenticationFailed("Invalid email or password.")
@@ -169,6 +217,24 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
 
         attrs["user"] = user
         return attrs
+
+    def _find_user(self, identifier):
+        base_queryset = User.objects.filter(deleted_at__isnull=True)
+        email = normalize_email(identifier)
+
+        user = base_queryset.filter(email__iexact=email).first()
+        if user is not None:
+            return user
+
+        user = base_queryset.filter(username__iexact=identifier).first()
+        if user is not None:
+            return user
+
+        candidates = phone_candidates(identifier)
+        if not candidates:
+            return None
+
+        return base_queryset.filter(phone__in=candidates).first()
 
 
 class ForgotPasswordSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
@@ -274,7 +340,10 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
         phone = value.strip()
         user = self.context["request"].user
         if (
-            User.objects.filter(phone=phone, deleted_at__isnull=True)
+            User.objects.filter(
+                phone__in=phone_candidates(phone),
+                deleted_at__isnull=True,
+            )
             .exclude(pk=user.pk)
             .exists()
         ):
