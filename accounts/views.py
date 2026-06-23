@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
@@ -14,6 +15,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from .models import OneTimePassword
 from .serializers import (
+    DeleteAccountSerializer,
     EmailOTPSerializer,
     EmailTokenRefreshSerializer,
     ForgotPasswordSerializer,
@@ -21,6 +23,7 @@ from .serializers import (
     LogoutSerializer,
     RegisterSerializer,
     ResetPasswordSerializer,
+    UserUpdateSerializer,
     UserSerializer,
 )
 from .services import issue_otp, otp_response_data, verify_otp
@@ -35,6 +38,7 @@ def token_payload(user):
     return {
         "accessToken": access,
         "refreshToken": refresh_value,
+        "expiresIn": int(settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"].total_seconds()),
         "user": UserSerializer(user).data,
     }
 
@@ -48,7 +52,10 @@ class RegisterView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        user = User.objects.filter(email__iexact=data["email"]).first()
+        user = User.objects.filter(
+            email__iexact=data["email"],
+            deleted_at__isnull=True,
+        ).first()
 
         if user is None:
             user = User(
@@ -88,6 +95,7 @@ class VerifyRegistrationOTPView(APIView):
         user = User.objects.filter(
             email__iexact=serializer.validated_data["email"],
             is_active=False,
+            deleted_at__isnull=True,
         ).first()
         if user is None:
             return Response(
@@ -120,6 +128,7 @@ class ResendRegistrationOTPView(APIView):
         user = User.objects.filter(
             email__iexact=serializer.validated_data["email"],
             is_active=False,
+            deleted_at__isnull=True,
         ).first()
         if user is None:
             return Response(
@@ -157,6 +166,94 @@ class LogoutView(APIView):
         )
 
 
+class MeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(UserSerializer(request.user).data)
+
+    def patch(self, request):
+        serializer = UserUpdateSerializer(
+            request.user,
+            data=request.data,
+            partial=True,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        return Response(UserSerializer(user).data)
+
+    @transaction.atomic
+    def delete(self, request):
+        serializer = DeleteAccountSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+        BlacklistedToken.objects.bulk_create(
+            [
+                BlacklistedToken(token=token)
+                for token in OutstandingToken.objects.filter(user=user)
+            ],
+            ignore_conflicts=True,
+        )
+        deleted_at = timezone.now()
+        deleted_marker = f"deleted-{user.pk}-{int(deleted_at.timestamp())}"
+        user.is_active = False
+        user.deleted_at = deleted_at
+        user.email = f"{deleted_marker}@deleted.local"
+        user.username = deleted_marker
+        user.phone = deleted_marker
+        user.save(
+            update_fields=[
+                "is_active",
+                "deleted_at",
+                "email",
+                "username",
+                "phone",
+                "updated_at",
+            ]
+        )
+        return Response({"detail": "Account deleted."}, status=status.HTTP_200_OK)
+
+
+class CheckUsernameView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        username = request.query_params.get("username", "").strip()
+        registered = bool(username) and User.objects.filter(
+            username__iexact=username,
+            deleted_at__isnull=True,
+        ).exists()
+        return Response({"available": not registered, "registered": registered})
+
+
+class CheckEmailView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        email = request.query_params.get("email", "").strip()
+        registered = bool(email) and User.objects.filter(
+            email__iexact=email,
+            deleted_at__isnull=True,
+        ).exists()
+        return Response({"available": not registered, "registered": registered})
+
+
+class CheckPhoneView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        phone = request.query_params.get("phone", "").strip()
+        registered = bool(phone) and User.objects.filter(
+            phone=phone,
+            deleted_at__isnull=True,
+        ).exists()
+        return Response({"available": not registered, "registered": registered})
+
+
 class ForgotPasswordView(APIView):
     permission_classes = [AllowAny]
 
@@ -166,6 +263,7 @@ class ForgotPasswordView(APIView):
         user = User.objects.filter(
             email__iexact=serializer.validated_data["email"],
             is_active=True,
+            deleted_at__isnull=True,
         ).first()
 
         response_data = {

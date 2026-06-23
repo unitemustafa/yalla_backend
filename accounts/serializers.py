@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.exceptions import TokenError
@@ -30,10 +31,27 @@ class RequiredFieldMessagesMixin:
 
 class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
     id = serializers.CharField(read_only=True)
+    has_password = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ("id", "first_name", "last_name", "email", "phone", "role")
+        fields = (
+            "id",
+            "first_name",
+            "last_name",
+            "username",
+            "email",
+            "phone",
+            "gender",
+            "birth_date",
+            "avatar_url",
+            "username_changed_at",
+            "role",
+            "has_password",
+        )
+
+    def get_has_password(self, obj):
+        return obj.has_usable_password()
 
 
 class PasswordValidationMixin:
@@ -76,7 +94,10 @@ class RegisterSerializer(
 
     def validate_email(self, value):
         email = normalize_email(value)
-        user = User.objects.filter(email__iexact=email).first()
+        user = User.objects.filter(
+            email__iexact=email,
+            deleted_at__isnull=True,
+        ).first()
         if user and user.is_active:
             raise serializers.ValidationError("An account with this email already exists.")
         return email
@@ -84,14 +105,20 @@ class RegisterSerializer(
     def validate_username(self, value):
         username = value.strip()
         email = normalize_email(self.initial_data.get("email", ""))
-        user = User.objects.filter(username__iexact=username).first()
+        user = User.objects.filter(
+            username__iexact=username,
+            deleted_at__isnull=True,
+        ).first()
         if user and user.email.lower() != email:
             raise serializers.ValidationError("This username is already taken.")
         return username
 
     def validate_phone(self, value):
         phone = value.strip()
-        user = User.objects.filter(phone=phone).first()
+        user = User.objects.filter(
+            phone=phone,
+            deleted_at__isnull=True,
+        ).first()
         email = normalize_email(self.initial_data.get("email", ""))
         if user and user.email.lower() != email:
             raise serializers.ValidationError(
@@ -128,7 +155,10 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
 
     def validate(self, attrs):
         email = normalize_email(attrs["email"])
-        user = User.objects.filter(email__iexact=email).first()
+        user = User.objects.filter(
+            email__iexact=email,
+            deleted_at__isnull=True,
+        ).first()
 
         if user is None or not user.check_password(attrs["password"]):
             raise AuthenticationFailed("Invalid email or password.")
@@ -161,6 +191,7 @@ class ResetPasswordSerializer(PasswordValidationMixin, EmailOTPSerializer):
         user = User.objects.filter(
             email__iexact=attrs["email"],
             is_active=True,
+            deleted_at__isnull=True,
         ).first()
         if user is None:
             raise serializers.ValidationError({"otp": "Invalid verification code."})
@@ -197,6 +228,84 @@ class LogoutSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             raise serializers.ValidationError(
                 {"refresh": "Invalid or expired refresh token."}
             ) from exc
+
+
+class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
+    first_name = serializers.CharField(max_length=150, required=False)
+    last_name = serializers.CharField(max_length=150, required=False)
+    username = serializers.CharField(
+        max_length=150,
+        validators=[UnicodeUsernameValidator()],
+        required=False,
+    )
+    email = serializers.EmailField(required=False)
+    phone = serializers.CharField(max_length=30, required=False)
+    gender = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    birth_date = serializers.DateField(required=False, allow_null=True)
+    avatar_url = serializers.URLField(required=False, allow_blank=True)
+
+    def validate_email(self, value):
+        email = normalize_email(value)
+        user = self.context["request"].user
+        if (
+            User.objects.filter(email__iexact=email)
+            .filter(deleted_at__isnull=True)
+            .exclude(pk=user.pk)
+            .exists()
+        ):
+            raise serializers.ValidationError(
+                "An account with this email already exists."
+            )
+        return email
+
+    def validate_username(self, value):
+        username = value.strip()
+        user = self.context["request"].user
+        if (
+            User.objects.filter(username__iexact=username)
+            .filter(deleted_at__isnull=True)
+            .exclude(pk=user.pk)
+            .exists()
+        ):
+            raise serializers.ValidationError("This username is already taken.")
+        return username
+
+    def validate_phone(self, value):
+        phone = value.strip()
+        user = self.context["request"].user
+        if (
+            User.objects.filter(phone=phone, deleted_at__isnull=True)
+            .exclude(pk=user.pk)
+            .exists()
+        ):
+            raise serializers.ValidationError(
+                "An account with this phone number already exists."
+            )
+        return phone
+
+    def update(self, instance, validated_data):
+        update_fields = list(validated_data.keys())
+        if (
+            "username" in validated_data
+            and validated_data["username"] != instance.username
+        ):
+            instance.username_changed_at = timezone.now()
+            update_fields.append("username_changed_at")
+
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        instance.save(update_fields=[*update_fields, "updated_at"])
+        return instance
+
+
+class DeleteAccountSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
+
+    def validate_password(self, value):
+        user = self.context["request"].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Invalid password.")
+        return value
 
 
 class EmailTokenRefreshSerializer(
