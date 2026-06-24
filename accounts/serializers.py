@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.exceptions import PermissionDenied
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -76,16 +77,23 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
             "username",
             "email",
             "phone",
-            "gender",
-            "birth_date",
-            "avatar_url",
-            "username_changed_at",
             "role",
             "has_password",
         )
 
     def get_has_password(self, obj):
         return obj.has_usable_password()
+
+
+class AdminUserSerializer(UserSerializer):
+    class Meta(UserSerializer.Meta):
+        fields = UserSerializer.Meta.fields + (
+            "is_active",
+            "is_staff",
+            "is_superuser",
+            "created_at",
+            "updated_at",
+        )
 
 
 class PasswordValidationMixin:
@@ -128,11 +136,7 @@ class RegisterSerializer(
     password_confirm = serializers.CharField(write_only=True, trim_whitespace=False)
     terms_accepted = serializers.BooleanField()
 
-    def validate_first_name(self, value):
-        return reject_whitespace(value)
-
-    def validate_last_name(self, value):
-        return reject_whitespace(value)
+   
 
     def validate_email(self, value):
         reject_whitespace(value)
@@ -213,6 +217,12 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
         if not user.is_active:
             raise serializers.ValidationError(
                 "Account email has not been verified."
+            )
+        expected_role = self.context.get("expected_role")
+        if expected_role and user.role != expected_role:
+            role_label = User.Role(expected_role).label.lower()
+            raise PermissionDenied(
+                f"This login is only for {role_label} accounts."
             )
 
         attrs["user"] = user
@@ -306,9 +316,6 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
     )
     email = serializers.EmailField(required=False)
     phone = serializers.CharField(max_length=30, required=False)
-    gender = serializers.CharField(max_length=20, required=False, allow_blank=True)
-    birth_date = serializers.DateField(required=False, allow_null=True)
-    avatar_url = serializers.URLField(required=False, allow_blank=True)
 
     def validate_email(self, value):
         email = normalize_email(value)
@@ -363,6 +370,109 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
 
         for field, value in validated_data.items():
             setattr(instance, field, value)
+        instance.save(update_fields=[*update_fields, "updated_at"])
+        return instance
+
+
+class AdminUserWriteSerializer(
+    RequiredFieldMessagesMixin,
+    PasswordValidationMixin,
+    serializers.ModelSerializer,
+):
+    password = serializers.CharField(
+        required=False,
+        write_only=True,
+        trim_whitespace=False,
+    )
+
+    class Meta:
+        model = User
+        fields = (
+            "first_name",
+            "last_name",
+            "username",
+            "email",
+            "phone",
+            "password",
+            "role",
+            "is_active",
+            "is_staff",
+            "is_superuser",
+        )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance is None:
+            self.fields["password"].required = True
+
+
+    def validate_email(self, value):
+        reject_whitespace(value)
+        email = normalize_email(value)
+        queryset = User.objects.filter(
+            email__iexact=email,
+            deleted_at__isnull=True,
+        )
+        if self.instance is not None:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError(
+                "An account with this email already exists."
+            )
+        return email
+
+    def validate_username(self, value):
+        reject_whitespace(value)
+        username = value.strip()
+        queryset = User.objects.filter(
+            username__iexact=username,
+            deleted_at__isnull=True,
+        )
+        if self.instance is not None:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError("This username is already taken.")
+        return username
+
+    def validate_phone(self, value):
+        reject_whitespace(value)
+        phone = value.strip()
+        queryset = User.objects.filter(
+            phone__in=phone_candidates(phone),
+            deleted_at__isnull=True,
+        )
+        if self.instance is not None:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError(
+                "An account with this phone number already exists."
+            )
+        return phone
+
+    def create(self, validated_data):
+        password = validated_data.pop("password")
+        user = User(**validated_data)
+        user.set_password(password)
+        user.terms_accepted = True
+        user.terms_accepted_at = timezone.now()
+        user.save()
+        return user
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop("password", None)
+        update_fields = list(validated_data.keys())
+        if (
+            "username" in validated_data
+            and validated_data["username"] != instance.username
+        ):
+            instance.username_changed_at = timezone.now()
+            update_fields.append("username_changed_at")
+
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        if password is not None:
+            instance.set_password(password)
+            update_fields.append("password")
         instance.save(update_fields=[*update_fields, "updated_at"])
         return instance
 

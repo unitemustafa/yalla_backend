@@ -46,6 +46,10 @@ class Product(models.Model):
         on_delete=models.PROTECT,
         related_name="products",
     )
+    is_available = models.BooleanField(
+        default=True,
+        help_text="True if the product is available for sale."
+    )
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     image = models.ImageField(upload_to="products/", blank=True, null=True)

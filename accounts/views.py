@@ -3,7 +3,8 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.generics import get_object_or_404
+from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -15,6 +16,8 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from .models import OneTimePassword
 from .serializers import (
+    AdminUserSerializer,
+    AdminUserWriteSerializer,
     DeleteAccountSerializer,
     EmailOTPSerializer,
     EmailTokenRefreshSerializer,
@@ -32,6 +35,17 @@ from .services import issue_otp, otp_response_data, verify_otp
 User = get_user_model()
 
 
+class IsAdminRole(BasePermission):
+    message = "Only admin users can manage users."
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.role == User.Role.ADMIN
+        )
+
+
 def token_payload(user):
     refresh = RefreshToken.for_user(user)
     access = str(refresh.access_token)
@@ -42,6 +56,26 @@ def token_payload(user):
         "expiresIn": int(settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"].total_seconds()),
         "user": UserSerializer(user).data,
     }
+
+
+def soft_delete_user(user):
+    deleted_at = timezone.now()
+    deleted_marker = f"deleted-{user.pk}-{int(deleted_at.timestamp())}"
+    user.is_active = False
+    user.deleted_at = deleted_at
+    user.email = f"{deleted_marker}@deleted.local"
+    user.username = deleted_marker
+    user.phone = deleted_marker
+    user.save(
+        update_fields=[
+            "is_active",
+            "deleted_at",
+            "email",
+            "username",
+            "phone",
+            "updated_at",
+        ]
+    )
 
 
 class RegisterView(APIView):
@@ -147,11 +181,27 @@ class ResendRegistrationOTPView(APIView):
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    role = None
 
     def post(self, request):
-        serializer = LoginSerializer(data=request.data)
+        serializer = LoginSerializer(
+            data=request.data,
+            context={"expected_role": self.role},
+        )
         serializer.is_valid(raise_exception=True)
         return Response(token_payload(serializer.validated_data["user"]))
+
+
+class ClientLoginView(LoginView):
+    role = User.Role.CLIENT
+
+
+class RepresentativeLoginView(LoginView):
+    role = User.Role.REPRESENTATIVE
+
+
+class AdminLoginView(LoginView):
+    role = User.Role.ADMIN
 
 
 class LogoutView(APIView):
@@ -199,23 +249,60 @@ class MeView(APIView):
             ],
             ignore_conflicts=True,
         )
-        deleted_at = timezone.now()
-        deleted_marker = f"deleted-{user.pk}-{int(deleted_at.timestamp())}"
-        user.is_active = False
-        user.deleted_at = deleted_at
-        user.email = f"{deleted_marker}@deleted.local"
-        user.username = deleted_marker
-        user.phone = deleted_marker
-        user.save(
-            update_fields=[
-                "is_active",
-                "deleted_at",
-                "email",
-                "username",
-                "phone",
-                "updated_at",
-            ]
+        soft_delete_user(user)
+        return Response({"detail": "Account deleted."}, status=status.HTTP_200_OK)
+
+
+class AdminUserListCreateView(APIView):
+    
+
+    def get(self, request):
+        users = User.objects.filter(deleted_at__isnull=True).order_by(
+            "-created_at",
+            "-id",
         )
+        return Response(AdminUserSerializer(users, many=True).data)
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = AdminUserWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        return Response(
+            AdminUserSerializer(user).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminUserDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get_user(self, user_id):
+        return get_object_or_404(
+            User.objects.filter(deleted_at__isnull=True),
+            id=user_id,
+        )
+
+    def get(self, request, user_id):
+        user = self.get_user(user_id)
+        return Response(AdminUserSerializer(user).data)
+
+    @transaction.atomic
+    def patch(self, request, user_id):
+        user = self.get_user(user_id)
+        serializer = AdminUserWriteSerializer(
+            user,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        return Response(AdminUserSerializer(user).data)
+
+    @transaction.atomic
+    def delete(self, request, user_id):
+        user = self.get_user(user_id)
+        soft_delete_user(user)
         return Response({"detail": "Account deleted."}, status=status.HTTP_200_OK)
 
 

@@ -34,13 +34,20 @@ class AuthenticationAPITests(APITestCase):
             "terms_accepted": True,
         }
 
-    def create_active_user(self):
+    def create_active_user(
+        self,
+        role=User.Role.CLIENT,
+        username="customer",
+        email=None,
+        phone="+213555000001",
+    ):
         return User.objects.create_user(
-            username="customer",
-            email=self.email,
-            phone="+213555000001",
+            username=username,
+            email=email or self.email,
+            phone=phone,
             password=self.password,
             is_active=True,
+            role=role,
         )
 
     def test_registration_requires_otp_before_login(self):
@@ -169,6 +176,142 @@ class AuthenticationAPITests(APITestCase):
         self.assertIn("expiresIn", response.data)
         self.assertNotIn("access", response.data)
         self.assertNotIn("refresh", response.data)
+
+    def test_role_specific_login_endpoints_require_matching_role(self):
+        client = self.create_active_user(
+            role=User.Role.CLIENT,
+            username="client_user",
+            email="client@example.com",
+            phone="+213555000011",
+        )
+        representative = self.create_active_user(
+            role=User.Role.REPRESENTATIVE,
+            username="representative_user",
+            email="representative@example.com",
+            phone="+213555000012",
+        )
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="admin_user",
+            email="admin@example.com",
+            phone="+213555000013",
+        )
+
+        client_response = self.client.post(
+            f"{AUTH_BASE}/login/client/",
+            {"email": client.email, "password": self.password},
+        )
+        representative_response = self.client.post(
+            f"{AUTH_BASE}/login/representative/",
+            {"email": representative.email, "password": self.password},
+        )
+        admin_response = self.client.post(
+            f"{AUTH_BASE}/login/admin/",
+            {"email": admin.email, "password": self.password},
+        )
+        wrong_role_response = self.client.post(
+            f"{AUTH_BASE}/login/admin/",
+            {"email": client.email, "password": self.password},
+        )
+
+        self.assertEqual(client_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            client_response.data["user"]["role"],
+            User.Role.CLIENT,
+        )
+        self.assertEqual(representative_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            representative_response.data["user"]["role"],
+            User.Role.REPRESENTATIVE,
+        )
+        self.assertEqual(admin_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(admin_response.data["user"]["role"], User.Role.ADMIN)
+        self.assertEqual(
+            wrong_role_response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+        self.assertEqual(
+            wrong_role_response.data["detail"],
+            "This login is only for admin accounts.",
+        )
+
+    def test_admin_user_crud_requires_authentication(self):
+        response = self.client.get(f"{AUTH_BASE}/users/")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_admin_user_crud_requires_admin_role(self):
+        client = self.create_active_user()
+        refresh = RefreshToken.for_user(client)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get(f"{AUTH_BASE}/users/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data["detail"], "Only admin users can manage users.")
+
+    def test_admin_can_create_read_update_and_delete_user(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="admin_crud",
+            email="admin-crud@example.com",
+            phone="+213555000021",
+        )
+        refresh = RefreshToken.for_user(admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        create_response = self.client.post(
+            f"{AUTH_BASE}/users/",
+            {
+                "first_name": "New",
+                "last_name": "User",
+                "username": "managed_user",
+                "email": "managed@example.com",
+                "phone": "+213555000022",
+                "password": self.password,
+                "role": User.Role.REPRESENTATIVE,
+                "is_active": True,
+            },
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(create_response.data["email"], "managed@example.com")
+        self.assertEqual(create_response.data["role"], User.Role.REPRESENTATIVE)
+        self.assertTrue(
+            User.objects.get(email="managed@example.com").check_password(
+                self.password
+            )
+        )
+
+        user_id = create_response.data["id"]
+        list_response = self.client.get(f"{AUTH_BASE}/users/")
+        detail_response = self.client.get(f"{AUTH_BASE}/users/{user_id}/")
+        update_response = self.client.patch(
+            f"{AUTH_BASE}/users/{user_id}/",
+            {
+                "first_name": "Updated",
+                "role": User.Role.CLIENT,
+            },
+        )
+        delete_response = self.client.delete(f"{AUTH_BASE}/users/{user_id}/")
+        deleted_detail_response = self.client.get(f"{AUTH_BASE}/users/{user_id}/")
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertIn(
+            int(user_id),
+            [int(user["id"]) for user in list_response.data],
+        )
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_response.data["username"], "managed_user")
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_response.data["first_name"], "Updated")
+        self.assertEqual(update_response.data["role"], User.Role.CLIENT)
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(
+            deleted_detail_response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+        self.assertIsNotNone(User.objects.get(pk=user_id).deleted_at)
 
     def test_missing_fields_return_field_specific_required_messages(self):
         login_response = self.client.post(

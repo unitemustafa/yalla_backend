@@ -61,8 +61,8 @@ class Command(BaseCommand):
             {
                 "email": "seed.admin@yalla.test",
                 "username": "seed_admin",
-                "first_name": "Yalla",
-                "last_name": "Admin",
+                "first_name": "يلا",
+                "last_name": "مشرف",
                 "phone": "+213555100001",
                 "role": User.Role.ADMIN,
                 "is_staff": True,
@@ -72,8 +72,8 @@ class Command(BaseCommand):
             {
                 "email": "seed.amina@yalla.test",
                 "username": "seed_amina",
-                "first_name": "Amina",
-                "last_name": "Bensalem",
+                "first_name": "أمينة",
+                "last_name": "بن سالم",
                 "phone": "+213555100002",
                 "role": User.Role.CLIENT,
                 "is_staff": False,
@@ -83,8 +83,8 @@ class Command(BaseCommand):
             {
                 "email": "seed.karim@yalla.test",
                 "username": "seed_karim",
-                "first_name": "Karim",
-                "last_name": "Mansouri",
+                "first_name": "كريم",
+                "last_name": "منصوري",
                 "phone": "+213555100003",
                 "role": User.Role.CLIENT,
                 "is_staff": False,
@@ -94,8 +94,8 @@ class Command(BaseCommand):
             {
                 "email": "seed.courier@yalla.test",
                 "username": "seed_courier",
-                "first_name": "Sofiane",
-                "last_name": "Delivery",
+                "first_name": "سفيان",
+                "last_name": "مندوب",
                 "phone": "+213555100004",
                 "role": User.Role.REPRESENTATIVE,
                 "is_staff": False,
@@ -105,8 +105,8 @@ class Command(BaseCommand):
             {
                 "email": "seed.pending@yalla.test",
                 "username": "seed_pending",
-                "first_name": "Pending",
-                "last_name": "Customer",
+                "first_name": "زبون",
+                "last_name": "قيد التفعيل",
                 "phone": "+213555100005",
                 "role": User.Role.CLIENT,
                 "is_staff": False,
@@ -164,9 +164,9 @@ class Command(BaseCommand):
 
     def _seed_locations(self, users):
         area_definitions = [
-            ("Central Algiers", "250.00", "36.7538000", "3.0588000", "8.00"),
-            ("Bab Ezzouar", "300.00", "36.7167000", "3.1833000", "6.50"),
-            ("Oran Centre", "280.00", "35.6969000", "-0.6331000", "7.00"),
+            ("وسط الجزائر", "250.00", "36.7538000", "3.0588000", "8.00"),
+            ("باب الزوار", "300.00", "36.7167000", "3.1833000", "6.50"),
+            ("وسط وهران", "280.00", "35.6969000", "-0.6331000", "7.00"),
         ]
         areas = {}
         for name, price, latitude, longitude, radius in area_definitions:
@@ -185,21 +185,21 @@ class Command(BaseCommand):
         addresses = [
             (
                 users["seed.amina@yalla.test"],
-                "Home",
+                "المنزل",
                 "36.7525000",
                 "3.0419000",
                 True,
             ),
             (
                 users["seed.amina@yalla.test"],
-                "Work",
+                "العمل",
                 "36.7110000",
                 "3.1810000",
                 False,
             ),
             (
                 users["seed.karim@yalla.test"],
-                "Home",
+                "المنزل",
                 "35.7002000",
                 "-0.6401000",
                 True,
@@ -219,28 +219,28 @@ class Command(BaseCommand):
 
     def _seed_markets(self, areas):
         classifications = {}
-        for name in ("Supermarket", "Restaurant", "Bakery"):
+        for name in ("سوبرماركت", "مطعم", "مخبزة"):
             obj, _ = MarketClassification.objects.get_or_create(name=name)
             classifications[name] = obj
 
         definitions = [
             (
-                "Yalla Fresh Market",
-                "Algiers Centre",
-                "Supermarket",
-                ["Central Algiers", "Bab Ezzouar"],
+                "سوق يلا الطازج",
+                "وسط الجزائر",
+                "سوبرماركت",
+                ["وسط الجزائر", "باب الزوار"],
             ),
             (
-                "Atlas Family Kitchen",
-                "Bab Ezzouar",
-                "Restaurant",
-                ["Central Algiers", "Bab Ezzouar"],
+                "مطبخ أطلس العائلي",
+                "باب الزوار",
+                "مطعم",
+                ["وسط الجزائر", "باب الزوار"],
             ),
             (
-                "Oran Golden Bakery",
-                "Oran Centre",
-                "Bakery",
-                ["Oran Centre"],
+                "مخبزة وهران الذهبية",
+                "وسط وهران",
+                "مخبزة",
+                ["وسط وهران"],
             ),
         ]
         markets = {}
@@ -258,14 +258,14 @@ class Command(BaseCommand):
         return markets
 
     def _seed_catalog(self, markets):
-        grocery, _ = CategoryClassification.objects.get_or_create(name="Grocery")
-        food, _ = CategoryClassification.objects.get_or_create(name="Prepared Food")
+        grocery, _ = CategoryClassification.objects.get_or_create(name="بقالة")
+        food, _ = CategoryClassification.objects.get_or_create(name="أكل جاهز")
 
         category_definitions = [
-            ("Fresh Produce", grocery, "produce", "Fresh fruit and vegetables"),
-            ("Drinks", grocery, "beverage", "Cold and shelf-stable drinks"),
-            ("Bakery", food, "bakery", "Bread and baked goods"),
-            ("Meals", food, "meal", "Ready-to-eat meals"),
+            ("خضر وفواكه", grocery, "produce", "فواكه وخضر طازجة"),
+            ("مشروبات", grocery, "beverage", "مشروبات باردة ومعلبة"),
+            ("مخبوزات", food, "bakery", "خبز ومخبوزات يومية"),
+            ("وجبات", food, "meal", "وجبات جاهزة للأكل"),
         ]
         categories = {}
         for name, classification, category_type, description in category_definitions:
@@ -277,10 +277,10 @@ class Command(BaseCommand):
             categories[name] = category
 
         attribute_definitions = {
-            "Fresh Produce": ("Unit", ["500 g", "1 kg"]),
-            "Drinks": ("Size", ["330 ml", "1 L"]),
-            "Bakery": ("Pack", ["Single", "Pack of 4"]),
-            "Meals": ("Portion", ["Regular", "Family"]),
+            "خضر وفواكه": ("الوحدة", ["500 غ", "1 كغ"]),
+            "مشروبات": ("الحجم", ["330 مل", "1 لتر"]),
+            "مخبوزات": ("العبوة", ["قطعة واحدة", "عبوة 4 قطع"]),
+            "وجبات": ("الحصة", ["عادية", "عائلية"]),
         }
         attributes = {}
         options = {}
@@ -299,16 +299,16 @@ class Command(BaseCommand):
                 options[category_name].append(option)
 
         product_definitions = [
-            ("Red Apples", "Yalla Fresh Market", "Fresh Produce", "320.00"),
-            ("Bananas", "Yalla Fresh Market", "Fresh Produce", "240.00"),
-            ("Orange Juice", "Yalla Fresh Market", "Drinks", "180.00"),
-            ("Fresh Milk", "Yalla Fresh Market", "Drinks", "160.00"),
-            ("Mineral Water", "Yalla Fresh Market", "Drinks", "70.00"),
-            ("Chicken Couscous", "Atlas Family Kitchen", "Meals", "850.00"),
-            ("Vegetable Chorba", "Atlas Family Kitchen", "Meals", "420.00"),
-            ("Grilled Chicken", "Atlas Family Kitchen", "Meals", "980.00"),
-            ("Traditional Baguette", "Oran Golden Bakery", "Bakery", "60.00"),
-            ("Chocolate Croissant", "Oran Golden Bakery", "Bakery", "140.00"),
+            ("تفاح أحمر", "سوق يلا الطازج", "خضر وفواكه", "320.00"),
+            ("موز", "سوق يلا الطازج", "خضر وفواكه", "240.00"),
+            ("عصير برتقال", "سوق يلا الطازج", "مشروبات", "180.00"),
+            ("حليب طازج", "سوق يلا الطازج", "مشروبات", "160.00"),
+            ("مياه معدنية", "سوق يلا الطازج", "مشروبات", "70.00"),
+            ("كسكس بالدجاج", "مطبخ أطلس العائلي", "وجبات", "850.00"),
+            ("شوربة خضار", "مطبخ أطلس العائلي", "وجبات", "420.00"),
+            ("دجاج مشوي", "مطبخ أطلس العائلي", "وجبات", "980.00"),
+            ("خبز باغيت تقليدي", "مخبزة وهران الذهبية", "مخبوزات", "60.00"),
+            ("كرواسون بالشوكولاتة", "مخبزة وهران الذهبية", "مخبوزات", "140.00"),
         ]
         products = {}
         variants = {}
@@ -321,7 +321,7 @@ class Command(BaseCommand):
                 name=name,
                 defaults={
                     "category": categories[category_name],
-                    "description": f"Seeded {name.lower()} product.",
+                    "description": f"منتج تجريبي: {name}.",
                     "discount": Decimal("0.00"),
                 },
             )
@@ -359,31 +359,31 @@ class Command(BaseCommand):
 
     def _seed_additions(self, products):
         classifications = {}
-        for name in ("Sauce", "Packaging", "Extra"):
+        for name in ("صلصات", "تغليف", "إضافات"):
             obj, _ = AdditionClassification.objects.get_or_create(name=name)
             classifications[name] = obj
 
         definitions = [
             (
-                "Garlic Sauce",
                 "صلصة الثوم",
-                "Sauce",
+                "صلصة الثوم",
+                "صلصات",
                 "80.00",
-                ["Chicken Couscous", "Vegetable Chorba"],
+                ["كسكس بالدجاج", "شوربة خضار"],
             ),
             (
-                "Gift Bag",
                 "كيس هدية",
-                "Packaging",
+                "كيس هدية",
+                "تغليف",
                 "50.00",
-                ["Red Apples", "Orange Juice", "Chocolate Croissant"],
+                ["تفاح أحمر", "عصير برتقال", "كرواسون بالشوكولاتة"],
             ),
             (
-                "Extra Bread",
                 "خبز إضافي",
-                "Extra",
+                "خبز إضافي",
+                "إضافات",
                 "40.00",
-                ["Chicken Couscous", "Vegetable Chorba"],
+                ["كسكس بالدجاج", "شوربة خضار"],
             ),
         ]
         additions = {}
@@ -404,39 +404,39 @@ class Command(BaseCommand):
     def _seed_offers(self, markets, products, now):
         definitions = [
             (
-                "Fresh Fruit Weekend",
-                "Yalla Fresh Market",
+                "عرض الفواكه الطازجة",
+                "سوق يلا الطازج",
                 Offer.OfferType.DISCOUNT,
                 "10.00",
-                ["Red Apples", "Bananas"],
+                ["تفاح أحمر", "موز"],
             ),
             (
-                "Family Dinner Deal",
-                "Atlas Family Kitchen",
+                "عرض عشاء العائلة",
+                "مطبخ أطلس العائلي",
                 Offer.OfferType.PACKAGE,
                 "15.00",
-                ["Chicken Couscous", "Vegetable Chorba"],
+                ["كسكس بالدجاج", "شوربة خضار"],
             ),
             (
-                "Hydration Essentials",
-                "Yalla Fresh Market",
+                "أساسيات الانتعاش",
+                "سوق يلا الطازج",
                 Offer.OfferType.DELIVERY,
                 "8.00",
-                ["Mineral Water", "Orange Juice"],
+                ["مياه معدنية", "عصير برتقال"],
             ),
             (
-                "Algiers Lunch Flash",
-                "Atlas Family Kitchen",
+                "غداء الجزائر السريع",
+                "مطبخ أطلس العائلي",
                 Offer.OfferType.FLASH,
                 "12.00",
-                ["Grilled Chicken", "Vegetable Chorba"],
+                ["دجاج مشوي", "شوربة خضار"],
             ),
             (
-                "Morning Bakery Flash",
-                "Oran Golden Bakery",
+                "عرض المخبزة الصباحي",
+                "مخبزة وهران الذهبية",
                 Offer.OfferType.FLASH,
                 "12.00",
-                ["Traditional Baguette", "Chocolate Croissant"],
+                ["خبز باغيت تقليدي", "كرواسون بالشوكولاتة"],
             ),
         ]
         offers = {}
@@ -445,7 +445,7 @@ class Command(BaseCommand):
                 market=markets[market_name],
                 title=title,
                 defaults={
-                    "description": f"Seeded offer: {title}.",
+                    "description": f"عرض تجريبي: {title}.",
                     "type": offer_type,
                     "discount": Decimal(discount),
                     "start_time": now - timedelta(days=1),
@@ -465,43 +465,43 @@ class Command(BaseCommand):
             {
                 "marker": "SEED-ORDER-001",
                 "user": users["seed.amina@yalla.test"],
-                "market": markets["Yalla Fresh Market"],
+                "market": markets["سوق يلا الطازج"],
                 "status": Order.Status.DELIVERED,
                 "payment_method": "cash",
                 "delivery_price": Decimal("250.00"),
                 "items": [
-                    (variants["Red Apples"][1], 2),
-                    (variants["Orange Juice"][0], 3),
+                    (variants["تفاح أحمر"][1], 2),
+                    (variants["عصير برتقال"][0], 3),
                 ],
-                "offer": offers["Fresh Fruit Weekend"],
+                "offer": offers["عرض الفواكه الطازجة"],
                 "offer_discount": Decimal("120.00"),
             },
             {
                 "marker": "SEED-ORDER-002",
                 "user": users["seed.karim@yalla.test"],
-                "market": markets["Atlas Family Kitchen"],
+                "market": markets["مطبخ أطلس العائلي"],
                 "status": Order.Status.UNDER_PREPARATION,
                 "payment_method": "card",
                 "delivery_price": Decimal("300.00"),
                 "items": [
-                    (variants["Chicken Couscous"][0], 1),
-                    (variants["Vegetable Chorba"][0], 2),
+                    (variants["كسكس بالدجاج"][0], 1),
+                    (variants["شوربة خضار"][0], 2),
                 ],
-                "offer": offers["Family Dinner Deal"],
+                "offer": offers["عرض عشاء العائلة"],
                 "offer_discount": Decimal("180.00"),
             },
             {
                 "marker": "SEED-ORDER-003",
                 "user": users["seed.amina@yalla.test"],
-                "market": markets["Oran Golden Bakery"],
+                "market": markets["مخبزة وهران الذهبية"],
                 "status": Order.Status.PENDING,
                 "payment_method": "cash",
                 "delivery_price": Decimal("280.00"),
                 "items": [
-                    (variants["Traditional Baguette"][1], 1),
-                    (variants["Chocolate Croissant"][0], 4),
+                    (variants["خبز باغيت تقليدي"][1], 1),
+                    (variants["كرواسون بالشوكولاتة"][0], 4),
                 ],
-                "offer": offers["Morning Bakery Flash"],
+                "offer": offers["عرض المخبزة الصباحي"],
                 "offer_discount": Decimal("75.00"),
             },
         ]

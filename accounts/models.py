@@ -12,10 +12,7 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=30, unique=True)
     role = models.CharField(max_length=30, choices=Role.choices, default=Role.CLIENT)
-    gender = models.CharField(max_length=20, blank=True)
-    birth_date = models.DateField(null=True, blank=True)
-    avatar_url = models.URLField(blank=True, db_column="avatar")
-    username_changed_at = models.DateTimeField(null=True, blank=True)
+    
 
     terms_accepted = models.BooleanField(default=False)
     terms_accepted_at = models.DateTimeField(null=True, blank=True)
