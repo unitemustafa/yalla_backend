@@ -77,6 +77,10 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
             "username",
             "email",
             "phone",
+            "gender",
+            "birth_date",
+            "avatar_url",
+            "username_changed_at",
             "role",
             "has_password",
         )
@@ -316,6 +320,9 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
     )
     email = serializers.EmailField(required=False)
     phone = serializers.CharField(max_length=30, required=False)
+    gender = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    birth_date = serializers.DateField(required=False, allow_null=True)
+    avatar_url = serializers.URLField(required=False, allow_blank=True)
 
     def validate_email(self, value):
         email = normalize_email(value)
@@ -394,6 +401,9 @@ class AdminUserWriteSerializer(
             "email",
             "phone",
             "password",
+            "gender",
+            "birth_date",
+            "avatar_url",
             "role",
             "is_active",
             "is_staff",
