@@ -8,10 +8,16 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from catalog.models import (
+    AdditionClassification,
+    CategoryAttribute,
     CategoryClassification,
+    CategoryOption,
     Product,
+    ProductAddition,
+    ProductAttributeValue,
     ProductCategory,
     ProductVariant,
+    VariantAttributeValue,
 )
 from locations.models import Address, DeliveryArea
 from offers.models import Offer
@@ -19,6 +25,7 @@ from offers.models import Offer
 from .models import Market, MarketClassification
 
 User = get_user_model()
+HOME_BASE = "/api/v1/home"
 
 
 class HomeAPITests(APITestCase):
@@ -127,14 +134,14 @@ class HomeAPITests(APITestCase):
         )
 
     def test_home_requires_authentication(self):
-        response = self.client.get("/api/home/")
+        response = self.client.get(f"{HOME_BASE}/")
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_home_requires_user_address(self):
         self.default_address.delete()
         self.authenticate()
 
-        response = self.client.get("/api/home/")
+        response = self.client.get(f"{HOME_BASE}/")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
@@ -145,7 +152,7 @@ class HomeAPITests(APITestCase):
     def test_home_returns_limited_content_from_user_location_only(self):
         self.authenticate()
 
-        response = self.client.get("/api/home/")
+        response = self.client.get(f"{HOME_BASE}/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["location"]["name"], "Home")
@@ -181,6 +188,333 @@ class HomeAPITests(APITestCase):
                 for product in response.data["products"]
             )
         )
+
+    def test_classification_summary_requires_authentication(self):
+        response = self.client.get(f"{HOME_BASE}/classifications/")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_classification_summary_requires_user_address(self):
+        self.default_address.delete()
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/classifications/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "A user address is required before loading market classifications.",
+        )
+
+    def test_classification_summary_returns_common_and_all_counts(self):
+        busiest_classification = MarketClassification.objects.create(
+            name="Busiest local"
+        )
+        medium_classification = MarketClassification.objects.create(
+            name="Medium local"
+        )
+        quiet_classification = MarketClassification.objects.create(
+            name="Quiet local"
+        )
+        busiest_market = self._create_market(
+            "Busiest Market",
+            busiest_classification,
+            self.local_area,
+        )
+        medium_market = self._create_market(
+            "Medium Market",
+            medium_classification,
+            self.local_area,
+        )
+        quiet_market = self._create_market(
+            "Quiet Market",
+            quiet_classification,
+            self.local_area,
+        )
+        for index in range(6):
+            self._create_product(
+                f"Busiest Product {index}",
+                busiest_market,
+                200 + index,
+            )
+        for index in range(4):
+            self._create_product(
+                f"Medium Product {index}",
+                medium_market,
+                300 + index,
+            )
+        for index in range(2):
+            self._create_product(
+                f"Quiet Product {index}",
+                quiet_market,
+                400 + index,
+            )
+
+        self.authenticate()
+        response = self.client.get(f"{HOME_BASE}/classifications/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data.keys(),
+            {"common_categories", "market_classifications"},
+        )
+        self.assertEqual(len(response.data["common_categories"]), 4)
+
+        common_by_name = {
+            classification["name"]: classification["product_count"]
+            for classification in response.data["common_categories"]
+        }
+        self.assertEqual(common_by_name["Busiest local"], 6)
+        self.assertEqual(common_by_name["Local restaurants"], 5)
+        self.assertEqual(common_by_name["Local supermarkets"], 5)
+        self.assertEqual(common_by_name["Medium local"], 4)
+        self.assertNotIn("Quiet local", common_by_name)
+        self.assertNotIn("Remote bakeries", common_by_name)
+
+        all_by_name = {
+            classification["name"]: classification
+            for classification in response.data["market_classifications"]
+        }
+        self.assertEqual(all_by_name["Busiest local"]["product_count"], 6)
+        self.assertEqual(all_by_name["Local restaurants"]["product_count"], 5)
+        self.assertEqual(all_by_name["Local supermarkets"]["product_count"], 5)
+        self.assertEqual(all_by_name["Medium local"]["product_count"], 4)
+        self.assertEqual(all_by_name["Quiet local"]["product_count"], 2)
+        self.assertEqual(all_by_name["Remote bakeries"]["product_count"], 1)
+        self.assertEqual(len(all_by_name["Busiest local"]["products"]), 3)
+        self.assertEqual(len(all_by_name["Quiet local"]["products"]), 2)
+        self.assertTrue(
+            all(
+                "market" not in product and "variants" not in product
+                for product in all_by_name["Busiest local"]["products"]
+            )
+        )
+
+    def test_classification_markets_requires_authentication(self):
+        response = self.client.get(
+            f"{HOME_BASE}/classifications/"
+            f"{self.local_classification.id}/markets/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_classification_markets_returns_covered_markets_with_products(self):
+        for index in range(3):
+            self._create_product(
+                f"Extra Local Product {index}",
+                self.local_market,
+                500 + index,
+            )
+
+        self.authenticate()
+        response = self.client.get(
+            f"{HOME_BASE}/classifications/"
+            f"{self.local_classification.id}/markets/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["classification"],
+            {
+                "id": self.local_classification.id,
+                "name": self.local_classification.name,
+            },
+        )
+        self.assertEqual(len(response.data["markets"]), 1)
+
+        market = response.data["markets"][0]
+        self.assertEqual(market["id"], self.local_market.id)
+        self.assertEqual(len(market["products"]), 3)
+        self.assertNotIn("variants", market["products"][0])
+        self.assertNotIn("market", market["products"][0])
+
+    def test_classification_markets_excludes_remote_markets(self):
+        self.authenticate()
+        response = self.client.get(
+            f"{HOME_BASE}/classifications/"
+            f"{self.remote_classification.id}/markets/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["markets"], [])
+
+    def test_classification_markets_returns_not_found_for_unknown_id(self):
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/classifications/99999/markets/")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_product_search_requires_authentication(self):
+        response = self.client.get(f"{HOME_BASE}/search/", {"q": "Local"})
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_product_search_requires_user_address(self):
+        self.default_address.delete()
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/search/", {"q": "Local"})
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "A user address is required before searching products.",
+        )
+
+    def test_product_search_matches_product_market_and_classification(self):
+        unique_product = self._create_product(
+            "Unique Search Item",
+            self.local_market,
+            700,
+        )
+        self.authenticate()
+
+        product_response = self.client.get(
+            f"{HOME_BASE}/search/",
+            {"q": unique_product.name},
+        )
+        market_response = self.client.get(
+            f"{HOME_BASE}/search/",
+            {"q": "Local Kitchen"},
+        )
+        classification_response = self.client.get(
+            f"{HOME_BASE}/search/",
+            {"q": "Local restaurants"},
+        )
+
+        self.assertEqual(product_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(market_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(classification_response.status_code, status.HTTP_200_OK)
+
+        self.assertEqual(product_response.data["count"], 1)
+        self.assertEqual(
+            product_response.data["results"][0]["name"],
+            unique_product.name,
+        )
+
+        self.assertEqual(market_response.data["count"], 5)
+        self.assertTrue(
+            all(
+                product["market"]["id"] == self.second_local_market.id
+                for product in market_response.data["results"]
+            )
+        )
+        self.assertEqual(classification_response.data["count"], 5)
+        self.assertTrue(
+            all(
+                product["market"]["classification_id"]
+                == self.second_local_classification.id
+                for product in classification_response.data["results"]
+            )
+        )
+
+    def test_product_search_is_limited_to_user_address_and_paginated(self):
+        for index in range(11):
+            self._create_product(
+                f"Paged Local Product {index}",
+                self.local_market,
+                600 + index,
+            )
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/search/", {"q": "Product"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 21)
+        self.assertEqual(len(response.data["results"]), 10)
+        self.assertIsNotNone(response.data["next"])
+        self.assertTrue(
+            all(
+                product["market"]["id"]
+                in {self.local_market.id, self.second_local_market.id}
+                for product in response.data["results"]
+            )
+        )
+        self.assertTrue(
+            all(
+                product["name"] != self.remote_product.name
+                for product in response.data["results"]
+            )
+        )
+
+    def test_product_detail_requires_authentication(self):
+        response = self.client.get(f"{HOME_BASE}/products/{self.local_products[0].id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_product_detail_requires_user_address(self):
+        self.default_address.delete()
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/products/{self.local_products[0].id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "A user address is required before loading product details.",
+        )
+
+    def test_product_detail_returns_all_product_information(self):
+        product = self.local_products[0]
+        attribute = CategoryAttribute.objects.create(
+            category=self.category,
+            name="Size",
+        )
+        option = CategoryOption.objects.create(
+            attribute=attribute,
+            value="Large",
+        )
+        ProductAttributeValue.objects.create(
+            product=product,
+            attribute=attribute,
+            option=option,
+        )
+        variant = product.variants.first()
+        VariantAttributeValue.objects.create(
+            variant=variant,
+            attribute=attribute,
+            option=option,
+        )
+        addition_classification = AdditionClassification.objects.create(
+            name="Extras"
+        )
+        addition = ProductAddition.objects.create(
+            classification=addition_classification,
+            name_ar="جبن",
+            name_en="Cheese",
+            price=Decimal("120.00"),
+        )
+        addition.products.add(product)
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/products/{product.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["id"], product.id)
+        self.assertEqual(response.data["market"]["id"], self.local_market.id)
+        self.assertEqual(response.data["category"]["id"], self.category.id)
+        self.assertEqual(response.data["attribute_values"][0]["attribute_name"], "Size")
+        self.assertEqual(response.data["attribute_values"][0]["option_value"], "Large")
+        self.assertEqual(response.data["variants"][0]["id"], variant.id)
+        self.assertEqual(
+            response.data["variants"][0]["attribute_values"][0]["option_value"],
+            "Large",
+        )
+        self.assertEqual(response.data["additions"][0]["name_en"], "Cheese")
+        self.assertEqual(
+            response.data["additions"][0]["classification_name"],
+            "Extras",
+        )
+        self.assertIn("created_at", response.data)
+        self.assertIn("updated_at", response.data)
+
+    def test_product_detail_returns_not_found_for_remote_product(self):
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/products/{self.remote_product.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def _create_market(self, name, classification, area):
         market = Market.objects.create(

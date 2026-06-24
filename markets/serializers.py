@@ -1,6 +1,13 @@
 from rest_framework import serializers
 
-from catalog.models import Product, ProductCategory, ProductVariant
+from catalog.models import (
+    Product,
+    ProductAddition,
+    ProductAttributeValue,
+    ProductCategory,
+    ProductVariant,
+    VariantAttributeValue,
+)
 from offers.models import Offer
 
 from .models import Market, MarketClassification
@@ -30,6 +37,14 @@ class HomeMarketClassificationSerializer(serializers.ModelSerializer):
         return HomeMarketSerializer(markets, many=True).data
 
 
+class MarketClassificationCountSerializer(serializers.ModelSerializer):
+    product_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = MarketClassification
+        fields = ("id", "name", "product_count")
+
+
 class HomeCategorySerializer(serializers.ModelSerializer):
     classification_id = serializers.IntegerField(read_only=True)
 
@@ -51,6 +66,68 @@ class HomeVariantSerializer(serializers.ModelSerializer):
         fields = ("id", "price", "sku")
 
 
+class ProductAttributeValueSerializer(serializers.ModelSerializer):
+    attribute_id = serializers.IntegerField(read_only=True)
+    attribute_name = serializers.CharField(source="attribute.name", read_only=True)
+    option_id = serializers.IntegerField(read_only=True)
+    option_value = serializers.CharField(source="option.value", read_only=True)
+
+    class Meta:
+        model = ProductAttributeValue
+        fields = (
+            "id",
+            "attribute_id",
+            "attribute_name",
+            "option_id",
+            "option_value",
+        )
+
+
+class VariantAttributeValueSerializer(serializers.ModelSerializer):
+    attribute_id = serializers.IntegerField(read_only=True)
+    attribute_name = serializers.CharField(source="attribute.name", read_only=True)
+    option_id = serializers.IntegerField(read_only=True)
+    option_value = serializers.CharField(source="option.value", read_only=True)
+
+    class Meta:
+        model = VariantAttributeValue
+        fields = (
+            "id",
+            "attribute_id",
+            "attribute_name",
+            "option_id",
+            "option_value",
+        )
+
+
+class ProductDetailVariantSerializer(HomeVariantSerializer):
+    attribute_values = VariantAttributeValueSerializer(many=True, read_only=True)
+
+    class Meta(HomeVariantSerializer.Meta):
+        fields = HomeVariantSerializer.Meta.fields + ("attribute_values",)
+
+
+class ProductAdditionSerializer(serializers.ModelSerializer):
+    classification_id = serializers.IntegerField(read_only=True)
+    classification_name = serializers.CharField(
+        source="classification.name",
+        read_only=True,
+    )
+
+    class Meta:
+        model = ProductAddition
+        fields = (
+            "id",
+            "classification_id",
+            "classification_name",
+            "image",
+            "name_ar",
+            "name_en",
+            "price",
+            "is_active",
+        )
+
+
 class HomeProductSerializer(serializers.ModelSerializer):
     category = HomeCategorySerializer(read_only=True)
     market = HomeMarketSerializer(read_only=True)
@@ -68,6 +145,69 @@ class HomeProductSerializer(serializers.ModelSerializer):
             "market",
             "variants",
         )
+
+
+class ProductDetailSerializer(HomeProductSerializer):
+    variants = ProductDetailVariantSerializer(many=True, read_only=True)
+    attribute_values = ProductAttributeValueSerializer(many=True, read_only=True)
+    additions = ProductAdditionSerializer(many=True, read_only=True)
+
+    class Meta(HomeProductSerializer.Meta):
+        fields = HomeProductSerializer.Meta.fields + (
+            "attribute_values",
+            "additions",
+            "created_at",
+            "updated_at",
+        )
+
+
+class MarketClassificationProductSerializer(serializers.ModelSerializer):
+    category = HomeCategorySerializer(read_only=True)
+
+    class Meta:
+        model = Product
+        fields = (
+            "id",
+            "name",
+            "description",
+            "image",
+            "discount",
+            "category",
+        )
+
+
+class MarketClassificationWithProductsSerializer(
+    MarketClassificationCountSerializer
+):
+    products = serializers.SerializerMethodField()
+
+    class Meta(MarketClassificationCountSerializer.Meta):
+        fields = MarketClassificationCountSerializer.Meta.fields + ("products",)
+
+    def get_products(self, classification):
+        products_by_classification = self.context["products_by_classification"]
+        products = products_by_classification.get(classification.id, [])
+        return MarketClassificationProductSerializer(
+            products,
+            many=True,
+            context=self.context,
+        ).data
+
+
+class MarketWithCommonProductsSerializer(HomeMarketSerializer):
+    products = serializers.SerializerMethodField()
+
+    class Meta(HomeMarketSerializer.Meta):
+        fields = HomeMarketSerializer.Meta.fields + ("products",)
+
+    def get_products(self, market):
+        products_by_market = self.context["products_by_market"]
+        products = products_by_market.get(market.id, [])
+        return MarketClassificationProductSerializer(
+            products,
+            many=True,
+            context=self.context,
+        ).data
 
 
 class HomeOfferSerializer(serializers.ModelSerializer):
