@@ -254,7 +254,7 @@ class MeView(APIView):
 
 
 class AdminUserListCreateView(APIView):
-    
+    permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
         users = User.objects.filter(deleted_at__isnull=True).order_by(
