@@ -117,6 +117,139 @@ class AdditionClassificationAPITests(APITestCase):
             ["An addition classification with this name already exists."],
         )
 
+    def test_category_classification_crud_requires_admin_role(self):
+        self.authenticate(self.client_user)
+
+        response = self.client.get(f"{CATALOG_BASE}/category-classifications/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_can_create_read_update_and_delete_category_classification(self):
+        self.authenticate(self.admin)
+
+        create_response = self.client.post(
+            f"{CATALOG_BASE}/category-classifications/",
+            {"name": " مشروبات "},
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(create_response.data["name"], "مشروبات")
+        classification_id = create_response.data["id"]
+
+        list_response = self.client.get(f"{CATALOG_BASE}/category-classifications/")
+        detail_response = self.client.get(
+            f"{CATALOG_BASE}/category-classifications/{classification_id}/"
+        )
+        update_response = self.client.patch(
+            f"{CATALOG_BASE}/category-classifications/{classification_id}/",
+            {"name": "حلويات"},
+        )
+        delete_response = self.client.delete(
+            f"{CATALOG_BASE}/category-classifications/{classification_id}/"
+        )
+        deleted_detail_response = self.client.get(
+            f"{CATALOG_BASE}/category-classifications/{classification_id}/"
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertIn(classification_id, [item["id"] for item in list_response.data])
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_response.data["name"], "مشروبات")
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_response.data["name"], "حلويات")
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(
+            deleted_detail_response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_category_classification_delete_rejects_used_classification(self):
+        self.authenticate(self.admin)
+
+        response = self.client.delete(
+            f"{CATALOG_BASE}/category-classifications/"
+            f"{self.category.classification_id}/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_product_category_crud_requires_admin_role(self):
+        self.authenticate(self.client_user)
+
+        response = self.client.get(f"{CATALOG_BASE}/product-categories/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_can_create_read_update_and_delete_product_category(self):
+        classification = CategoryClassification.objects.create(name="مشروبات")
+        updated_classification = CategoryClassification.objects.create(
+            name="حلويات"
+        )
+        self.authenticate(self.admin)
+
+        create_response = self.client.post(
+            f"{CATALOG_BASE}/product-categories/",
+            {
+                "classification_id": classification.id,
+                "name": " عصائر ",
+                "type": " beverage ",
+                "description": "مشروبات طازجة",
+            },
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(create_response.data["name"], "عصائر")
+        self.assertEqual(create_response.data["type"], "beverage")
+        self.assertEqual(
+            create_response.data["classification"]["id"],
+            classification.id,
+        )
+        category_id = create_response.data["id"]
+
+        list_response = self.client.get(f"{CATALOG_BASE}/product-categories/")
+        detail_response = self.client.get(
+            f"{CATALOG_BASE}/product-categories/{category_id}/"
+        )
+        update_response = self.client.patch(
+            f"{CATALOG_BASE}/product-categories/{category_id}/",
+            {
+                "classification_id": updated_classification.id,
+                "name": "كيك",
+                "description": "حلويات يومية",
+            },
+        )
+        delete_response = self.client.delete(
+            f"{CATALOG_BASE}/product-categories/{category_id}/"
+        )
+        deleted_detail_response = self.client.get(
+            f"{CATALOG_BASE}/product-categories/{category_id}/"
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertIn(category_id, [item["id"] for item in list_response.data])
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_response.data["name"], "عصائر")
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_response.data["name"], "كيك")
+        self.assertEqual(
+            update_response.data["classification"]["id"],
+            updated_classification.id,
+        )
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(
+            deleted_detail_response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_product_category_delete_rejects_used_category(self):
+        self.authenticate(self.admin)
+
+        response = self.client.delete(
+            f"{CATALOG_BASE}/product-categories/{self.category.id}/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_product_addition_create_requires_authentication(self):
         classification = AdditionClassification.objects.create(name="إضافات")
 
