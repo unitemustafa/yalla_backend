@@ -8,6 +8,7 @@ from catalog.models import (
     ProductVariant,
     VariantAttributeValue,
 )
+from locations.models import DeliveryArea
 from offers.models import Offer
 
 from .models import Market, MarketClassification
@@ -35,6 +36,88 @@ class HomeMarketClassificationSerializer(serializers.ModelSerializer):
             status=Market.Status.ACTIVE,
         ).order_by("name")
         return HomeMarketSerializer(markets, many=True).data
+
+
+class AdminMarketClassificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MarketClassification
+        fields = ("id", "name")
+
+    def validate_name(self, value):
+        name = value.strip()
+        queryset = MarketClassification.objects.filter(name__iexact=name)
+        if self.instance is not None:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError(
+                "A market classification with this name already exists."
+            )
+        return name
+
+
+class DeliveryAreaSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DeliveryArea
+        fields = (
+            "id",
+            "name",
+            "delivery_price",
+            "center_latitude",
+            "center_longitude",
+            "radius_km",
+            "is_active",
+        )
+
+
+class AdminMarketSerializer(serializers.ModelSerializer):
+    classification_id = serializers.PrimaryKeyRelatedField(
+        queryset=MarketClassification.objects.all(),
+        source="classification",
+        write_only=True,
+    )
+    classification = AdminMarketClassificationSerializer(read_only=True)
+    delivery_area_ids = serializers.PrimaryKeyRelatedField(
+        queryset=DeliveryArea.objects.all(),
+        source="delivery_areas",
+        many=True,
+        required=False,
+        write_only=True,
+    )
+    delivery_areas = DeliveryAreaSummarySerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Market
+        fields = (
+            "id",
+            "classification",
+            "classification_id",
+            "name",
+            "branch",
+            "status",
+            "delivery_areas",
+            "delivery_area_ids",
+            "created_at",
+            "updated_at",
+        )
+
+    def validate_name(self, value):
+        return value.strip()
+
+    def validate_branch(self, value):
+        return value.strip()
+
+    def create(self, validated_data):
+        delivery_areas = validated_data.pop("delivery_areas", [])
+        market = Market.objects.create(**validated_data)
+        market.delivery_areas.set(delivery_areas)
+        return market
+
+    def update(self, instance, validated_data):
+        delivery_areas = validated_data.pop("delivery_areas", None)
+        instance = super().update(instance, validated_data)
+        if delivery_areas is not None:
+            instance.delivery_areas.set(delivery_areas)
+        return instance
 
 
 class MarketClassificationCountSerializer(serializers.ModelSerializer):

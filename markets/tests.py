@@ -36,6 +36,14 @@ class HomeAPITests(APITestCase):
             phone="+213555200001",
             password="Password1!",
         )
+        self.admin = User.objects.create_user(
+            username="market_admin",
+            email="market-admin@example.com",
+            phone="+213555200002",
+            password="Password1!",
+            role=User.Role.ADMIN,
+            is_active=True,
+        )
         self.default_address = Address.objects.create(
             user=self.user,
             name="Home",
@@ -127,8 +135,8 @@ class HomeAPITests(APITestCase):
             now,
         )
 
-    def authenticate(self):
-        refresh = RefreshToken.for_user(self.user)
+    def authenticate(self, user=None):
+        refresh = RefreshToken.for_user(user or self.user)
         self.client.credentials(
             HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
         )
@@ -187,6 +195,137 @@ class HomeAPITests(APITestCase):
                 product["category"]["id"] == self.category.id
                 for product in response.data["products"]
             )
+        )
+
+    def test_market_classification_crud_requires_admin_role(self):
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/market-classifications/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(
+            response.data["detail"],
+            "Only admin users can manage markets.",
+        )
+
+    def test_admin_can_create_read_update_and_delete_market_classification(self):
+        self.authenticate(self.admin)
+
+        create_response = self.client.post(
+            f"{HOME_BASE}/market-classifications/",
+            {"name": " صيدليات "},
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(create_response.data["name"], "صيدليات")
+        classification_id = create_response.data["id"]
+
+        list_response = self.client.get(f"{HOME_BASE}/market-classifications/")
+        detail_response = self.client.get(
+            f"{HOME_BASE}/market-classifications/{classification_id}/"
+        )
+        update_response = self.client.patch(
+            f"{HOME_BASE}/market-classifications/{classification_id}/",
+            {"name": "محلات"},
+        )
+        delete_response = self.client.delete(
+            f"{HOME_BASE}/market-classifications/{classification_id}/"
+        )
+        deleted_detail_response = self.client.get(
+            f"{HOME_BASE}/market-classifications/{classification_id}/"
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertIn(classification_id, [item["id"] for item in list_response.data])
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_response.data["name"], "صيدليات")
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_response.data["name"], "محلات")
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(
+            deleted_detail_response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_market_classification_delete_rejects_used_classification(self):
+        self.authenticate(self.admin)
+
+        response = self.client.delete(
+            f"{HOME_BASE}/market-classifications/"
+            f"{self.local_classification.id}/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_market_crud_requires_admin_role(self):
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/markets/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_can_create_read_update_and_delete_market(self):
+        classification = MarketClassification.objects.create(name="صيدليات")
+        updated_classification = MarketClassification.objects.create(name="محلات")
+        self.authenticate(self.admin)
+
+        create_response = self.client.post(
+            f"{HOME_BASE}/markets/",
+            {
+                "classification_id": classification.id,
+                "name": " سوق جديد ",
+                "branch": " فرع أول ",
+                "status": Market.Status.ACTIVE,
+                "delivery_area_ids": [self.local_area.id],
+            },
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(create_response.data["name"], "سوق جديد")
+        self.assertEqual(create_response.data["branch"], "فرع أول")
+        self.assertEqual(
+            create_response.data["classification"]["id"],
+            classification.id,
+        )
+        self.assertEqual(
+            [area["id"] for area in create_response.data["delivery_areas"]],
+            [self.local_area.id],
+        )
+        market_id = create_response.data["id"]
+
+        list_response = self.client.get(f"{HOME_BASE}/markets/")
+        detail_response = self.client.get(f"{HOME_BASE}/markets/{market_id}/")
+        update_response = self.client.patch(
+            f"{HOME_BASE}/markets/{market_id}/",
+            {
+                "classification_id": updated_classification.id,
+                "name": "سوق محدث",
+                "status": Market.Status.INACTIVE,
+                "delivery_area_ids": [self.remote_area.id],
+            },
+        )
+        delete_response = self.client.delete(f"{HOME_BASE}/markets/{market_id}/")
+        deleted_detail_response = self.client.get(f"{HOME_BASE}/markets/{market_id}/")
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertIn(market_id, [item["id"] for item in list_response.data])
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_response.data["name"], "سوق جديد")
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_response.data["name"], "سوق محدث")
+        self.assertEqual(update_response.data["status"], Market.Status.INACTIVE)
+        self.assertEqual(
+            update_response.data["classification"]["id"],
+            updated_classification.id,
+        )
+        self.assertEqual(
+            [area["id"] for area in update_response.data["delivery_areas"]],
+            [self.remote_area.id],
+        )
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(
+            deleted_detail_response.status_code,
+            status.HTTP_404_NOT_FOUND,
         )
 
     def test_classification_summary_requires_authentication(self):

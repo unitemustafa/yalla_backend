@@ -1,17 +1,21 @@
+from django.db.models import ProtectedError
 from django.db.models import Count, Prefetch, Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.generics import get_object_or_404
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.models import User
 from catalog.models import Product, ProductVariant
 from offers.models import Offer
 
 from .models import Market, MarketClassification
 from .serializers import (
+    AdminMarketClassificationSerializer,
+    AdminMarketSerializer,
     HomeMarketClassificationSerializer,
     HomeOfferSerializer,
     HomeProductSerializer,
@@ -23,6 +27,17 @@ from .serializers import (
 from .services import markets_covering_address
 
 
+class IsAdminRole(BasePermission):
+    message = "Only admin users can manage markets."
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.role == User.Role.ADMIN
+        )
+
+
 def get_user_home_address(user):
     return (
         user.addresses.filter(is_default=True).order_by("-created_at").first()
@@ -32,6 +47,128 @@ def get_user_home_address(user):
 
 class ProductSearchPagination(PageNumberPagination):
     page_size = 10
+
+
+class AdminMarketClassificationListCreateView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        classifications = MarketClassification.objects.order_by("name", "id")
+        return Response(
+            AdminMarketClassificationSerializer(classifications, many=True).data
+        )
+
+    def post(self, request):
+        serializer = AdminMarketClassificationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        classification = serializer.save()
+        return Response(
+            AdminMarketClassificationSerializer(classification).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminMarketClassificationDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get_classification(self, classification_id):
+        return get_object_or_404(MarketClassification, id=classification_id)
+
+    def get(self, request, classification_id):
+        classification = self.get_classification(classification_id)
+        return Response(AdminMarketClassificationSerializer(classification).data)
+
+    def patch(self, request, classification_id):
+        classification = self.get_classification(classification_id)
+        serializer = AdminMarketClassificationSerializer(
+            classification,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        classification = serializer.save()
+        return Response(AdminMarketClassificationSerializer(classification).data)
+
+    def delete(self, request, classification_id):
+        classification = self.get_classification(classification_id)
+        try:
+            classification.delete()
+        except ProtectedError:
+            return Response(
+                {
+                    "detail": (
+                        "Cannot delete market classification while markets "
+                        "are using it."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            {"details": "Deleted Successfully"},
+            status=status.HTTP_204_NO_CONTENT,
+        )
+
+
+class AdminMarketListCreateView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        markets = (
+            Market.objects.select_related("classification")
+            .prefetch_related("delivery_areas")
+            .order_by("name", "id")
+        )
+        return Response(AdminMarketSerializer(markets, many=True).data)
+
+    def post(self, request):
+        serializer = AdminMarketSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        market = serializer.save()
+        return Response(
+            AdminMarketSerializer(market).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminMarketDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get_market(self, market_id):
+        return get_object_or_404(
+            Market.objects.select_related("classification").prefetch_related(
+                "delivery_areas"
+            ),
+            id=market_id,
+        )
+
+    def get(self, request, market_id):
+        market = self.get_market(market_id)
+        return Response(AdminMarketSerializer(market).data)
+
+    def patch(self, request, market_id):
+        market = self.get_market(market_id)
+        serializer = AdminMarketSerializer(
+            market,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        market = serializer.save()
+        return Response(AdminMarketSerializer(market).data)
+
+    def delete(self, request, market_id):
+        market = self.get_market(market_id)
+        try:
+            market.delete()
+        except ProtectedError:
+            return Response(
+                {"detail": "Cannot delete market while orders are using it."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            {"details": "Deleted Successfully"},
+            status=status.HTTP_204_NO_CONTENT,
+        )
 
 
 class HomeView(APIView):
