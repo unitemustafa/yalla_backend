@@ -9,10 +9,15 @@ from markets.models import Market, MarketClassification
 
 from .models import (
     AdditionClassification,
+    CategoryAttribute,
     CategoryClassification,
+    CategoryOption,
     Product,
     ProductAddition,
     ProductCategory,
+    ProductAttributeValue,
+    ProductVariant,
+    VariantAttributeValue,
 )
 
 User = get_user_model()
@@ -52,6 +57,18 @@ class AdditionClassificationAPITests(APITestCase):
         self.category = ProductCategory.objects.create(
             classification=category_classification,
             name="وجبات رئيسية",
+        )
+        self.size_attribute = CategoryAttribute.objects.create(
+            category=self.category,
+            name="الحجم",
+        )
+        self.small_option = CategoryOption.objects.create(
+            attribute=self.size_attribute,
+            value="صغير",
+        )
+        self.large_option = CategoryOption.objects.create(
+            attribute=self.size_attribute,
+            value="كبير",
         )
         self.product = Product.objects.create(
             market=self.market,
@@ -249,6 +266,160 @@ class AdditionClassificationAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_product_crud_requires_admin_role(self):
+        self.authenticate(self.client_user)
+
+        response = self.client.get(f"{CATALOG_BASE}/products/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_can_create_read_update_and_delete_product(self):
+        self.authenticate(self.admin)
+
+        create_response = self.client.post(
+            f"{CATALOG_BASE}/products/",
+            {
+                "market_id": self.market.id,
+                "category_id": self.category.id,
+                "is_available": True,
+                "name": " طبق جديد ",
+                "description": "طبق تجريبي",
+                "discount": "10.00",
+                "attribute_values": [
+                    {
+                        "attribute_id": self.size_attribute.id,
+                        "option_id": self.small_option.id,
+                    }
+                ],
+                "variants": [
+                    {
+                        "price": "500.00",
+                        "sku": " MEAL-S ",
+                        "attribute_values": [
+                            {
+                                "attribute_id": self.size_attribute.id,
+                                "option_id": self.small_option.id,
+                            }
+                        ],
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(create_response.data["name"], "طبق جديد")
+        self.assertEqual(create_response.data["market"]["id"], self.market.id)
+        self.assertEqual(create_response.data["category"]["id"], self.category.id)
+        self.assertEqual(
+            create_response.data["attribute_values"][0]["option"]["id"],
+            self.small_option.id,
+        )
+        self.assertEqual(create_response.data["variants"][0]["sku"], "MEAL-S")
+        product_id = create_response.data["id"]
+
+        self.assertTrue(
+            ProductAttributeValue.objects.filter(
+                product_id=product_id,
+                attribute=self.size_attribute,
+                option=self.small_option,
+            ).exists()
+        )
+        variant = ProductVariant.objects.get(product_id=product_id)
+        self.assertTrue(
+            VariantAttributeValue.objects.filter(
+                variant=variant,
+                attribute=self.size_attribute,
+                option=self.small_option,
+            ).exists()
+        )
+
+        list_response = self.client.get(f"{CATALOG_BASE}/products/")
+        detail_response = self.client.get(f"{CATALOG_BASE}/products/{product_id}/")
+        update_response = self.client.patch(
+            f"{CATALOG_BASE}/products/{product_id}/",
+            {
+                "name": "طبق محدث",
+                "is_available": False,
+                "attribute_values": [
+                    {
+                        "attribute_id": self.size_attribute.id,
+                        "option_id": self.large_option.id,
+                    }
+                ],
+                "variants": [
+                    {
+                        "price": "800.00",
+                        "sku": "MEAL-L",
+                        "attribute_values": [
+                            {
+                                "attribute_id": self.size_attribute.id,
+                                "option_id": self.large_option.id,
+                            }
+                        ],
+                    }
+                ],
+            },
+            format="json",
+        )
+        delete_response = self.client.delete(f"{CATALOG_BASE}/products/{product_id}/")
+        deleted_detail_response = self.client.get(
+            f"{CATALOG_BASE}/products/{product_id}/"
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertIn(product_id, [item["id"] for item in list_response.data])
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            detail_response.data["category"]["attributes"][0]["options"][0]["id"],
+            self.small_option.id,
+        )
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_response.data["name"], "طبق محدث")
+        self.assertFalse(update_response.data["is_available"])
+        self.assertEqual(
+            update_response.data["attribute_values"][0]["option"]["id"],
+            self.large_option.id,
+        )
+        self.assertEqual(update_response.data["variants"][0]["sku"], "MEAL-L")
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(
+            deleted_detail_response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_product_rejects_inconsistent_attribute_option(self):
+        other_attribute = CategoryAttribute.objects.create(
+            category=self.category,
+            name="اللون",
+        )
+        other_option = CategoryOption.objects.create(
+            attribute=other_attribute,
+            value="أحمر",
+        )
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{CATALOG_BASE}/products/",
+            {
+                "market_id": self.market.id,
+                "category_id": self.category.id,
+                "name": "منتج غير صالح",
+                "description": "",
+                "discount": "0.00",
+                "attribute_values": [
+                    {
+                        "attribute_id": self.size_attribute.id,
+                        "option_id": other_option.id,
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("attribute_values", response.data)
 
     def test_product_addition_create_requires_authentication(self):
         classification = AdditionClassification.objects.create(name="إضافات")

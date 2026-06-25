@@ -6,6 +6,8 @@ from .views import (
     CategoryClassificationListCreateView,
     ProductCategoryDetailView,
     ProductCategoryListCreateView,
+    ProductDetailView,
+    ProductListCreateView,
     ProductAdditionDetailView,
     ProductAdditionListCreateView,
 )
@@ -35,6 +37,16 @@ urlpatterns = [
         "product-categories/<int:category_id>/",
         ProductCategoryDetailView.as_view(),
         name="product-category-detail",
+    ),
+    path(
+        "products/",
+        ProductListCreateView.as_view(),
+        name="product-list-create",
+    ),
+    path(
+        "products/<int:product_id>/",
+        ProductDetailView.as_view(),
+        name="product-detail",
     ),
     path(
         "product-additions/",

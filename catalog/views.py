@@ -8,9 +8,10 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 
-from .models import CategoryClassification, ProductCategory, ProductAddition
+from .models import CategoryClassification, Product, ProductCategory, ProductAddition
 from .serializers import (
     AdditionClassificationSerializer,
+    AdminProductSerializer,
     CategoryClassificationSerializer,
     ProductCategorySerializer,
     ProductAdditionSerializer,
@@ -159,6 +160,95 @@ class ProductCategoryDetailView(APIView):
                         "using it."
                     )
                 },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            {"details": "Deleted Successfully"},
+            status=status.HTTP_204_NO_CONTENT,
+        )
+
+
+class ProductListCreateView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get_queryset(self):
+        return (
+            Product.objects.select_related(
+                "market__classification",
+                "category__classification",
+            )
+            .prefetch_related(
+                "category__attributes__options",
+                "attribute_values__attribute__options",
+                "attribute_values__option",
+                "variants__attribute_values__attribute__options",
+                "variants__attribute_values__option",
+                "additions",
+            )
+            .order_by("name", "id")
+        )
+
+    def get(self, request):
+        return Response(
+            AdminProductSerializer(self.get_queryset(), many=True).data
+        )
+
+    def post(self, request):
+        serializer = AdminProductSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        product = serializer.save()
+        product = self.get_queryset().get(id=product.id)
+        return Response(
+            AdminProductSerializer(product).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ProductDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get_queryset(self):
+        return (
+            Product.objects.select_related(
+                "market__classification",
+                "category__classification",
+            )
+            .prefetch_related(
+                "category__attributes__options",
+                "attribute_values__attribute__options",
+                "attribute_values__option",
+                "variants__attribute_values__attribute__options",
+                "variants__attribute_values__option",
+                "additions",
+            )
+        )
+
+    def get_product(self, product_id):
+        return get_object_or_404(self.get_queryset(), id=product_id)
+
+    def get(self, request, product_id):
+        product = self.get_product(product_id)
+        return Response(AdminProductSerializer(product).data)
+
+    def patch(self, request, product_id):
+        product = self.get_product(product_id)
+        serializer = AdminProductSerializer(
+            product,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        product = serializer.save()
+        product = self.get_queryset().get(id=product.id)
+        return Response(AdminProductSerializer(product).data)
+
+    def delete(self, request, product_id):
+        product = self.get_product(product_id)
+        try:
+            product.delete()
+        except ProtectedError:
+            return Response(
+                {"detail": "Cannot delete product while orders are using it."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(
