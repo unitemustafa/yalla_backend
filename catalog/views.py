@@ -8,10 +8,19 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 
-from .models import CategoryClassification, Product, ProductCategory, ProductAddition
+from .models import (
+    CategoryAttribute,
+    CategoryClassification,
+    CategoryOption,
+    Product,
+    ProductCategory,
+    ProductAddition,
+)
 from .serializers import (
     AdditionClassificationSerializer,
     AdminProductSerializer,
+    AdminCategoryAttributeSerializer,
+    AdminCategoryOptionSerializer,
     CategoryClassificationSerializer,
     ProductCategorySerializer,
     ProductAdditionSerializer,
@@ -101,7 +110,7 @@ class CategoryClassificationDetailView(APIView):
             )
         return Response(
             {"details": "Deleted Successfully"},
-            status=status.HTTP_204_NO_CONTENT,
+            status=status.HTTP_200_OK,
         )
 
 
@@ -164,7 +173,139 @@ class ProductCategoryDetailView(APIView):
             )
         return Response(
             {"details": "Deleted Successfully"},
-            status=status.HTTP_204_NO_CONTENT,
+            status=status.HTTP_200_OK,
+        )
+
+
+class CategoryAttributeListCreateView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        attributes = (
+            CategoryAttribute.objects.select_related(
+                "category__classification",
+            )
+            .prefetch_related("options")
+            .order_by("category__name", "name", "id")
+        )
+        return Response(AdminCategoryAttributeSerializer(attributes, many=True).data)
+
+    def post(self, request):
+        serializer = AdminCategoryAttributeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        attribute = serializer.save()
+        return Response(
+            AdminCategoryAttributeSerializer(attribute).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CategoryAttributeDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get_attribute(self, attribute_id):
+        return get_object_or_404(
+            CategoryAttribute.objects.select_related(
+                "category__classification",
+            ).prefetch_related("options"),
+            id=attribute_id,
+        )
+
+    def get(self, request, attribute_id):
+        attribute = self.get_attribute(attribute_id)
+        return Response(AdminCategoryAttributeSerializer(attribute).data)
+
+    def patch(self, request, attribute_id):
+        attribute = self.get_attribute(attribute_id)
+        serializer = AdminCategoryAttributeSerializer(
+            attribute,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        attribute = serializer.save()
+        return Response(AdminCategoryAttributeSerializer(attribute).data)
+
+    def delete(self, request, attribute_id):
+        attribute = self.get_attribute(attribute_id)
+        try:
+            attribute.delete()
+        except ProtectedError:
+            return Response(
+                {
+                    "detail": (
+                        "Cannot delete category attribute while product or "
+                        "variant values are using it."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            {"details": "Deleted Successfully"},
+            status=status.HTTP_200_OK,
+        )
+
+
+class CategoryOptionListCreateView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        options = CategoryOption.objects.select_related(
+            "attribute__category",
+        ).order_by("attribute__name", "value", "id")
+        return Response(AdminCategoryOptionSerializer(options, many=True).data)
+
+    def post(self, request):
+        serializer = AdminCategoryOptionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        option = serializer.save()
+        return Response(
+            AdminCategoryOptionSerializer(option).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CategoryOptionDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get_option(self, option_id):
+        return get_object_or_404(
+            CategoryOption.objects.select_related("attribute__category"),
+            id=option_id,
+        )
+
+    def get(self, request, option_id):
+        option = self.get_option(option_id)
+        return Response(AdminCategoryOptionSerializer(option).data)
+
+    def patch(self, request, option_id):
+        option = self.get_option(option_id)
+        serializer = AdminCategoryOptionSerializer(
+            option,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        option = serializer.save()
+        return Response(AdminCategoryOptionSerializer(option).data)
+
+    def delete(self, request, option_id):
+        option = self.get_option(option_id)
+        try:
+            option.delete()
+        except ProtectedError:
+            return Response(
+                {
+                    "detail": (
+                        "Cannot delete category option while product or "
+                        "variant values are using it."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            {"details": "Deleted Successfully"},
+            status=status.HTTP_200_OK,
         )
 
 

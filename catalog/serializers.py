@@ -79,12 +79,88 @@ class CategoryOptionSerializer(serializers.ModelSerializer):
         fields = ("id", "value")
 
 
+class AdminCategoryOptionSerializer(serializers.ModelSerializer):
+    attribute_id = serializers.PrimaryKeyRelatedField(
+        queryset=CategoryAttribute.objects.all(),
+        source="attribute",
+        write_only=True,
+    )
+    attribute = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = CategoryOption
+        fields = ("id", "attribute", "attribute_id", "value")
+
+    def get_attribute(self, option):
+        return {
+            "id": option.attribute_id,
+            "name": option.attribute.name,
+            "category_id": option.attribute.category_id,
+        }
+
+    def validate_value(self, value):
+        return value.strip()
+
+    def validate(self, attrs):
+        attribute = attrs.get("attribute") or getattr(self.instance, "attribute", None)
+        value = attrs.get("value") or getattr(self.instance, "value", None)
+        if attribute is None or value is None:
+            return attrs
+
+        queryset = CategoryOption.objects.filter(
+            attribute=attribute,
+            value__iexact=value,
+        )
+        if self.instance is not None:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError(
+                {"value": "This option already exists for this attribute."}
+            )
+        return attrs
+
+
 class CategoryAttributeSerializer(serializers.ModelSerializer):
     options = CategoryOptionSerializer(many=True, read_only=True)
 
     class Meta:
         model = CategoryAttribute
         fields = ("id", "name", "options")
+
+
+class AdminCategoryAttributeSerializer(serializers.ModelSerializer):
+    category_id = serializers.PrimaryKeyRelatedField(
+        queryset=ProductCategory.objects.all(),
+        source="category",
+        write_only=True,
+    )
+    category = ProductCategorySerializer(read_only=True)
+    options = CategoryOptionSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = CategoryAttribute
+        fields = ("id", "category", "category_id", "name", "options")
+
+    def validate_name(self, value):
+        return value.strip()
+
+    def validate(self, attrs):
+        category = attrs.get("category") or getattr(self.instance, "category", None)
+        name = attrs.get("name") or getattr(self.instance, "name", None)
+        if category is None or name is None:
+            return attrs
+
+        queryset = CategoryAttribute.objects.filter(
+            category=category,
+            name__iexact=name,
+        )
+        if self.instance is not None:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError(
+                {"name": "This attribute already exists for this category."}
+            )
+        return attrs
 
 
 class ProductCategoryDetailSerializer(ProductCategorySerializer):

@@ -174,7 +174,7 @@ class AdditionClassificationAPITests(APITestCase):
         self.assertEqual(detail_response.data["name"], "مشروبات")
         self.assertEqual(update_response.status_code, status.HTTP_200_OK)
         self.assertEqual(update_response.data["name"], "حلويات")
-        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(delete_response.status_code, status.HTTP_200_OK)
         self.assertEqual(
             deleted_detail_response.status_code,
             status.HTTP_404_NOT_FOUND,
@@ -252,7 +252,7 @@ class AdditionClassificationAPITests(APITestCase):
             update_response.data["classification"]["id"],
             updated_classification.id,
         )
-        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(delete_response.status_code, status.HTTP_200_OK)
         self.assertEqual(
             deleted_detail_response.status_code,
             status.HTTP_404_NOT_FOUND,
@@ -263,6 +263,171 @@ class AdditionClassificationAPITests(APITestCase):
 
         response = self.client.delete(
             f"{CATALOG_BASE}/product-categories/{self.category.id}/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_category_attribute_crud_requires_admin_role(self):
+        self.authenticate(self.client_user)
+
+        response = self.client.get(f"{CATALOG_BASE}/category-attributes/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_can_create_read_update_and_delete_category_attribute(self):
+        self.authenticate(self.admin)
+
+        create_response = self.client.post(
+            f"{CATALOG_BASE}/category-attributes/",
+            {
+                "category_id": self.category.id,
+                "name": " اللون ",
+            },
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(create_response.data["name"], "اللون")
+        self.assertEqual(create_response.data["category"]["id"], self.category.id)
+        attribute_id = create_response.data["id"]
+
+        list_response = self.client.get(f"{CATALOG_BASE}/category-attributes/")
+        detail_response = self.client.get(
+            f"{CATALOG_BASE}/category-attributes/{attribute_id}/"
+        )
+        update_response = self.client.patch(
+            f"{CATALOG_BASE}/category-attributes/{attribute_id}/",
+            {"name": "النوع"},
+        )
+        delete_response = self.client.delete(
+            f"{CATALOG_BASE}/category-attributes/{attribute_id}/"
+        )
+        deleted_detail_response = self.client.get(
+            f"{CATALOG_BASE}/category-attributes/{attribute_id}/"
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertIn(attribute_id, [item["id"] for item in list_response.data])
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_response.data["name"], "اللون")
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_response.data["name"], "النوع")
+        self.assertEqual(delete_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            deleted_detail_response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_category_attribute_duplicate_name_per_category_is_rejected(self):
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{CATALOG_BASE}/category-attributes/",
+            {
+                "category_id": self.category.id,
+                "name": self.size_attribute.name,
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["name"],
+            ["This attribute already exists for this category."],
+        )
+
+    def test_category_attribute_delete_rejects_used_attribute(self):
+        ProductAttributeValue.objects.create(
+            product=self.product,
+            attribute=self.size_attribute,
+            option=self.small_option,
+        )
+        self.authenticate(self.admin)
+
+        response = self.client.delete(
+            f"{CATALOG_BASE}/category-attributes/{self.size_attribute.id}/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_category_option_crud_requires_admin_role(self):
+        self.authenticate(self.client_user)
+
+        response = self.client.get(f"{CATALOG_BASE}/category-options/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_can_create_read_update_and_delete_category_option(self):
+        self.authenticate(self.admin)
+
+        create_response = self.client.post(
+            f"{CATALOG_BASE}/category-options/",
+            {
+                "attribute_id": self.size_attribute.id,
+                "value": " متوسط ",
+            },
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(create_response.data["value"], "متوسط")
+        self.assertEqual(
+            create_response.data["attribute"]["id"],
+            self.size_attribute.id,
+        )
+        option_id = create_response.data["id"]
+
+        list_response = self.client.get(f"{CATALOG_BASE}/category-options/")
+        detail_response = self.client.get(
+            f"{CATALOG_BASE}/category-options/{option_id}/"
+        )
+        update_response = self.client.patch(
+            f"{CATALOG_BASE}/category-options/{option_id}/",
+            {"value": "صغير جدا"},
+        )
+        delete_response = self.client.delete(
+            f"{CATALOG_BASE}/category-options/{option_id}/"
+        )
+        deleted_detail_response = self.client.get(
+            f"{CATALOG_BASE}/category-options/{option_id}/"
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertIn(option_id, [item["id"] for item in list_response.data])
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_response.data["value"], "متوسط")
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_response.data["value"], "صغير جدا")
+        self.assertEqual(delete_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            deleted_detail_response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_category_option_duplicate_value_per_attribute_is_rejected(self):
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{CATALOG_BASE}/category-options/",
+            {
+                "attribute_id": self.size_attribute.id,
+                "value": self.small_option.value,
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["value"],
+            ["This option already exists for this attribute."],
+        )
+
+    def test_category_option_delete_rejects_used_option(self):
+        ProductAttributeValue.objects.create(
+            product=self.product,
+            attribute=self.size_attribute,
+            option=self.small_option,
+        )
+        self.authenticate(self.admin)
+
+        response = self.client.delete(
+            f"{CATALOG_BASE}/category-options/{self.small_option.id}/"
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

@@ -2,8 +2,12 @@ from django.urls import path
 
 from .views import (
     AdditionClassificationCreateView,
+    CategoryAttributeDetailView,
+    CategoryAttributeListCreateView,
     CategoryClassificationDetailView,
     CategoryClassificationListCreateView,
+    CategoryOptionDetailView,
+    CategoryOptionListCreateView,
     ProductCategoryDetailView,
     ProductCategoryListCreateView,
     ProductDetailView,
@@ -37,6 +41,26 @@ urlpatterns = [
         "product-categories/<int:category_id>/",
         ProductCategoryDetailView.as_view(),
         name="product-category-detail",
+    ),
+    path(
+        "category-attributes/",
+        CategoryAttributeListCreateView.as_view(),
+        name="category-attribute-list-create",
+    ),
+    path(
+        "category-attributes/<int:attribute_id>/",
+        CategoryAttributeDetailView.as_view(),
+        name="category-attribute-detail",
+    ),
+    path(
+        "category-options/",
+        CategoryOptionListCreateView.as_view(),
+        name="category-option-list-create",
+    ),
+    path(
+        "category-options/<int:option_id>/",
+        CategoryOptionDetailView.as_view(),
+        name="category-option-detail",
     ),
     path(
         "products/",
