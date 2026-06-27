@@ -141,11 +141,131 @@ class UserOrdersAPITests(APITestCase):
         self.assertEqual(response.data[0]["description"], "Primary order")
         self.assertEqual(response.data[0]["market"]["id"], self.market.id)
         self.assertEqual(response.data[0]["items"][0]["quantity"], 2)
+        self.assertTrue(response.data[0]["order_number"].startswith("YM-"))
         self.assertEqual(
             response.data[0]["items"][0]["variant"]["product"]["name"],
             "Order Product",
         )
         self.assertEqual(response.data[0]["offers"][0]["title"], "Order Offer")
+
+    def test_client_creates_order_from_saved_address_and_variants(self):
+        self.authenticate()
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/",
+            {
+                "delivery_address_id": self.address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 3}],
+                "payment_method": "cash_on_delivery",
+                "delivery_price": "25.00",
+                "discount": "5.00",
+                "description": "Leave at the door.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["customer"]["id"], self.user.id)
+        self.assertEqual(response.data["market"]["id"], self.market.id)
+        self.assertEqual(response.data["subtotal_price"], "2700.00")
+        self.assertEqual(response.data["total_price"], "2720.00")
+        self.assertEqual(response.data["items"][0]["quantity"], 3)
+
+    def test_admin_creates_order_for_existing_client(self):
+        admin_refresh = RefreshToken.for_user(self.admin)
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {admin_refresh.access_token}"
+        )
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/",
+            {
+                "user_id": self.user.id,
+                "delivery_address_id": self.address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+                "payment_method": "cash_on_delivery",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["customer"]["id"], self.user.id)
+
+    def test_order_creation_rejects_missing_items_foreign_address_and_mixed_markets(self):
+        self.authenticate()
+
+        missing_items = self.client.post(
+            f"{ORDERS_BASE}/",
+            {
+                "delivery_address_id": self.address.id,
+                "items": [],
+                "payment_method": "cash_on_delivery",
+            },
+            format="json",
+        )
+        self.assertEqual(missing_items.status_code, status.HTTP_400_BAD_REQUEST)
+
+        foreign_address = Address.objects.create(
+            user=self.other_user,
+            name="Other Home",
+            latitude=Decimal("30.2000000"),
+            longitude=Decimal("31.2000000"),
+        )
+        wrong_address = self.client.post(
+            f"{ORDERS_BASE}/",
+            {
+                "delivery_address_id": foreign_address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+                "payment_method": "cash_on_delivery",
+            },
+            format="json",
+        )
+        self.assertEqual(wrong_address.status_code, status.HTTP_400_BAD_REQUEST)
+
+        other_market = Market.objects.create(
+            classification=self.market.classification,
+            name="Other Market",
+        )
+        other_product = Product.objects.create(
+            market=other_market,
+            category=self.variant.product.category,
+            name="Other Product",
+        )
+        other_variant = ProductVariant.objects.create(
+            product=other_product,
+            price=Decimal("10.00"),
+        )
+        mixed_markets = self.client.post(
+            f"{ORDERS_BASE}/",
+            {
+                "delivery_address_id": self.address.id,
+                "items": [
+                    {"variant_id": self.variant.id, "quantity": 1},
+                    {"variant_id": other_variant.id, "quantity": 1},
+                ],
+                "payment_method": "cash_on_delivery",
+            },
+            format="json",
+        )
+        self.assertEqual(mixed_markets.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_admin_reads_detail_and_updates_order_status(self):
+        admin_refresh = RefreshToken.for_user(self.admin)
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {admin_refresh.access_token}"
+        )
+
+        detail = self.client.get(f"{ORDERS_BASE}/admin/{self.order.id}/")
+        self.assertEqual(detail.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail.data["id"], self.order.id)
+
+        updated = self.client.patch(
+            f"{ORDERS_BASE}/admin/{self.order.id}/status/",
+            {"status": Order.Status.READY},
+            format="json",
+        )
+        self.assertEqual(updated.status_code, status.HTTP_200_OK)
+        self.assertEqual(updated.data["status"], Order.Status.READY)
 
     def test_admin_assigns_ready_order_and_representative_delivers_it(self):
         self.order.status = Order.Status.READY

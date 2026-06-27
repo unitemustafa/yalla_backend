@@ -8,7 +8,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Order
-from .serializers import DeliverOrderSerializer, OrderSerializer
+from .serializers import (
+    DeliverOrderSerializer,
+    OrderCreateSerializer,
+    OrderSerializer,
+    OrderStatusUpdateSerializer,
+)
 from accounts.models import CourierProfile
 
 User = get_user_model()
@@ -62,6 +67,20 @@ class UserOrdersView(APIView):
         )
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @transaction.atomic
+    def post(self, request):
+        serializer = OrderCreateSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        order = serializer.save()
+        order = order_queryset().get(pk=order.pk)
+        return Response(
+            OrderSerializer(order, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
 
 class AdminOrdersView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
@@ -72,6 +91,47 @@ class AdminOrdersView(APIView):
         if order_status:
             orders = orders.filter(status=order_status)
         return Response(OrderSerializer(orders, many=True, context={"request": request}).data)
+
+
+class AdminOrderDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request, order_id):
+        try:
+            order = order_queryset().get(pk=order_id)
+        except Order.DoesNotExist:
+            return Response({"detail": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(OrderSerializer(order, context={"request": request}).data)
+
+
+class AdminOrderStatusView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    @transaction.atomic
+    def patch(self, request, order_id):
+        try:
+            order = Order.objects.select_for_update().get(pk=order_id)
+        except Order.DoesNotExist:
+            return Response({"detail": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = OrderStatusUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        order.status = serializer.validated_data["status"]
+        if order.status != Order.Status.DELIVERED:
+            order.delivered_at = None
+        if order.status != Order.Status.READY:
+            order.assigned_representative = None
+            order.assigned_at = None
+        order.save(
+            update_fields=[
+                "status",
+                "delivered_at",
+                "assigned_representative",
+                "assigned_at",
+                "updated_at",
+            ]
+        )
+        order = order_queryset().get(pk=order.pk)
+        return Response(OrderSerializer(order, context={"request": request}).data)
 
 
 class OrderAssignmentView(APIView):
