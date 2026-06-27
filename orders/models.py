@@ -15,6 +15,20 @@ class Order(models.Model):
         on_delete=models.PROTECT,
         related_name="orders",
     )
+    delivery_address = models.ForeignKey(
+        "locations.Address",
+        on_delete=models.PROTECT,
+        related_name="orders",
+        blank=True,
+        null=True,
+    )
+    assigned_representative = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="assigned_orders",
+        blank=True,
+        null=True,
+    )
     market = models.ForeignKey(
         "markets.Market",
         on_delete=models.PROTECT,
@@ -34,6 +48,14 @@ class Order(models.Model):
     subtotal_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     total_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     image = models.ImageField(upload_to="orders/", blank=True, null=True)
+    assigned_at = models.DateTimeField(blank=True, null=True)
+    delivered_at = models.DateTimeField(blank=True, null=True)
+    delivery_note = models.TextField(blank=True)
+    delivery_proof = models.ImageField(
+        upload_to="delivery-proofs/",
+        blank=True,
+        null=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

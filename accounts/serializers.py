@@ -12,7 +12,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import OneTimePassword
+from .models import CourierProfile, OneTimePassword
 from .services import normalize_email, verify_otp
 
 User = get_user_model()
@@ -64,9 +64,33 @@ class RequiredFieldMessagesMixin:
         return fields
 
 
+class CourierProfileSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
+    delivery_area_name = serializers.CharField(
+        source="delivery_area.name",
+        read_only=True,
+    )
+
+    class Meta:
+        model = CourierProfile
+        fields = (
+            "vehicle_type",
+            "plate_number",
+            "delivery_area",
+            "delivery_area_name",
+            "max_active_orders",
+            "is_available",
+        )
+
+    def validate_max_active_orders(self, value):
+        if value < 1:
+            raise serializers.ValidationError("Must be at least 1.")
+        return value
+
+
 class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
     id = serializers.CharField(read_only=True)
     has_password = serializers.SerializerMethodField()
+    courier_profile = CourierProfileSerializer(read_only=True)
 
     class Meta:
         model = User
@@ -83,6 +107,7 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
             "username_changed_at",
             "role",
             "has_password",
+            "courier_profile",
         )
 
     def get_has_password(self, obj):
@@ -128,8 +153,14 @@ class RegisterSerializer(
     PasswordValidationMixin,
     serializers.Serializer,
 ):
-    first_name = serializers.CharField(max_length=150)
-    last_name = serializers.CharField(max_length=150)
+    first_name = serializers.CharField(
+        max_length=150,
+        validators=[no_whitespace_validator],
+    )
+    last_name = serializers.CharField(
+        max_length=150,
+        validators=[no_whitespace_validator],
+    )
     username = serializers.CharField(
         max_length=150,
         validators=[no_whitespace_validator, UnicodeUsernameValidator()],
@@ -391,6 +422,7 @@ class AdminUserWriteSerializer(
         write_only=True,
         trim_whitespace=False,
     )
+    courier_profile = CourierProfileSerializer(required=False)
 
     class Meta:
         model = User
@@ -408,6 +440,7 @@ class AdminUserWriteSerializer(
             "is_active",
             "is_staff",
             "is_superuser",
+            "courier_profile",
         )
 
     def __init__(self, *args, **kwargs):
@@ -459,16 +492,48 @@ class AdminUserWriteSerializer(
             )
         return phone
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        role = attrs.get("role", getattr(self.instance, "role", None))
+        profile_data = attrs.get("courier_profile")
+        existing_profile = (
+            getattr(self.instance, "courier_profile", None)
+            if self.instance is not None
+            else None
+        )
+        if role == User.Role.REPRESENTATIVE and not (profile_data or existing_profile):
+            raise serializers.ValidationError(
+                {"courier_profile": "Courier profile is required for representatives."}
+            )
+        if profile_data is not None and role != User.Role.REPRESENTATIVE:
+            raise serializers.ValidationError(
+                {"courier_profile": "Courier profile is only valid for representatives."}
+            )
+        if (
+            self.instance is not None
+            and self.instance.role == User.Role.REPRESENTATIVE
+            and attrs.get("is_active") is False
+            and self.instance.assigned_orders.filter(status="ready").exists()
+        ):
+            raise serializers.ValidationError(
+                {"is_active": "Reassign active orders before disabling this courier."}
+            )
+        return attrs
+
     def create(self, validated_data):
+        profile_data = validated_data.pop("courier_profile", None)
         password = validated_data.pop("password")
         user = User(**validated_data)
         user.set_password(password)
         user.terms_accepted = True
         user.terms_accepted_at = timezone.now()
         user.save()
+        if profile_data is not None:
+            CourierProfile.objects.create(user=user, **profile_data)
         return user
 
     def update(self, instance, validated_data):
+        profile_data = validated_data.pop("courier_profile", None)
         password = validated_data.pop("password", None)
         update_fields = list(validated_data.keys())
         if (
@@ -484,6 +549,17 @@ class AdminUserWriteSerializer(
             instance.set_password(password)
             update_fields.append("password")
         instance.save(update_fields=[*update_fields, "updated_at"])
+        if instance.role != User.Role.REPRESENTATIVE:
+            CourierProfile.objects.filter(user=instance).delete()
+            return instance
+        if profile_data is not None:
+            profile, _ = CourierProfile.objects.get_or_create(
+                user=instance,
+                defaults=profile_data,
+            )
+            for field, value in profile_data.items():
+                setattr(profile, field, value)
+            profile.save()
         return instance
 
 

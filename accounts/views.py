@@ -302,8 +302,16 @@ class AdminUserDetailView(APIView):
     @transaction.atomic
     def delete(self, request, user_id):
         user = self.get_user(user_id)
+        if (
+            user.role == User.Role.REPRESENTATIVE
+            and user.assigned_orders.filter(status="ready").exists()
+        ):
+            return Response(
+                {"detail": "Reassign active orders before deleting this courier."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         soft_delete_user(user)
-        return Response({"detail": "Account deleted."}, status=status.HTTP_200_OK)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CheckUsernameView(APIView):

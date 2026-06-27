@@ -1,3 +1,5 @@
+from django.conf import settings
+from django.conf.urls.static import static
 from django.urls import path, include
 
 urlpatterns = [
@@ -6,4 +8,8 @@ urlpatterns = [
     path("api/v1/home/", include("markets.urls")),
     path("api/v1/offers/", include("offers.urls")),
     path("api/v1/orders/", include("orders.urls")),
+    path("api/v1/locations/", include("locations.urls")),
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

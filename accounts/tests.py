@@ -6,6 +6,7 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
+from locations.models import DeliveryArea
 
 from .models import OneTimePassword
 
@@ -251,6 +252,13 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(response.data["detail"], "Only admin users can manage users.")
 
     def test_admin_can_create_read_update_and_delete_user(self):
+        area = DeliveryArea.objects.create(
+            name="Central",
+            delivery_price="20.00",
+            center_latitude="30.0000000",
+            center_longitude="31.0000000",
+            radius_km="10.00",
+        )
         admin = self.create_active_user(
             role=User.Role.ADMIN,
             username="admin_crud",
@@ -271,12 +279,24 @@ class AuthenticationAPITests(APITestCase):
                 "password": self.password,
                 "role": User.Role.REPRESENTATIVE,
                 "is_active": True,
+                "courier_profile": {
+                    "vehicle_type": "Motorcycle",
+                    "plate_number": "ABC-123",
+                    "delivery_area": area.id,
+                    "max_active_orders": 3,
+                    "is_available": True,
+                },
             },
+            format="json",
         )
 
         self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(create_response.data["email"], "managed@example.com")
         self.assertEqual(create_response.data["role"], User.Role.REPRESENTATIVE)
+        self.assertEqual(
+            create_response.data["courier_profile"]["plate_number"],
+            "ABC-123",
+        )
         self.assertTrue(
             User.objects.get(email="managed@example.com").check_password(
                 self.password

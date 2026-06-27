@@ -33,6 +33,25 @@ class User(AbstractUser):
         ]
 
 
+class CourierProfile(models.Model):
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="courier_profile",
+    )
+    vehicle_type = models.CharField(max_length=100)
+    plate_number = models.CharField(max_length=50)
+    delivery_area = models.ForeignKey(
+        "locations.DeliveryArea",
+        on_delete=models.PROTECT,
+        related_name="courier_profiles",
+    )
+    max_active_orders = models.PositiveSmallIntegerField(default=3)
+    is_available = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
 class OneTimePassword(models.Model):
     class Purpose(models.TextChoices):
         REGISTRATION = "registration", "Registration"

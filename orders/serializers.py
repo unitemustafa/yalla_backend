@@ -6,6 +6,46 @@ from markets.serializers import HomeMarketSerializer, MarketClassificationProduc
 from .models import Order, OrderItem, OrderOffer
 
 
+class OrderAddressSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    latitude = serializers.DecimalField(max_digits=10, decimal_places=7, read_only=True)
+    longitude = serializers.DecimalField(max_digits=10, decimal_places=7, read_only=True)
+
+
+class OrderCustomerSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    first_name = serializers.CharField(read_only=True)
+    last_name = serializers.CharField(read_only=True)
+    phone = serializers.CharField(read_only=True)
+    avatar_url = serializers.URLField(read_only=True, allow_null=True)
+
+
+class AssignedRepresentativeSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    first_name = serializers.CharField(read_only=True)
+    last_name = serializers.CharField(read_only=True)
+    phone = serializers.CharField(read_only=True)
+    avatar_url = serializers.URLField(read_only=True, allow_null=True)
+
+
+class DeliverOrderSerializer(serializers.Serializer):
+    note = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    proof = serializers.ImageField(required=False)
+
+    def validate_proof(self, value):
+        if value.size > 10 * 1024 * 1024:
+            raise serializers.ValidationError("Proof image must not exceed 10 MB.")
+        return value
+
+    def validate(self, attrs):
+        if not attrs.get("note") and attrs.get("proof") is None:
+            raise serializers.ValidationError(
+                "A delivery proof image or note is required."
+            )
+        return attrs
+
+
 class OrderVariantSerializer(serializers.ModelSerializer):
     product = MarketClassificationProductSerializer(read_only=True)
 
@@ -58,12 +98,18 @@ class OrderSerializer(serializers.ModelSerializer):
         many=True,
         read_only=True,
     )
+    customer = OrderCustomerSerializer(source="user", read_only=True)
+    delivery_address = OrderAddressSerializer(read_only=True)
+    assigned_representative = AssignedRepresentativeSerializer(read_only=True)
 
     class Meta:
         model = Order
         fields = (
             "id",
             "market",
+            "customer",
+            "delivery_address",
+            "assigned_representative",
             "payment_method",
             "discount",
             "description",
@@ -72,6 +118,10 @@ class OrderSerializer(serializers.ModelSerializer):
             "subtotal_price",
             "total_price",
             "image",
+            "assigned_at",
+            "delivered_at",
+            "delivery_note",
+            "delivery_proof",
             "items",
             "offers",
             "created_at",

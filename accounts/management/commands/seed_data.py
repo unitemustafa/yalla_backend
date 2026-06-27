@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from accounts.models import OneTimePassword
+from accounts.models import CourierProfile, OneTimePassword
 from catalog.models import (
     AdditionClassification,
     CategoryAttribute,
@@ -37,6 +37,16 @@ class Command(BaseCommand):
         users = self._seed_users(now)
         self._seed_otps(users, now)
         areas = self._seed_locations(users)
+        CourierProfile.objects.update_or_create(
+            user=users["seed.courier@yalla.test"],
+            defaults={
+                "vehicle_type": "Motorcycle",
+                "plate_number": "YH-1004",
+                "delivery_area": next(iter(areas.values())),
+                "max_active_orders": 3,
+                "is_available": True,
+            },
+        )
         markets = self._seed_markets(areas)
         catalog = self._seed_catalog(markets)
         additions = self._seed_additions(catalog["products"])
@@ -524,6 +534,10 @@ class Command(BaseCommand):
                     "delivery_price": definition["delivery_price"],
                     "subtotal_price": subtotal,
                     "total_price": total,
+                    "delivery_address": definition["user"].addresses.filter(
+                        is_default=True
+                    ).first()
+                    or definition["user"].addresses.order_by("-created_at").first(),
                 },
             )
             order.items.all().delete()
