@@ -22,7 +22,10 @@ class AdditionClassificationSerializer(serializers.ModelSerializer):
 
     def validate_name(self, value):
         name = value.strip()
-        if AdditionClassification.objects.filter(name__iexact=name).exists():
+        queryset = AdditionClassification.objects.filter(name__iexact=name)
+        if self.instance is not None:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
             raise serializers.ValidationError(
                 "An addition classification with this name already exists."
             )

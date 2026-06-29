@@ -2,7 +2,67 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import Address, DeliveryArea
+from .models import Address, DeliveryArea, ServiceCity
+
+
+class ServiceCitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ServiceCity
+        fields = (
+            "id",
+            "name",
+            "center_latitude",
+            "center_longitude",
+            "radius_km",
+            "is_active",
+        )
+        read_only_fields = ("id",)
+
+    def validate_name(self, value):
+        return value.strip()
+
+    def validate_center_latitude(self, value):
+        if not Decimal("-90") <= value <= Decimal("90"):
+            raise serializers.ValidationError("Latitude must be between -90 and 90.")
+        return value
+
+    def validate_center_longitude(self, value):
+        if not Decimal("-180") <= value <= Decimal("180"):
+            raise serializers.ValidationError(
+                "Longitude must be between -180 and 180."
+            )
+        return value
+
+    def validate_radius_km(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Radius must be greater than zero.")
+        return value
+
+
+class DeliveryAreaSerializer(ServiceCitySerializer):
+    service_city_id = serializers.PrimaryKeyRelatedField(
+        queryset=ServiceCity.objects.all(),
+        source="service_city",
+    )
+
+    class Meta:
+        model = DeliveryArea
+        fields = (
+            "id",
+            "service_city_id",
+            "name",
+            "center_latitude",
+            "center_longitude",
+            "radius_km",
+            "delivery_price",
+            "is_active",
+        )
+        read_only_fields = ("id",)
+
+    def validate_delivery_price(self, value):
+        if value < 0:
+            raise serializers.ValidationError("Delivery price cannot be negative.")
+        return value
 
 
 class AddressSerializer(serializers.ModelSerializer):

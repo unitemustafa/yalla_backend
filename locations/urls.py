@@ -5,11 +5,33 @@ from .views import (
     AddressDetailView,
     AddressListCreateView,
     AddressSetDefaultView,
-    DeliveryAreaListView,
+    DeliveryAreaDetailView,
+    DeliveryAreaListCreateView,
+    ServiceCityDetailView,
+    ServiceCityListCreateView,
 )
 
 urlpatterns = [
-    path("delivery-areas/", DeliveryAreaListView.as_view(), name="delivery-areas"),
+    path(
+        "service-cities/",
+        ServiceCityListCreateView.as_view(),
+        name="service-city-list-create",
+    ),
+    path(
+        "service-cities/<int:city_id>/",
+        ServiceCityDetailView.as_view(),
+        name="service-city-detail",
+    ),
+    path(
+        "delivery-areas/",
+        DeliveryAreaListCreateView.as_view(),
+        name="delivery-area-list-create",
+    ),
+    path(
+        "delivery-areas/<int:area_id>/",
+        DeliveryAreaDetailView.as_view(),
+        name="delivery-area-detail",
+    ),
     path("addresses/", AddressListCreateView.as_view(), name="addresses"),
     path("addresses/default/", AddressDefaultView.as_view(), name="default-address"),
     path("addresses/<int:address_id>/", AddressDetailView.as_view(), name="address-detail"),

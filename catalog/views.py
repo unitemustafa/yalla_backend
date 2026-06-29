@@ -59,6 +59,50 @@ class AdditionClassificationListCreateView(APIView):
         )
 
 
+class AdditionClassificationDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get_classification(self, classification_id):
+        return get_object_or_404(
+            AdditionClassification,
+            id=classification_id,
+        )
+
+    def get(self, request, classification_id):
+        classification = self.get_classification(classification_id)
+        return Response(AdditionClassificationSerializer(classification).data)
+
+    def patch(self, request, classification_id):
+        classification = self.get_classification(classification_id)
+        serializer = AdditionClassificationSerializer(
+            classification,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        classification = serializer.save()
+        return Response(AdditionClassificationSerializer(classification).data)
+
+    def delete(self, request, classification_id):
+        classification = self.get_classification(classification_id)
+        try:
+            classification.delete()
+        except ProtectedError:
+            return Response(
+                {
+                    "detail": (
+                        "Cannot delete addition classification while product "
+                        "additions are using it."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            {"details": "Deleted Successfully"},
+            status=status.HTTP_200_OK,
+        )
+
+
 class CategoryClassificationListCreateView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
 

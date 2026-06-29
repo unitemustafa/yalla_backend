@@ -148,6 +148,49 @@ class AdditionClassificationAPITests(APITestCase):
             ["An addition classification with this name already exists."],
         )
 
+    def test_admin_can_read_update_and_delete_addition_classification(self):
+        classification = AdditionClassification.objects.create(name="إضافات")
+        self.authenticate(self.admin)
+
+        detail_response = self.client.get(
+            f"{CATALOG_BASE}/addition-classifications/{classification.id}/"
+        )
+        update_response = self.client.patch(
+            f"{CATALOG_BASE}/addition-classifications/{classification.id}/",
+            {"name": " إضافات محدثة "},
+            format="json",
+        )
+        delete_response = self.client.delete(
+            f"{CATALOG_BASE}/addition-classifications/{classification.id}/"
+        )
+
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_response.data["name"], "إضافات محدثة")
+        self.assertEqual(delete_response.status_code, status.HTTP_200_OK)
+        self.assertFalse(
+            AdditionClassification.objects.filter(pk=classification.id).exists()
+        )
+
+    def test_addition_classification_delete_rejects_used_classification(self):
+        classification = AdditionClassification.objects.create(name="إضافات")
+        ProductAddition.objects.create(
+            classification=classification,
+            name_ar="جبن",
+            name_en="Cheese",
+            price="100.00",
+        )
+        self.authenticate(self.admin)
+
+        response = self.client.delete(
+            f"{CATALOG_BASE}/addition-classifications/{classification.id}/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(
+            AdditionClassification.objects.filter(pk=classification.id).exists()
+        )
+
     def test_category_classification_crud_requires_admin_role(self):
         self.authenticate(self.client_user)
 

@@ -1,4 +1,6 @@
 from django.db import transaction
+from django.db.models.deletion import ProtectedError
+from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
@@ -6,26 +8,82 @@ from rest_framework.views import APIView
 
 from accounts.views import IsAdminRole
 
-from .models import Address, DeliveryArea
-from .serializers import AddressSerializer, AddressWriteSerializer
+from .models import Address, DeliveryArea, ServiceCity
+from .serializers import (
+    AddressSerializer,
+    AddressWriteSerializer,
+    DeliveryAreaSerializer,
+    ServiceCitySerializer,
+)
+
+
+class ProtectedDeleteMixin:
+    protected_error_message = "This item is in use and cannot be deleted."
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {"detail": self.protected_error_message},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+class ServiceCityListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+    serializer_class = ServiceCitySerializer
+    queryset = ServiceCity.objects.order_by("name", "id")
+
+
+class ServiceCityDetailView(
+    ProtectedDeleteMixin,
+    generics.RetrieveUpdateDestroyAPIView,
+):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+    serializer_class = ServiceCitySerializer
+    queryset = ServiceCity.objects.all()
+    lookup_url_kwarg = "city_id"
+    protected_error_message = (
+        "Service city cannot be deleted while its delivery areas are in use."
+    )
+
+
+class DeliveryAreaListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+    serializer_class = DeliveryAreaSerializer
+
+    def get_queryset(self):
+        queryset = DeliveryArea.objects.select_related("service_city").order_by(
+            "name", "id"
+        )
+        city_id = self.request.query_params.get("service_city_id")
+        if city_id:
+            queryset = queryset.filter(service_city_id=city_id)
+        return queryset
+
+
+class DeliveryAreaDetailView(
+    ProtectedDeleteMixin,
+    generics.RetrieveUpdateDestroyAPIView,
+):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+    serializer_class = DeliveryAreaSerializer
+    queryset = DeliveryArea.objects.select_related("service_city")
+    lookup_url_kwarg = "area_id"
+    protected_error_message = (
+        "Delivery area cannot be deleted while representatives are using it."
+    )
 
 
 class DeliveryAreaListView(APIView):
+    """Backward-compatible alias for the original read-only endpoint."""
+
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
         areas = DeliveryArea.objects.order_by("name", "id")
-        return Response(
-            [
-                {
-                    "id": area.id,
-                    "name": area.name,
-                    "delivery_price": area.delivery_price,
-                    "is_active": area.is_active,
-                }
-                for area in areas
-            ]
-        )
+        return Response(DeliveryAreaSerializer(areas, many=True).data)
 
 
 def address_queryset_for_request(request):

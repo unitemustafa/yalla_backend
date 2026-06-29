@@ -496,15 +496,6 @@ class AdminUserWriteSerializer(
         attrs = super().validate(attrs)
         role = attrs.get("role", getattr(self.instance, "role", None))
         profile_data = attrs.get("courier_profile")
-        existing_profile = (
-            getattr(self.instance, "courier_profile", None)
-            if self.instance is not None
-            else None
-        )
-        if role == User.Role.REPRESENTATIVE and not (profile_data or existing_profile):
-            raise serializers.ValidationError(
-                {"courier_profile": "Courier profile is required for representatives."}
-            )
         if profile_data is not None and role != User.Role.REPRESENTATIVE:
             raise serializers.ValidationError(
                 {"courier_profile": "Courier profile is only valid for representatives."}

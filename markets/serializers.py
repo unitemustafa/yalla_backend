@@ -14,30 +14,6 @@ from offers.models import Offer
 from .models import Market, MarketClassification
 
 
-class HomeMarketSerializer(serializers.ModelSerializer):
-    classification_id = serializers.IntegerField(read_only=True)
-
-    class Meta:
-        model = Market
-        fields = ("id", "name", "branch", "status", "classification_id")
-
-
-class HomeMarketClassificationSerializer(serializers.ModelSerializer):
-    markets = serializers.SerializerMethodField()
-
-    class Meta:
-        model = MarketClassification
-        fields = ("id", "name", "markets")
-
-    def get_markets(self, classification):
-        eligible_market_ids = self.context["eligible_market_ids"]
-        markets = classification.markets.filter(
-            id__in=eligible_market_ids,
-            status=Market.Status.ACTIVE,
-        ).order_by("name")
-        return HomeMarketSerializer(markets, many=True).data
-
-
 class AdminMarketClassificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = MarketClassification
@@ -56,10 +32,13 @@ class AdminMarketClassificationSerializer(serializers.ModelSerializer):
 
 
 class DeliveryAreaSummarySerializer(serializers.ModelSerializer):
+    service_city_id = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = DeliveryArea
         fields = (
             "id",
+            "service_city_id",
             "name",
             "delivery_price",
             "center_latitude",
@@ -67,6 +46,43 @@ class DeliveryAreaSummarySerializer(serializers.ModelSerializer):
             "radius_km",
             "is_active",
         )
+
+
+class DeliveryAreaRelatedField(serializers.PrimaryKeyRelatedField):
+    def to_representation(self, value):
+        return DeliveryAreaSummarySerializer(value).data
+
+
+class HomeMarketSerializer(serializers.ModelSerializer):
+    classification_id = serializers.IntegerField(read_only=True)
+    delivery_areas = DeliveryAreaSummarySerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Market
+        fields = (
+            "id",
+            "name",
+            "branch",
+            "status",
+            "classification_id",
+            "delivery_areas",
+        )
+
+
+class HomeMarketClassificationSerializer(serializers.ModelSerializer):
+    markets = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MarketClassification
+        fields = ("id", "name", "markets")
+
+    def get_markets(self, classification):
+        eligible_market_ids = self.context["eligible_market_ids"]
+        markets = classification.markets.filter(
+            id__in=eligible_market_ids,
+            status=Market.Status.ACTIVE,
+        ).prefetch_related("delivery_areas").order_by("name")
+        return HomeMarketSerializer(markets, many=True).data
 
 
 class AdminMarketSerializer(serializers.ModelSerializer):
@@ -83,7 +99,11 @@ class AdminMarketSerializer(serializers.ModelSerializer):
         required=False,
         write_only=True,
     )
-    delivery_areas = DeliveryAreaSummarySerializer(many=True, read_only=True)
+    delivery_areas = DeliveryAreaRelatedField(
+        queryset=DeliveryArea.objects.all(),
+        many=True,
+        required=False,
+    )
 
     class Meta:
         model = Market
@@ -105,6 +125,20 @@ class AdminMarketSerializer(serializers.ModelSerializer):
 
     def validate_branch(self, value):
         return value.strip()
+
+    def validate(self, attrs):
+        if (
+            "delivery_areas" in self.initial_data
+            and "delivery_area_ids" in self.initial_data
+        ):
+            raise serializers.ValidationError(
+                {
+                    "delivery_areas": (
+                        "Use either delivery_areas or delivery_area_ids, not both."
+                    )
+                }
+            )
+        return attrs
 
     def create(self, validated_data):
         delivery_areas = validated_data.pop("delivery_areas", [])

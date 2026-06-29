@@ -1,21 +1,19 @@
 from django.urls import path
 
 from .views import (
-    AdminOrderDetailView,
-    AdminOrderStatusView,
-    AdminOrdersView,
-    AssignedOrdersView,
-    DeliverOrderView,
     OrderAssignmentView,
-    UserOrdersView,
+    OrderDetailView,
+    OrderListCreateView,
+    OrderStatusView,
 )
 
 urlpatterns = [
-    path("", UserOrdersView.as_view(), name="user-orders"),
-    path("admin/", AdminOrdersView.as_view(), name="admin-orders"),
-    path("admin/<int:order_id>/", AdminOrderDetailView.as_view(), name="admin-order-detail"),
-    path("admin/<int:order_id>/status/", AdminOrderStatusView.as_view(), name="admin-order-status"),
-    path("assigned/", AssignedOrdersView.as_view(), name="assigned-orders"),
-    path("<int:order_id>/assignment/", OrderAssignmentView.as_view(), name="order-assignment"),
-    path("<int:order_id>/deliver/", DeliverOrderView.as_view(), name="deliver-order"),
+    path("", OrderListCreateView.as_view(), name="order-list-create"),
+    path("<int:order_id>/", OrderDetailView.as_view(), name="order-detail"),
+    path("<int:order_id>/status/", OrderStatusView.as_view(), name="order-status"),
+    path(
+        "<int:order_id>/assignment/",
+        OrderAssignmentView.as_view(),
+        name="order-assignment",
+    ),
 ]

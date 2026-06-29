@@ -8,7 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from locations.models import DeliveryArea
 
-from .models import OneTimePassword
+from .models import CourierProfile, OneTimePassword
 
 User = get_user_model()
 AUTH_BASE = "/api/v1/auth"
@@ -332,6 +332,38 @@ class AuthenticationAPITests(APITestCase):
             status.HTTP_404_NOT_FOUND,
         )
         self.assertIsNotNone(User.objects.get(pk=user_id).deleted_at)
+
+    def test_admin_can_create_representative_without_courier_profile(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="profile_optional_admin",
+            email="profile-optional-admin@example.com",
+            phone="+213555000031",
+        )
+        refresh = RefreshToken.for_user(admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            f"{AUTH_BASE}/users/",
+            {
+                "first_name": "New",
+                "last_name": "Representative",
+                "username": "representative_without_profile",
+                "email": "representative-without-profile@example.com",
+                "phone": "+213555000032",
+                "password": self.password,
+                "role": User.Role.REPRESENTATIVE,
+                "is_active": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["role"], User.Role.REPRESENTATIVE)
+        self.assertIsNone(response.data["courier_profile"])
+        self.assertFalse(
+            CourierProfile.objects.filter(user_id=response.data["id"]).exists()
+        )
 
     def test_missing_fields_return_field_specific_required_messages(self):
         login_response = self.client.post(

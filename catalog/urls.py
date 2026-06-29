@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AdditionClassificationDetailView,
     AdditionClassificationListCreateView,
     CategoryAttributeDetailView,
     CategoryAttributeListCreateView,
@@ -21,6 +22,11 @@ urlpatterns = [
         "addition-classifications/",
         AdditionClassificationListCreateView.as_view(),
         name="addition-classification-list-create",
+    ),
+    path(
+        "addition-classifications/<int:classification_id>/",
+        AdditionClassificationDetailView.as_view(),
+        name="addition-classification-detail",
     ),
     path(
         "category-classifications/",

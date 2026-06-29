@@ -167,7 +167,7 @@ class AdminMarketDetailView(APIView):
             )
         return Response(
             {"details": "Deleted Successfully"},
-            status=status.HTTP_204_NO_CONTENT,
+            status=status.HTTP_200_OK,
         )
 
 
@@ -193,6 +193,7 @@ class HomeView(APIView):
             Product.objects.filter(market_id__in=market_ids)
             .select_related("category__classification", "market__classification")
             .prefetch_related(
+                "market__delivery_areas",
                 Prefetch(
                     "variants",
                     queryset=ProductVariant.objects.order_by("price", "id"),
@@ -209,6 +210,7 @@ class HomeView(APIView):
             )
             .select_related("market__classification")
             .prefetch_related(
+                "market__delivery_areas",
                 Prefetch(
                     "products",
                     queryset=Product.objects.filter(
@@ -218,7 +220,7 @@ class HomeView(APIView):
                         "category__classification",
                         "market__classification",
                     )
-                    .prefetch_related("variants"),
+                    .prefetch_related("variants", "market__delivery_areas"),
                 )
             )
             .order_by("-created_at", "-id")[:4]
@@ -372,6 +374,7 @@ class MarketClassificationMarketsView(APIView):
                 status=Market.Status.ACTIVE,
             )
             .distinct()
+            .prefetch_related("delivery_areas")
             .order_by("name", "id")
         )
         products_by_market = {
@@ -439,6 +442,7 @@ class ProductSearchView(APIView):
                 "market__classification",
             )
             .prefetch_related(
+                "market__delivery_areas",
                 Prefetch(
                     "variants",
                     queryset=ProductVariant.objects.order_by("price", "id"),
@@ -485,6 +489,7 @@ class ProductDetailView(APIView):
                 "market__classification",
             )
             .prefetch_related(
+                "market__delivery_areas",
                 Prefetch(
                     "variants",
                     queryset=ProductVariant.objects.prefetch_related(

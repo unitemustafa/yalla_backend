@@ -1693,103 +1693,6 @@
           ]
         },
         {
-          "name": "Get User Orders",
-          "request": {
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzgyMjk2MTYyLCJpYXQiOjE3ODIyOTUyNjIsImp0aSI6IjQ1MWQ1YjU3ZjM2ZjQ5YTI4NDZmNjg3MWFlNzUwMzE2IiwidXNlcl9pZCI6IjUifQ.K4YuhKkpBR-Es4wcfjybMkQ7U9TsZFTPRm5eTaXC-_w",
-                  "type": "string"
-                }
-              ]
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{local}}/api/v1/orders/",
-              "host": [
-                "{{local}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "orders",
-                ""
-              ]
-            }
-          },
-          "response": [
-            {
-              "name": "Get User Orders",
-              "originalRequest": {
-                "method": "GET",
-                "header": [],
-                "url": {
-                  "raw": "{{local}}/api/v1/orders/",
-                  "host": [
-                    "{{local}}"
-                  ],
-                  "path": [
-                    "api",
-                    "v1",
-                    "orders",
-                    ""
-                  ]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": null,
-              "header": [
-                {
-                  "key": "Date",
-                  "value": "Wed, 24 Jun 2026 10:01:18 GMT"
-                },
-                {
-                  "key": "Server",
-                  "value": "WSGIServer/0.2 CPython/3.14.5"
-                },
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                },
-                {
-                  "key": "Vary",
-                  "value": "Accept, origin"
-                },
-                {
-                  "key": "Allow",
-                  "value": "GET, HEAD, OPTIONS"
-                },
-                {
-                  "key": "X-Frame-Options",
-                  "value": "DENY"
-                },
-                {
-                  "key": "Content-Length",
-                  "value": "2679"
-                },
-                {
-                  "key": "X-Content-Type-Options",
-                  "value": "nosniff"
-                },
-                {
-                  "key": "Referrer-Policy",
-                  "value": "same-origin"
-                },
-                {
-                  "key": "Cross-Origin-Opener-Policy",
-                  "value": "same-origin"
-                }
-              ],
-              "cookie": [],
-              "body": "[\n    {\n        \"id\": 3,\n        \"market\": {\n            \"id\": 3,\n            \"name\": \"Oran Golden Bakery\",\n            \"branch\": \"Oran Centre\",\n            \"status\": \"active\",\n            \"classification_id\": 3\n        },\n        \"payment_method\": \"cash\",\n        \"discount\": \"75.00\",\n        \"description\": \"SEED-ORDER-003\",\n        \"status\": \"pending\",\n        \"delivery_price\": \"280.00\",\n        \"subtotal_price\": \"665.00\",\n        \"total_price\": \"870.00\",\n        \"image\": null,\n        \"items\": [\n            {\n                \"id\": 23,\n                \"variant\": {\n                    \"id\": 26,\n                    \"price\": \"105.00\",\n                    \"sku\": \"SEED-09-2\",\n                    \"product\": {\n                        \"id\": 6,\n                        \"name\": \"Traditional Baguette\",\n                        \"description\": \"Seeded traditional baguette product.\",\n                        \"image\": null,\n                        \"discount\": \"0.00\",\n                        \"category\": {\n                            \"id\": 3,\n                            \"name\": \"Bakery\",\n                            \"type\": \"bakery\",\n                            \"description\": \"Bread and baked goods\",\n                            \"image\": null,\n                            \"classification_id\": 2\n                        }\n                    }\n                },\n                \"quantity\": 1,\n                \"unit_price\": \"105.00\"\n            },\n            {\n                \"id\": 24,\n                \"variant\": {\n                    \"id\": 27,\n                    \"price\": \"140.00\",\n                    \"sku\": \"SEED-10-1\",\n                    \"product\": {\n                        \"id\": 7,\n                        \"name\": \"Chocolate Croissant\",\n                        \"description\": \"Seeded chocolate croissant product.\",\n                        \"image\": null,\n                        \"discount\": \"0.00\",\n                        \"category\": {\n                            \"id\": 3,\n                            \"name\": \"Bakery\",\n                            \"type\": \"bakery\",\n                            \"description\": \"Bread and baked goods\",\n                            \"image\": null,\n                            \"classification_id\": 2\n                        }\n                    }\n                },\n                \"quantity\": 4,\n                \"unit_price\": \"140.00\"\n            }\n        ],\n        \"offers\": [\n            {\n                \"id\": 3,\n                \"offer_id\": 3,\n                \"title\": \"Morning Bakery Flash\",\n                \"description\": \"Seeded offer: Morning Bakery Flash.\",\n                \"image\": null,\n                \"type\": \"flash\",\n                \"discount\": \"12.00\",\n                \"discount_amount\": \"75.00\",\n                \"created_at\": \"2026-06-20T17:04:25.684583Z\"\n            }\n        ],\n        \"created_at\": \"2026-06-20T17:04:25.680038Z\",\n        \"updated_at\": \"2026-06-24T07:54:20.201145Z\"\n    },\n    {\n        \"id\": 1,\n        \"market\": {\n            \"id\": 1,\n            \"name\": \"Yalla Fresh Market\",\n            \"branch\": \"Algiers Centre\",\n            \"status\": \"active\",\n            \"classification_id\": 1\n        },\n        \"payment_method\": \"cash\",\n        \"discount\": \"120.00\",\n        \"description\": \"SEED-ORDER-001\",\n        \"status\": \"delivered\",\n        \"delivery_price\": \"250.00\",\n        \"subtotal_price\": \"1660.00\",\n        \"total_price\": \"1790.00\",\n        \"image\": null,\n        \"items\": [\n            {\n                \"id\": 19,\n                \"variant\": {\n                    \"id\": 2,\n                    \"price\": \"560.00\",\n                    \"sku\": \"SEED-01-2\",\n                    \"product\": {\n                        \"id\": 1,\n                        \"name\": \"Red Apples\",\n                        \"description\": \"Seeded red apples product.\",\n                        \"image\": null,\n                        \"discount\": \"0.00\",\n                        \"category\": {\n                            \"id\": 1,\n                            \"name\": \"Fresh Produce\",\n                            \"type\": \"produce\",\n                            \"description\": \"Fresh fruit and vegetables\",\n                            \"image\": null,\n                            \"classification_id\": 1\n                        }\n                    }\n                },\n                \"quantity\": 2,\n                \"unit_price\": \"560.00\"\n            },\n            {\n                \"id\": 20,\n                \"variant\": {\n                    \"id\": 5,\n                    \"price\": \"180.00\",\n                    \"sku\": \"SEED-03-1\",\n                    \"product\": {\n                        \"id\": 3,\n                        \"name\": \"Orange Juice\",\n                        \"description\": \"Seeded orange juice product.\",\n                        \"image\": null,\n                        \"discount\": \"0.00\",\n                        \"category\": {\n                            \"id\": 2,\n                            \"name\": \"Drinks\",\n                            \"type\": \"beverage\",\n                            \"description\": \"Cold and shelf-stable drinks\",\n                            \"image\": null,\n                            \"classification_id\": 1\n                        }\n                    }\n                },\n                \"quantity\": 3,\n                \"unit_price\": \"180.00\"\n            }\n        ],\n        \"offers\": [\n            {\n                \"id\": 1,\n                \"offer_id\": 1,\n                \"title\": \"Fresh Fruit Weekend\",\n                \"description\": \"Seeded offer: Fresh Fruit Weekend.\",\n                \"image\": null,\n                \"type\": \"discount\",\n                \"discount\": \"10.00\",\n                \"discount_amount\": \"120.00\",\n                \"created_at\": \"2026-06-20T17:04:25.671858Z\"\n            }\n        ],\n        \"created_at\": \"2026-06-20T17:04:25.664435Z\",\n        \"updated_at\": \"2026-06-24T07:54:20.182888Z\"\n    }\n]"
-            }
-          ]
-        },
-        {
           "name": "Home page",
           "request": {
             "auth": {
@@ -5016,6 +4919,88 @@
                   "body": "{\n    \"detail\": \"Account deleted.\"\n}"
                 }
               ]
+            }
+          ]
+        },
+        {
+          "name": "Dashboard Overview",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{local}}/api/v1/dashboard/overview/?from=2026-05-01&to=2026-05-22",
+              "host": [
+                "{{local}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dashboard",
+                "overview",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-05-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-05-22"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Dashboard Overview",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{local}}/api/v1/dashboard/overview/?from=2026-05-01&to=2026-05-22",
+                  "host": [
+                    "{{local}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "dashboard",
+                    "overview",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "from",
+                      "value": "2026-05-01"
+                    },
+                    {
+                      "key": "to",
+                      "value": "2026-05-22"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"range\": {\n    \"from\": \"2026-05-01\",\n    \"to\": \"2026-05-22\",\n    \"timezone\": \"UTC\"\n  },\n  \"currency\": \"EGP\",\n  \"revenue\": {\n    \"total\": \"46745.94\",\n    \"percentage\": 84.2\n  },\n  \"orders\": {\n    \"total\": 273,\n    \"completed\": 168,\n    \"incomplete\": 105,\n    \"completion_rate\": 61.5\n  },\n  \"customers\": {\n    \"new\": 129,\n    \"returning\": 42,\n    \"return_rate\": 24.6\n  },\n  \"top_products\": [\n    {\n      \"product_id\": 1,\n      \"name\": \"Red Apples\",\n      \"revenue\": \"1700.00\",\n      \"quantity_sold\": 4,\n      \"orders_count\": 4\n    }\n  ],\n  \"active_orders\": [\n    {\n      \"id\": 123,\n      \"number\": \"YM-20260521-000123\",\n      \"customer\": {\n        \"id\": 10,\n        \"name\": \"Donia\"\n      },\n      \"total\": \"379.00\",\n      \"status\": \"pending\",\n      \"created_at\": \"2026-05-21T12:30:00Z\"\n    }\n  ],\n  \"top_shops\": [\n    {\n      \"market_id\": 1,\n      \"name\": \"Yalla Market - Main\",\n      \"zone\": \"Algiers\",\n      \"orders_count\": 74,\n      \"average_items_per_order\": 3.28,\n      \"revenue\": \"18240.50\"\n    }\n  ]\n}"
             }
           ]
         }

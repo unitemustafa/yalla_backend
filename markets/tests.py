@@ -19,7 +19,7 @@ from catalog.models import (
     ProductVariant,
     VariantAttributeValue,
 )
-from locations.models import Address, DeliveryArea
+from locations.models import Address, DeliveryArea, ServiceCity
 from offers.models import Offer
 
 from .models import Market, MarketClassification
@@ -51,7 +51,14 @@ class HomeAPITests(APITestCase):
             longitude=Decimal("3.0419000"),
             is_default=True,
         )
+        self.service_city = ServiceCity.objects.create(
+            name="Algiers",
+            center_latitude=Decimal("36.7525000"),
+            center_longitude=Decimal("3.0419000"),
+            radius_km=Decimal("30.00"),
+        )
         self.local_area = DeliveryArea.objects.create(
+            service_city=self.service_city,
             name="Local",
             delivery_price=Decimal("250.00"),
             center_latitude=Decimal("36.7538000"),
@@ -59,6 +66,7 @@ class HomeAPITests(APITestCase):
             radius_km=Decimal("8.00"),
         )
         self.remote_area = DeliveryArea.objects.create(
+            service_city=self.service_city,
             name="Remote",
             delivery_price=Decimal("280.00"),
             center_latitude=Decimal("35.6969000"),
@@ -276,7 +284,7 @@ class HomeAPITests(APITestCase):
                 "name": " سوق جديد ",
                 "branch": " فرع أول ",
                 "status": Market.Status.ACTIVE,
-                "delivery_area_ids": [self.local_area.id],
+                "delivery_areas": [self.local_area.id],
             },
         )
 
@@ -301,7 +309,7 @@ class HomeAPITests(APITestCase):
                 "classification_id": updated_classification.id,
                 "name": "سوق محدث",
                 "status": Market.Status.INACTIVE,
-                "delivery_area_ids": [self.remote_area.id],
+                "delivery_areas": [self.remote_area.id],
             },
         )
         delete_response = self.client.delete(f"{HOME_BASE}/markets/{market_id}/")
@@ -311,6 +319,17 @@ class HomeAPITests(APITestCase):
         self.assertIn(market_id, [item["id"] for item in list_response.data])
         self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
         self.assertEqual(detail_response.data["name"], "سوق جديد")
+        listed_market = next(
+            item for item in list_response.data if item["id"] == market_id
+        )
+        self.assertEqual(
+            [area["id"] for area in listed_market["delivery_areas"]],
+            [self.local_area.id],
+        )
+        self.assertEqual(
+            [area["id"] for area in detail_response.data["delivery_areas"]],
+            [self.local_area.id],
+        )
         self.assertEqual(update_response.status_code, status.HTTP_200_OK)
         self.assertEqual(update_response.data["name"], "سوق محدث")
         self.assertEqual(update_response.data["status"], Market.Status.INACTIVE)
