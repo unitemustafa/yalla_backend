@@ -274,6 +274,21 @@ class AdminUserListCreateView(APIView):
         )
 
 
+class AdminRepresentativeListView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        representatives = (
+            User.objects.filter(
+                role=User.Role.REPRESENTATIVE,
+                deleted_at__isnull=True,
+            )
+            .select_related("courier_profile__delivery_area")
+            .order_by("-created_at", "-id")
+        )
+        return Response(AdminUserSerializer(representatives, many=True).data)
+
+
 class AdminUserDetailView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
 

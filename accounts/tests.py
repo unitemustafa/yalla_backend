@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.test import override_settings
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.exceptions import TokenError
@@ -364,6 +365,59 @@ class AuthenticationAPITests(APITestCase):
         self.assertFalse(
             CourierProfile.objects.filter(user_id=response.data["id"]).exists()
         )
+
+    def test_admin_can_list_only_non_deleted_representatives(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="representative_list_admin",
+            email="representative-list-admin@example.com",
+            phone="+213555000041",
+        )
+        representative = self.create_active_user(
+            role=User.Role.REPRESENTATIVE,
+            username="listed_representative",
+            email="listed-representative@example.com",
+            phone="+213555000042",
+        )
+        deleted_representative = self.create_active_user(
+            role=User.Role.REPRESENTATIVE,
+            username="deleted_representative",
+            email="deleted-representative@example.com",
+            phone="+213555000043",
+        )
+        deleted_representative.deleted_at = timezone.now()
+        deleted_representative.save(update_fields=["deleted_at"])
+        self.create_active_user(
+            role=User.Role.CLIENT,
+            username="unlisted_client",
+            email="unlisted-client@example.com",
+            phone="+213555000044",
+        )
+        refresh = RefreshToken.for_user(admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get(f"{AUTH_BASE}/representatives/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [int(item["id"]) for item in response.data],
+            [representative.id],
+        )
+        self.assertEqual(response.data[0]["role"], User.Role.REPRESENTATIVE)
+        self.assertIsNone(response.data[0]["courier_profile"])
+
+    def test_representative_list_requires_admin_role(self):
+        client = self.create_active_user(
+            username="representative_list_client",
+            email="representative-list-client@example.com",
+            phone="+213555000045",
+        )
+        refresh = RefreshToken.for_user(client)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get(f"{AUTH_BASE}/representatives/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_missing_fields_return_field_specific_required_messages(self):
         login_response = self.client.post(
