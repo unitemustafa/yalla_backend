@@ -229,7 +229,11 @@ class AdminProductSerializer(serializers.ModelSerializer):
     category = ProductCategoryDetailSerializer(read_only=True)
     attribute_values = AttributeValueSerializer(many=True, required=False)
     variants = ProductVariantSerializer(many=True, required=False)
-    additions = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    additions = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=ProductAddition.objects.all(),
+        required=False,
+    )
 
     class Meta:
         model = Product
@@ -301,19 +305,24 @@ class AdminProductSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         attribute_values = validated_data.pop("attribute_values", [])
         variants = validated_data.pop("variants", [])
+        additions = validated_data.pop("additions", [])
         product = Product.objects.create(**validated_data)
         self._replace_product_attribute_values(product, attribute_values)
         self._replace_variants(product, variants)
+        product.additions.set(additions)
         return product
 
     def update(self, instance, validated_data):
         attribute_values = validated_data.pop("attribute_values", None)
         variants = validated_data.pop("variants", None)
+        additions = validated_data.pop("additions", None)
         instance = super().update(instance, validated_data)
         if attribute_values is not None:
             self._replace_product_attribute_values(instance, attribute_values)
         if variants is not None:
             self._replace_variants(instance, variants)
+        if additions is not None:
+            instance.additions.set(additions)
         return instance
 
     def _replace_product_attribute_values(self, product, attribute_values):

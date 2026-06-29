@@ -4335,7 +4335,21 @@
                   "name": "Create Product",
                   "request": {
                     "method": "POST",
-                    "header": [],
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n    \"market_id\": 1,\n    \"category_id\": 1,\n    \"is_available\": true,\n    \"name\": \"Cheese Burger\",\n    \"description\": \"Burger with cheese\",\n    \"discount\": \"10.00\",\n    \"additions\": [1, 2],\n    \"attribute_values\": [\n        {\n            \"attribute_id\": 1,\n            \"option_id\": 1\n        }\n    ],\n    \"variants\": [\n        {\n            \"price\": \"500.00\",\n            \"sku\": \"BURGER-S\",\n            \"attribute_values\": [\n                {\n                    \"attribute_id\": 1,\n                    \"option_id\": 1\n                }\n            ]\n        }\n    ]\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
                     "url": {
                       "raw": "{{local}}/api/v1/catalog/products/",
                       "host": [

@@ -2,6 +2,7 @@ from django.db.models import ProtectedError
 
 from rest_framework import status
 from rest_framework.generics import get_object_or_404
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -9,6 +10,7 @@ from rest_framework.views import APIView
 from accounts.models import User
 
 from .models import (
+    AdditionClassification,
     CategoryAttribute,
     CategoryClassification,
     CategoryOption,
@@ -38,8 +40,14 @@ class IsAdminRole(BasePermission):
         )
 
 
-class AdditionClassificationCreateView(APIView):
+class AdditionClassificationListCreateView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        classifications = AdditionClassification.objects.order_by("name", "id")
+        return Response(
+            AdditionClassificationSerializer(classifications, many=True).data
+        )
 
     def post(self, request):
         serializer = AdditionClassificationSerializer(data=request.data)
@@ -311,6 +319,7 @@ class CategoryOptionDetailView(APIView):
 
 class ProductListCreateView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
         return (
@@ -347,6 +356,7 @@ class ProductListCreateView(APIView):
 
 class ProductDetailView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
         return (

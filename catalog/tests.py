@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -117,6 +118,19 @@ class AdditionClassificationAPITests(APITestCase):
         self.assertEqual(response.data["name"], "صلصات")
         self.assertTrue(
             AdditionClassification.objects.filter(name="صلصات").exists()
+        )
+
+    def test_admin_can_list_addition_classifications(self):
+        sauce = AdditionClassification.objects.create(name="صلصات")
+        extras = AdditionClassification.objects.create(name="إضافات")
+        self.authenticate(self.admin)
+
+        response = self.client.get(f"{CATALOG_BASE}/addition-classifications/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [item["id"] for item in response.data],
+            [extras.id, sauce.id],
         )
 
     def test_duplicate_addition_classification_name_is_rejected(self):
@@ -440,6 +454,15 @@ class AdditionClassificationAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_admin_can_create_read_update_and_delete_product(self):
+        addition_classification = AdditionClassification.objects.create(
+            name="إضافات الوجبات"
+        )
+        addition = ProductAddition.objects.create(
+            classification=addition_classification,
+            name_ar="جبن",
+            name_en="Cheese",
+            price="120.00",
+        )
         self.authenticate(self.admin)
 
         create_response = self.client.post(
@@ -451,6 +474,7 @@ class AdditionClassificationAPITests(APITestCase):
                 "name": " طبق جديد ",
                 "description": "طبق تجريبي",
                 "discount": "10.00",
+                "additions": [addition.id],
                 "attribute_values": [
                     {
                         "attribute_id": self.size_attribute.id,
@@ -482,6 +506,7 @@ class AdditionClassificationAPITests(APITestCase):
             self.small_option.id,
         )
         self.assertEqual(create_response.data["variants"][0]["sku"], "MEAL-S")
+        self.assertEqual(create_response.data["additions"], [addition.id])
         product_id = create_response.data["id"]
 
         self.assertTrue(
@@ -492,6 +517,7 @@ class AdditionClassificationAPITests(APITestCase):
             ).exists()
         )
         variant = ProductVariant.objects.get(product_id=product_id)
+        self.assertTrue(addition.products.filter(id=product_id).exists())
         self.assertTrue(
             VariantAttributeValue.objects.filter(
                 variant=variant,
@@ -507,6 +533,7 @@ class AdditionClassificationAPITests(APITestCase):
             {
                 "name": "طبق محدث",
                 "is_available": False,
+                "additions": [],
                 "attribute_values": [
                     {
                         "attribute_id": self.size_attribute.id,
@@ -548,11 +575,42 @@ class AdditionClassificationAPITests(APITestCase):
             self.large_option.id,
         )
         self.assertEqual(update_response.data["variants"][0]["sku"], "MEAL-L")
+        self.assertEqual(update_response.data["additions"], [])
         self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertEqual(
             deleted_detail_response.status_code,
             status.HTTP_404_NOT_FOUND,
         )
+
+    def test_admin_can_create_product_with_image(self):
+        self.authenticate(self.admin)
+        image = SimpleUploadedFile(
+            "meal.gif",
+            (
+                b"GIF87a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00"
+                b"\xff\xff\xff,\x00\x00\x00\x00\x01\x00\x01\x00"
+                b"\x00\x02\x02D\x01\x00;"
+            ),
+            content_type="image/gif",
+        )
+
+        response = self.client.post(
+            f"{CATALOG_BASE}/products/",
+            {
+                "market_id": self.market.id,
+                "category_id": self.category.id,
+                "name": "طبق بصورة",
+                "description": "طبق تجريبي",
+                "discount": "0.00",
+                "image": image,
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        product = Product.objects.get(id=response.data["id"])
+        self.assertTrue(product.image.name.startswith("products/"))
+        self.assertTrue(response.data["image"])
 
     def test_product_rejects_inconsistent_attribute_option(self):
         other_attribute = CategoryAttribute.objects.create(
