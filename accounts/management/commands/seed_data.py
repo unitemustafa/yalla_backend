@@ -20,7 +20,7 @@ from catalog.models import (
     ProductVariant,
     VariantAttributeValue,
 )
-from locations.models import Address, DeliveryArea
+from locations.models import Address, DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
 from offers.models import Offer
 from orders.models import Order, OrderItem, OrderOffer
@@ -37,21 +37,12 @@ class Command(BaseCommand):
         users = self._seed_users(now)
         self._seed_otps(users, now)
         areas = self._seed_locations(users)
-        CourierProfile.objects.update_or_create(
-            user=users["seed.courier@yalla.test"],
-            defaults={
-                "vehicle_type": "Motorcycle",
-                "plate_number": "YH-1004",
-                "delivery_area": next(iter(areas.values())),
-                "max_active_orders": 3,
-                "is_available": True,
-            },
-        )
+        self._seed_courier_profiles(users, areas)
         markets = self._seed_markets(areas)
         catalog = self._seed_catalog(markets)
         additions = self._seed_additions(catalog["products"])
         offers = self._seed_offers(markets, catalog["products"], now)
-        self._seed_orders(users, markets, catalog["variants"], offers)
+        self._seed_orders(users, markets, catalog["variants"], offers, now)
 
         self.stdout.write(
             self.style.SUCCESS(
@@ -63,7 +54,9 @@ class Command(BaseCommand):
             "Created/updated: "
             f"{len(users)} users, {len(areas)} delivery areas, "
             f"{len(markets)} markets, {len(catalog['products'])} products, "
-            f"{len(additions)} additions, {len(offers)} offers."
+            f"{sum(len(value) for value in catalog['variants'].values())} variants, "
+            f"{len(additions)} additions, {len(offers)} offers, "
+            f"{Order.objects.filter(description__startswith='SEED-ORDER-').count()} orders."
         )
 
     def _seed_users(self, now):
@@ -123,6 +116,50 @@ class Command(BaseCommand):
                 "is_superuser": False,
                 "is_active": False,
             },
+            {
+                "email": "seed.sara@yalla.test",
+                "username": "seed_sara",
+                "first_name": "سارة",
+                "last_name": "بوزيد",
+                "phone": "+213555100006",
+                "role": User.Role.CLIENT,
+                "is_staff": False,
+                "is_superuser": False,
+                "is_active": True,
+            },
+            {
+                "email": "seed.nadir@yalla.test",
+                "username": "seed_nadir",
+                "first_name": "نذير",
+                "last_name": "عيساوي",
+                "phone": "+213555100007",
+                "role": User.Role.CLIENT,
+                "is_staff": False,
+                "is_superuser": False,
+                "is_active": True,
+            },
+            {
+                "email": "seed.courier2@yalla.test",
+                "username": "seed_courier2",
+                "first_name": "مراد",
+                "last_name": "سائق",
+                "phone": "+213555100008",
+                "role": User.Role.REPRESENTATIVE,
+                "is_staff": False,
+                "is_superuser": False,
+                "is_active": True,
+            },
+            {
+                "email": "seed.courier3@yalla.test",
+                "username": "seed_courier3",
+                "first_name": "ليلى",
+                "last_name": "سائقة",
+                "phone": "+213555100009",
+                "role": User.Role.REPRESENTATIVE,
+                "is_staff": False,
+                "is_superuser": False,
+                "is_active": True,
+            },
         ]
         users = {}
         for definition in definitions:
@@ -173,16 +210,62 @@ class Command(BaseCommand):
             otp.save(update_fields=["used_at"])
 
     def _seed_locations(self, users):
+        city_definitions = [
+            ("الجزائر", "36.7538000", "3.0588000", "35.00"),
+            ("وهران", "35.6969000", "-0.6331000", "30.00"),
+            ("قسنطينة", "36.3650000", "6.6147000", "25.00"),
+            ("عنابة", "36.9000000", "7.7667000", "22.00"),
+        ]
+        cities = {}
+        for name, latitude, longitude, radius in city_definitions:
+            city, _ = ServiceCity.objects.update_or_create(
+                name=name,
+                defaults={
+                    "center_latitude": Decimal(latitude),
+                    "center_longitude": Decimal(longitude),
+                    "radius_km": Decimal(radius),
+                    "is_active": True,
+                },
+            )
+            cities[name] = city
+
         area_definitions = [
-            ("وسط الجزائر", "250.00", "36.7538000", "3.0588000", "8.00"),
-            ("باب الزوار", "300.00", "36.7167000", "3.1833000", "6.50"),
-            ("وسط وهران", "280.00", "35.6969000", "-0.6331000", "7.00"),
+            (
+                "وسط الجزائر",
+                "الجزائر",
+                "250.00",
+                "36.7538000",
+                "3.0588000",
+                "8.00",
+            ),
+            (
+                "باب الزوار",
+                "الجزائر",
+                "300.00",
+                "36.7167000",
+                "3.1833000",
+                "6.50",
+            ),
+            (
+                "وسط وهران",
+                "وهران",
+                "280.00",
+                "35.6969000",
+                "-0.6331000",
+                "7.00",
+            ),
+            ("بئر الجير", "وهران", "300.00", "35.7200000", "-0.5500000", "6.00"),
+            ("وسط قسنطينة", "قسنطينة", "270.00", "36.3650000", "6.6147000", "7.00"),
+            ("الخروب", "قسنطينة", "320.00", "36.2633000", "6.6936000", "6.00"),
+            ("وسط عنابة", "عنابة", "260.00", "36.9000000", "7.7667000", "7.00"),
+            ("البوني", "عنابة", "290.00", "36.8500000", "7.7300000", "6.00"),
         ]
         areas = {}
-        for name, price, latitude, longitude, radius in area_definitions:
+        for name, city_name, price, latitude, longitude, radius in area_definitions:
             area, _ = DeliveryArea.objects.update_or_create(
                 name=name,
                 defaults={
+                    "service_city": cities[city_name],
                     "delivery_price": Decimal(price),
                     "center_latitude": Decimal(latitude),
                     "center_longitude": Decimal(longitude),
@@ -214,6 +297,18 @@ class Command(BaseCommand):
                 "-0.6401000",
                 True,
             ),
+            (
+                users["seed.courier@yalla.test"],
+                "منطقة المندوب",
+                "36.7525000",
+                "3.0419000",
+                True,
+            ),
+            (users["seed.sara@yalla.test"], "المنزل", "36.3600000", "6.6100000", True),
+            (users["seed.sara@yalla.test"], "الجامعة", "36.3700000", "6.6200000", False),
+            (users["seed.nadir@yalla.test"], "المنزل", "36.8950000", "7.7600000", True),
+            (users["seed.courier2@yalla.test"], "منطقة المندوب", "35.7200000", "-0.5500000", True),
+            (users["seed.courier3@yalla.test"], "منطقة المندوب", "36.3650000", "6.6147000", True),
         ]
         for user, name, latitude, longitude, is_default in addresses:
             Address.objects.update_or_create(
@@ -227,9 +322,27 @@ class Command(BaseCommand):
             )
         return areas
 
+    def _seed_courier_profiles(self, users, areas):
+        definitions = [
+            ("seed.courier@yalla.test", "Motorcycle", "YH-1004", "وسط الجزائر", 3, True),
+            ("seed.courier2@yalla.test", "Scooter", "YH-1008", "بئر الجير", 4, True),
+            ("seed.courier3@yalla.test", "Car", "YH-1009", "وسط قسنطينة", 5, False),
+        ]
+        for email, vehicle, plate, area, maximum, available in definitions:
+            CourierProfile.objects.update_or_create(
+                user=users[email],
+                defaults={
+                    "vehicle_type": vehicle,
+                    "plate_number": plate,
+                    "delivery_area": areas[area],
+                    "max_active_orders": maximum,
+                    "is_available": available,
+                },
+            )
+
     def _seed_markets(self, areas):
         classifications = {}
-        for name in ("سوبرماركت", "مطعم", "مخبزة"):
+        for name in ("سوبرماركت", "مطعم", "مخبزة", "حلويات", "منتجات عضوية"):
             obj, _ = MarketClassification.objects.get_or_create(name=name)
             classifications[name] = obj
 
@@ -252,6 +365,11 @@ class Command(BaseCommand):
                 "مخبزة",
                 ["وسط وهران"],
             ),
+            ("متجر الواحة", "بئر الجير", "سوبرماركت", ["وسط وهران", "بئر الجير"]),
+            ("نكهة قسنطينة", "وسط قسنطينة", "مطعم", ["وسط قسنطينة", "الخروب"]),
+            ("حلويات الجسور", "الخروب", "حلويات", ["وسط قسنطينة", "الخروب"]),
+            ("خيرات عنابة", "وسط عنابة", "منتجات عضوية", ["وسط عنابة", "البوني"]),
+            ("مخبزة المرجان", "البوني", "مخبزة", ["وسط عنابة", "البوني"]),
         ]
         markets = {}
         for name, branch, classification, area_names in definitions:
@@ -270,12 +388,15 @@ class Command(BaseCommand):
     def _seed_catalog(self, markets):
         grocery, _ = CategoryClassification.objects.get_or_create(name="بقالة")
         food, _ = CategoryClassification.objects.get_or_create(name="أكل جاهز")
+        sweets, _ = CategoryClassification.objects.get_or_create(name="حلويات")
 
         category_definitions = [
             ("خضر وفواكه", grocery, "produce", "فواكه وخضر طازجة"),
             ("مشروبات", grocery, "beverage", "مشروبات باردة ومعلبة"),
             ("مخبوزات", food, "bakery", "خبز ومخبوزات يومية"),
             ("وجبات", food, "meal", "وجبات جاهزة للأكل"),
+            ("حلويات", sweets, "dessert", "حلويات تقليدية وعصرية"),
+            ("منتجات عضوية", grocery, "organic", "منتجات طبيعية وعضوية"),
         ]
         categories = {}
         for name, classification, category_type, description in category_definitions:
@@ -291,6 +412,8 @@ class Command(BaseCommand):
             "مشروبات": ("الحجم", ["330 مل", "1 لتر"]),
             "مخبوزات": ("العبوة", ["قطعة واحدة", "عبوة 4 قطع"]),
             "وجبات": ("الحصة", ["عادية", "عائلية"]),
+            "حلويات": ("العبوة", ["قطعتان", "علبة 6 قطع"]),
+            "منتجات عضوية": ("الوزن", ["250 غ", "500 غ"]),
         }
         attributes = {}
         options = {}
@@ -319,6 +442,16 @@ class Command(BaseCommand):
             ("دجاج مشوي", "مطبخ أطلس العائلي", "وجبات", "980.00"),
             ("خبز باغيت تقليدي", "مخبزة وهران الذهبية", "مخبوزات", "60.00"),
             ("كرواسون بالشوكولاتة", "مخبزة وهران الذهبية", "مخبوزات", "140.00"),
+            ("قهوة مطحونة", "متجر الواحة", "مشروبات", "450.00"),
+            ("تمر دقلة نور", "متجر الواحة", "خضر وفواكه", "600.00"),
+            ("شخشوخة قسنطينية", "نكهة قسنطينة", "وجبات", "900.00"),
+            ("طاجين الزيتون", "نكهة قسنطينة", "وجبات", "780.00"),
+            ("بقلاوة", "حلويات الجسور", "حلويات", "500.00"),
+            ("مقروط بالعسل", "حلويات الجسور", "حلويات", "420.00"),
+            ("عسل جبلي", "خيرات عنابة", "منتجات عضوية", "1200.00"),
+            ("زيت زيتون", "خيرات عنابة", "منتجات عضوية", "950.00"),
+            ("خبز كامل", "مخبزة المرجان", "مخبوزات", "90.00"),
+            ("بريوش", "مخبزة المرجان", "مخبوزات", "160.00"),
         ]
         products = {}
         variants = {}
@@ -395,6 +528,9 @@ class Command(BaseCommand):
                 "40.00",
                 ["كسكس بالدجاج", "شوربة خضار"],
             ),
+            ("مكسرات", "مكسرات", "إضافات", "120.00", ["بقلاوة", "مقروط بالعسل"]),
+            ("علبة فاخرة", "علبة فاخرة", "تغليف", "150.00", ["بقلاوة", "عسل جبلي"]),
+            ("عسل إضافي", "عسل إضافي", "صلصات", "90.00", ["بريوش", "مقروط بالعسل"]),
         ]
         additions = {}
         for english, arabic, classification, price, product_names in definitions:
@@ -448,6 +584,10 @@ class Command(BaseCommand):
                 "12.00",
                 ["خبز باغيت تقليدي", "كرواسون بالشوكولاتة"],
             ),
+            ("أطباق قسنطينة", "نكهة قسنطينة", Offer.OfferType.PACKAGE, "18.00", ["شخشوخة قسنطينية", "طاجين الزيتون"]),
+            ("حلويات الجسور", "حلويات الجسور", Offer.OfferType.DISCOUNT, "10.00", ["بقلاوة", "مقروط بالعسل"]),
+            ("أسبوع المنتجات العضوية", "خيرات عنابة", Offer.OfferType.ANNOUNCEMENT, "5.00", ["عسل جبلي", "زيت زيتون"]),
+            ("توصيل مخبزة المرجان", "مخبزة المرجان", Offer.OfferType.DELIVERY, "7.00", ["خبز كامل", "بريوش"]),
         ]
         offers = {}
         for title, market_name, offer_type, discount, product_names in definitions:
@@ -470,7 +610,7 @@ class Command(BaseCommand):
             offers[title] = offer
         return offers
 
-    def _seed_orders(self, users, markets, variants, offers):
+    def _seed_orders(self, users, markets, variants, offers, now):
         definitions = [
             {
                 "marker": "SEED-ORDER-001",
@@ -514,6 +654,50 @@ class Command(BaseCommand):
                 "offer": offers["عرض المخبزة الصباحي"],
                 "offer_discount": Decimal("75.00"),
             },
+            {
+                "marker": "SEED-ORDER-004",
+                "user": users["seed.sara@yalla.test"],
+                "market": markets["نكهة قسنطينة"],
+                "status": Order.Status.CONFIRMED,
+                "payment_method": "cash",
+                "delivery_price": Decimal("270.00"),
+                "items": [(variants["شخشوخة قسنطينية"][0], 1)],
+                "offer": offers["أطباق قسنطينة"],
+                "offer_discount": Decimal("100.00"),
+            },
+            {
+                "marker": "SEED-ORDER-005",
+                "user": users["seed.sara@yalla.test"],
+                "market": markets["حلويات الجسور"],
+                "status": Order.Status.READY,
+                "payment_method": "card",
+                "delivery_price": Decimal("320.00"),
+                "items": [(variants["بقلاوة"][1], 2), (variants["مقروط بالعسل"][0], 1)],
+                "offer": offers["حلويات الجسور"],
+                "offer_discount": Decimal("150.00"),
+            },
+            {
+                "marker": "SEED-ORDER-006",
+                "user": users["seed.nadir@yalla.test"],
+                "market": markets["خيرات عنابة"],
+                "status": Order.Status.CANCELLED,
+                "payment_method": "cash",
+                "delivery_price": Decimal("260.00"),
+                "items": [(variants["عسل جبلي"][0], 1)],
+                "offer": offers["أسبوع المنتجات العضوية"],
+                "offer_discount": Decimal("60.00"),
+            },
+            {
+                "marker": "SEED-ORDER-007",
+                "user": users["seed.nadir@yalla.test"],
+                "market": markets["مخبزة المرجان"],
+                "status": Order.Status.DELIVERED,
+                "payment_method": "card",
+                "delivery_price": Decimal("290.00"),
+                "items": [(variants["خبز كامل"][1], 2), (variants["بريوش"][0], 3)],
+                "offer": offers["توصيل مخبزة المرجان"],
+                "offer_discount": Decimal("80.00"),
+            },
         ]
 
         for definition in definitions:
@@ -538,6 +722,20 @@ class Command(BaseCommand):
                         is_default=True
                     ).first()
                     or definition["user"].addresses.order_by("-created_at").first(),
+                    "assigned_representative": self._representative_for_order(
+                        users, definition["status"]
+                    ),
+                    "assigned_at": (
+                        now - timedelta(hours=2)
+                        if definition["status"] not in (Order.Status.PENDING, Order.Status.CANCELLED)
+                        else None
+                    ),
+                    "delivered_at": (
+                        now - timedelta(minutes=30)
+                        if definition["status"] == Order.Status.DELIVERED
+                        else None
+                    ),
+                    "delivery_note": "بيانات تجريبية للتوصيل.",
                 },
             )
             order.items.all().delete()
@@ -553,3 +751,13 @@ class Command(BaseCommand):
                 offer=definition["offer"],
                 defaults={"discount_amount": discount},
             )
+
+    def _representative_for_order(self, users, status):
+        if status in (Order.Status.PENDING, Order.Status.CANCELLED):
+            return None
+        email = (
+            "seed.courier2@yalla.test"
+            if status in (Order.Status.READY, Order.Status.DELIVERED)
+            else "seed.courier@yalla.test"
+        )
+        return users[email]
