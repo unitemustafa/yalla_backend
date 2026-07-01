@@ -8,7 +8,9 @@ from rest_framework.views import APIView
 
 from .models import Order
 from .serializers import (
+    ClientOrderCreateSerializer,
     OrderAssignmentSerializer,
+    OrderPreviewSerializer,
     OrderSerializer,
     OrderStatusSerializer,
 )
@@ -66,6 +68,39 @@ class ClientOrderListView(generics.ListAPIView):
         if order_status:
             queryset = queryset.filter(status=order_status)
         return queryset
+
+
+class OrderPreviewView(APIView):
+    permission_classes = (IsAuthenticated, IsClientRole)
+
+    def post(self, request):
+        serializer = OrderPreviewSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.preview_data())
+
+
+class ClientOrderCreateView(APIView):
+    permission_classes = (IsAuthenticated, IsClientRole)
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = ClientOrderCreateSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        orders = serializer.create_orders()
+        return Response(
+            OrderSerializer(
+                orders,
+                many=True,
+                context={"request": request},
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
