@@ -24,6 +24,7 @@ from .serializers import (
     AdminCategoryAttributeSerializer,
     AdminCategoryOptionSerializer,
     CategoryClassificationSerializer,
+    LikedProductSerializer,
     ProductCategorySerializer,
     ProductAdditionSerializer,
 )
@@ -38,6 +39,34 @@ class IsAdminRole(BasePermission):
             and request.user.is_authenticated
             and request.user.role == User.Role.ADMIN
         )
+
+
+class IsClientRole(BasePermission):
+    message = "Only client users can like products."
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.role == User.Role.CLIENT
+        )
+
+
+def product_queryset():
+    return (
+        Product.objects.select_related(
+            "market__classification",
+            "category__classification",
+        )
+        .prefetch_related(
+            "category__attributes__options",
+            "attribute_values__attribute__options",
+            "attribute_values__option",
+            "variants__attribute_values__attribute__options",
+            "variants__attribute_values__option",
+            "additions",
+        )
+    )
 
 
 class AdditionClassificationListCreateView(APIView):
@@ -366,21 +395,7 @@ class ProductListCreateView(APIView):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
-        return (
-            Product.objects.select_related(
-                "market__classification",
-                "category__classification",
-            )
-            .prefetch_related(
-                "category__attributes__options",
-                "attribute_values__attribute__options",
-                "attribute_values__option",
-                "variants__attribute_values__attribute__options",
-                "variants__attribute_values__option",
-                "additions",
-            )
-            .order_by("name", "id")
-        )
+        return product_queryset().order_by("name", "id")
 
     def get(self, request):
         return Response(
@@ -403,20 +418,7 @@ class ProductDetailView(APIView):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
-        return (
-            Product.objects.select_related(
-                "market__classification",
-                "category__classification",
-            )
-            .prefetch_related(
-                "category__attributes__options",
-                "attribute_values__attribute__options",
-                "attribute_values__option",
-                "variants__attribute_values__attribute__options",
-                "variants__attribute_values__option",
-                "additions",
-            )
-        )
+        return product_queryset()
 
     def get_product(self, product_id):
         return get_object_or_404(self.get_queryset(), id=product_id)
@@ -449,6 +451,51 @@ class ProductDetailView(APIView):
         return Response(
             {"details": "Deleted Successfully"},
             status=status.HTTP_204_NO_CONTENT,
+        )
+
+
+class ProductLikeListView(APIView):
+    permission_classes = [IsAuthenticated, IsClientRole]
+
+    def get(self, request):
+        products = (
+            product_queryset()
+            .filter(liked_by=request.user)
+            .order_by("name", "id")
+        )
+        return Response(LikedProductSerializer(products, many=True).data)
+
+
+class ProductLikeToggleView(APIView):
+    permission_classes = [IsAuthenticated, IsClientRole]
+
+    def post(self, request, product_id):
+        product = get_object_or_404(Product, id=product_id)
+        if product.liked_by.filter(id=request.user.id).exists():
+            product.liked_by.remove(request.user)
+            liked = False
+        else:
+            product.liked_by.add(request.user)
+            liked = True
+        return Response(
+            {
+                "product_id": product.id,
+                "liked": liked,
+            }
+        )
+
+
+class ProductUnlikeView(APIView):
+    permission_classes = [IsAuthenticated, IsClientRole]
+
+    def delete(self, request, product_id):
+        product = get_object_or_404(Product, id=product_id)
+        product.liked_by.remove(request.user)
+        return Response(
+            {
+                "product_id": product.id,
+                "liked": False,
+            }
         )
 
 

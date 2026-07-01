@@ -311,6 +311,48 @@ class MarketClassificationWithProductsSerializer(
         ).data
 
 
+class MarketWithStoreProductsSerializer(HomeMarketSerializer):
+    product_count = serializers.IntegerField(read_only=True)
+    products = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Market
+        fields = (
+            "id",
+            "name",
+            "branch",
+            "status",
+            "classification_id",
+            "product_count",
+            "products",
+        )
+
+    def get_products(self, market):
+        products_by_market = self.context["products_by_market"]
+        products = products_by_market.get(market.id, [])
+        return MarketClassificationProductSerializer(
+            products,
+            many=True,
+            context=self.context,
+        ).data
+
+
+class StoreMarketClassificationSerializer(MarketClassificationCountSerializer):
+    markets = serializers.SerializerMethodField()
+
+    class Meta(MarketClassificationCountSerializer.Meta):
+        fields = MarketClassificationCountSerializer.Meta.fields + ("markets",)
+
+    def get_markets(self, classification):
+        markets_by_classification = self.context["markets_by_classification"]
+        markets = markets_by_classification.get(classification.id, [])
+        return MarketWithStoreProductsSerializer(
+            markets,
+            many=True,
+            context=self.context,
+        ).data
+
+
 class MarketWithCommonProductsSerializer(HomeMarketSerializer):
     products = serializers.SerializerMethodField()
 

@@ -7,7 +7,7 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
-from locations.models import DeliveryArea
+from locations.models import DeliveryArea, ServiceCity
 
 from .models import CourierProfile, OneTimePassword
 
@@ -30,7 +30,7 @@ class AuthenticationAPITests(APITestCase):
             "last_name": "Customer",
             "username": "yalla_customer",
             "email": self.email.upper(),
-            "phone": "+201055000001",
+            "phone": "+213555000001",
             "password": self.password,
             "password_confirm": self.password,
             "terms_accepted": True,
@@ -41,7 +41,7 @@ class AuthenticationAPITests(APITestCase):
         role=User.Role.CLIENT,
         username="customer",
         email=None,
-        phone="+201055000001",
+        phone="+213555000001",
     ):
         return User.objects.create_user(
             username=username,
@@ -91,7 +91,7 @@ class AuthenticationAPITests(APITestCase):
         User.objects.create_user(
             username="Yalla_Customer",
             email="existing@example.com",
-            phone="+201055000002",
+            phone="+213555000002",
             password=self.password,
         )
 
@@ -111,7 +111,7 @@ class AuthenticationAPITests(APITestCase):
         payload["first_name"] = "Ya lla"
         payload["username"] = "yalla customer"
         payload["email"] = "customer @example.com"
-        payload["phone"] = "+2010 55000001"
+        payload["phone"] = "+213 555000001"
         payload["password"] = "Strong Password123!"
 
         response = self.client.post(f"{AUTH_BASE}/signup", payload)
@@ -133,20 +133,6 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(
             response.data["password"],
             ["Spaces are not allowed in this field."],
-        )
-
-    def test_registration_rejects_non_egyptian_phone_numbers(self):
-        payload = self.registration_payload()
-        payload["phone"] = "+447890123456"
-
-        response = self.client.post(f"{AUTH_BASE}/signup", payload)
-
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            response.data["phone"],
-            [
-                "Enter a valid Egyptian mobile number starting with 01, 1, 201, or +201."
-            ],
         )
 
     def test_registration_enforces_password_complexity(self):
@@ -198,19 +184,19 @@ class AuthenticationAPITests(APITestCase):
             role=User.Role.CLIENT,
             username="client_user",
             email="client@example.com",
-            phone="+201055000011",
+            phone="+213555000011",
         )
         representative = self.create_active_user(
             role=User.Role.REPRESENTATIVE,
             username="representative_user",
             email="representative@example.com",
-            phone="+201055000012",
+            phone="+213555000012",
         )
         admin = self.create_active_user(
             role=User.Role.ADMIN,
             username="admin_user",
             email="admin@example.com",
-            phone="+201055000013",
+            phone="+213555000013",
         )
 
         client_response = self.client.post(
@@ -267,8 +253,14 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(response.data["detail"], "Only admin users can manage users.")
 
     def test_admin_can_create_read_update_and_delete_user(self):
-        
+        city = ServiceCity.objects.create(
+            name="Algiers",
+            center_latitude="30.0000000",
+            center_longitude="31.0000000",
+            radius_km="20.00",
+        )
         area = DeliveryArea.objects.create(
+            service_city=city,
             name="Central",
             delivery_price="20.00",
             center_latitude="30.0000000",
@@ -279,7 +271,7 @@ class AuthenticationAPITests(APITestCase):
             role=User.Role.ADMIN,
             username="admin_crud",
             email="admin-crud@example.com",
-            phone="+201055000021",
+            phone="+213555000021",
         )
         refresh = RefreshToken.for_user(admin)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
@@ -291,7 +283,7 @@ class AuthenticationAPITests(APITestCase):
                 "last_name": "User",
                 "username": "managed_user",
                 "email": "managed@example.com",
-                "phone": "+201055000022",
+                "phone": "+213555000022",
                 "password": self.password,
                 "role": User.Role.REPRESENTATIVE,
                 "is_active": True,
@@ -354,7 +346,7 @@ class AuthenticationAPITests(APITestCase):
             role=User.Role.ADMIN,
             username="profile_optional_admin",
             email="profile-optional-admin@example.com",
-            phone="+201055000031",
+            phone="+213555000031",
         )
         refresh = RefreshToken.for_user(admin)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
@@ -366,7 +358,7 @@ class AuthenticationAPITests(APITestCase):
                 "last_name": "Representative",
                 "username": "representative_without_profile",
                 "email": "representative-without-profile@example.com",
-                "phone": "+201055000032",
+                "phone": "+213555000032",
                 "password": self.password,
                 "role": User.Role.REPRESENTATIVE,
                 "is_active": True,
@@ -386,19 +378,19 @@ class AuthenticationAPITests(APITestCase):
             role=User.Role.ADMIN,
             username="representative_list_admin",
             email="representative-list-admin@example.com",
-            phone="+201055000041",
+            phone="+213555000041",
         )
         representative = self.create_active_user(
             role=User.Role.REPRESENTATIVE,
             username="listed_representative",
             email="listed-representative@example.com",
-            phone="+201055000042",
+            phone="+213555000042",
         )
         deleted_representative = self.create_active_user(
             role=User.Role.REPRESENTATIVE,
             username="deleted_representative",
             email="deleted-representative@example.com",
-            phone="+201055000043",
+            phone="+213555000043",
         )
         deleted_representative.deleted_at = timezone.now()
         deleted_representative.save(update_fields=["deleted_at"])
@@ -406,7 +398,7 @@ class AuthenticationAPITests(APITestCase):
             role=User.Role.CLIENT,
             username="unlisted_client",
             email="unlisted-client@example.com",
-            phone="+201055000044",
+            phone="+213555000044",
         )
         refresh = RefreshToken.for_user(admin)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
@@ -425,7 +417,7 @@ class AuthenticationAPITests(APITestCase):
         client = self.create_active_user(
             username="representative_list_client",
             email="representative-list-client@example.com",
-            phone="+201055000045",
+            phone="+213555000045",
         )
         refresh = RefreshToken.for_user(client)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
@@ -522,7 +514,7 @@ class AuthenticationAPITests(APITestCase):
                 "first_name": "Updated",
                 "last_name": "Customer",
                 "username": "updated_customer",
-                "phone": "+201055000009",
+                "phone": "+213555000009",
                 "gender": "male",
                 "birth_date": "1995-04-12",
                 "avatar_url": "https://example.com/avatar.png",
@@ -540,10 +532,60 @@ class AuthenticationAPITests(APITestCase):
         )
         self.assertIsNotNone(update_response.data["username_changed_at"])
         user.refresh_from_db()
-        self.assertEqual(user.phone, "+201055000009")
+        self.assertEqual(user.phone, "+213555000009")
         self.assertEqual(user.gender, "male")
         self.assertEqual(user.birth_date.isoformat(), "1995-04-12")
         self.assertIsNotNone(user.username_changed_at)
+
+    def test_client_can_update_profile_information(self):
+        user = self.create_active_user()
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {
+                "first_name": "Client",
+                "last_name": "Updated",
+                "username": "client_updated",
+                "email": "client-updated@example.com",
+                "phone": "+213555000088",
+                "gender": "female",
+                "birth_date": "1998-08-20",
+                "avatar_url": "https://example.com/client-avatar.png",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["first_name"], "Client")
+        self.assertEqual(response.data["last_name"], "Updated")
+        self.assertEqual(response.data["username"], "client_updated")
+        self.assertEqual(response.data["email"], "client-updated@example.com")
+        self.assertEqual(response.data["phone"], "+213555000088")
+        self.assertEqual(response.data["role"], User.Role.CLIENT)
+        self.assertIsNotNone(response.data["username_changed_at"])
+        user.refresh_from_db()
+        self.assertEqual(user.email, "client-updated@example.com")
+        self.assertEqual(user.phone, "+213555000088")
+
+    def test_client_profile_update_rejects_non_client_users(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="profile_update_admin",
+            email="profile-update-admin@example.com",
+            phone="+213555000089",
+        )
+        refresh = RefreshToken.for_user(admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"first_name": "Nope"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_me_delete_requires_password_and_deletes_account(self):
         user = self.create_active_user()
@@ -602,7 +644,7 @@ class AuthenticationAPITests(APITestCase):
 
         phone_response = self.client.get(
             f"{AUTH_BASE}/check-phone",
-            {"phone": "+201055000009"},
+            {"phone": "+213555000009"},
         )
         self.assertTrue(phone_response.data["available"])
         self.assertFalse(phone_response.data["registered"])

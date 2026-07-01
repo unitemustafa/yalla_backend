@@ -12,7 +12,10 @@ from .views import (
     ProductCategoryDetailView,
     ProductCategoryListCreateView,
     ProductDetailView,
+    ProductLikeListView,
+    ProductLikeToggleView,
     ProductListCreateView,
+    ProductUnlikeView,
     ProductAdditionDetailView,
     ProductAdditionListCreateView,
 )
@@ -77,6 +80,21 @@ urlpatterns = [
         "products/<int:product_id>/",
         ProductDetailView.as_view(),
         name="product-detail",
+    ),
+    path(
+        "products/likes/",
+        ProductLikeListView.as_view(),
+        name="product-like-list",
+    ),
+    path(
+        "products/<int:product_id>/like/",
+        ProductLikeToggleView.as_view(),
+        name="product-like-toggle",
+    ),
+    path(
+        "products/<int:product_id>/unlike/",
+        ProductUnlikeView.as_view(),
+        name="product-unlike",
     ),
     path(
         "product-additions/",
