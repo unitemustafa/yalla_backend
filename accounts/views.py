@@ -46,6 +46,17 @@ class IsAdminRole(BasePermission):
         )
 
 
+class IsClientRole(BasePermission):
+    message = "Only client users can update client information."
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.role == User.Role.CLIENT
+        )
+
+
 def token_payload(user):
     refresh = RefreshToken.for_user(user)
     access = str(refresh.access_token)
@@ -251,6 +262,29 @@ class MeView(APIView):
         )
         soft_delete_user(user)
         return Response({"detail": "Account deleted."}, status=status.HTTP_200_OK)
+
+
+class ClientProfileView(APIView):
+    permission_classes = [IsAuthenticated, IsClientRole]
+
+    def update(self, request):
+        serializer = UserUpdateSerializer(
+            request.user,
+            data=request.data,
+            partial=True,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        return Response(UserSerializer(user).data)
+
+    @transaction.atomic
+    def patch(self, request):
+        return self.update(request)
+
+    @transaction.atomic
+    def put(self, request):
+        return self.update(request)
 
 
 class AdminUserListCreateView(APIView):

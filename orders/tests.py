@@ -46,6 +46,13 @@ class OrderAPITests(APITestCase):
             password="Password1!",
             role=User.Role.REPRESENTATIVE,
         )
+        self.other_customer = User.objects.create_user(
+            username="order-other-customer",
+            email="order-other-customer@example.com",
+            phone="+213555700004",
+            password="Password1!",
+            role=User.Role.CLIENT,
+        )
         self.address = Address.objects.create(
             user=self.customer,
             name="Home",
@@ -174,3 +181,50 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], Order.Status.CANCELLED)
         self.assertTrue(Order.objects.filter(pk=order_id).exists())
+
+    def test_client_can_list_only_their_orders(self):
+        own_order_id = self.create_order().data["id"]
+        other_order = Order.objects.create(
+            user=self.other_customer,
+            market=self.market,
+            payment_method="cash_on_delivery",
+            status=Order.Status.PENDING,
+            delivery_price=Decimal("100.00"),
+            subtotal_price=Decimal("500.00"),
+            total_price=Decimal("600.00"),
+        )
+        token = RefreshToken.for_user(self.customer).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.get(f"{ORDERS_BASE}/my/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([item["id"] for item in response.data], [own_order_id])
+        self.assertNotIn(other_order.id, [item["id"] for item in response.data])
+
+    def test_client_order_list_supports_status_filter(self):
+        confirmed_order_id = self.create_order().data["id"]
+        Order.objects.create(
+            user=self.customer,
+            market=self.market,
+            payment_method="cash_on_delivery",
+            status=Order.Status.PENDING,
+            delivery_price=Decimal("100.00"),
+            subtotal_price=Decimal("500.00"),
+            total_price=Decimal("600.00"),
+        )
+        token = RefreshToken.for_user(self.customer).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.get(
+            f"{ORDERS_BASE}/my/",
+            {"status": Order.Status.CONFIRMED},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([item["id"] for item in response.data], [confirmed_order_id])
+
+    def test_non_client_cannot_list_client_orders(self):
+        response = self.client.get(f"{ORDERS_BASE}/my/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

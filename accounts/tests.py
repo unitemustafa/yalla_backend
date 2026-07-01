@@ -7,7 +7,7 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
-from locations.models import DeliveryArea
+from locations.models import DeliveryArea, ServiceCity
 
 from .models import CourierProfile, OneTimePassword
 
@@ -253,7 +253,14 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(response.data["detail"], "Only admin users can manage users.")
 
     def test_admin_can_create_read_update_and_delete_user(self):
+        city = ServiceCity.objects.create(
+            name="Algiers",
+            center_latitude="30.0000000",
+            center_longitude="31.0000000",
+            radius_km="20.00",
+        )
         area = DeliveryArea.objects.create(
+            service_city=city,
             name="Central",
             delivery_price="20.00",
             center_latitude="30.0000000",
@@ -529,6 +536,56 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(user.gender, "male")
         self.assertEqual(user.birth_date.isoformat(), "1995-04-12")
         self.assertIsNotNone(user.username_changed_at)
+
+    def test_client_can_update_profile_information(self):
+        user = self.create_active_user()
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {
+                "first_name": "Client",
+                "last_name": "Updated",
+                "username": "client_updated",
+                "email": "client-updated@example.com",
+                "phone": "+213555000088",
+                "gender": "female",
+                "birth_date": "1998-08-20",
+                "avatar_url": "https://example.com/client-avatar.png",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["first_name"], "Client")
+        self.assertEqual(response.data["last_name"], "Updated")
+        self.assertEqual(response.data["username"], "client_updated")
+        self.assertEqual(response.data["email"], "client-updated@example.com")
+        self.assertEqual(response.data["phone"], "+213555000088")
+        self.assertEqual(response.data["role"], User.Role.CLIENT)
+        self.assertIsNotNone(response.data["username_changed_at"])
+        user.refresh_from_db()
+        self.assertEqual(user.email, "client-updated@example.com")
+        self.assertEqual(user.phone, "+213555000088")
+
+    def test_client_profile_update_rejects_non_client_users(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="profile_update_admin",
+            email="profile-update-admin@example.com",
+            phone="+213555000089",
+        )
+        refresh = RefreshToken.for_user(admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"first_name": "Nope"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_me_delete_requires_password_and_deletes_account(self):
         user = self.create_active_user()

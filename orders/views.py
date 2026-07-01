@@ -23,6 +23,13 @@ class IsAdminRole(BasePermission):
         return request.user.is_authenticated and request.user.role == User.Role.ADMIN
 
 
+class IsClientRole(BasePermission):
+    message = "Only client users can access their orders."
+
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and request.user.role == User.Role.CLIENT
+
+
 def order_queryset():
     return (
         Order.objects.select_related(
@@ -47,6 +54,18 @@ class OrderListCreateView(generics.ListCreateAPIView):
     @transaction.atomic
     def perform_create(self, serializer):
         serializer.save()
+
+
+class ClientOrderListView(generics.ListAPIView):
+    permission_classes = (IsAuthenticated, IsClientRole)
+    serializer_class = OrderSerializer
+
+    def get_queryset(self):
+        queryset = order_queryset().filter(user=self.request.user)
+        order_status = self.request.query_params.get("status")
+        if order_status:
+            queryset = queryset.filter(status=order_status)
+        return queryset
 
 
 class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):

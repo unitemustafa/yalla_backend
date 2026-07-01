@@ -9,6 +9,7 @@ from .views import (
     CheckPhoneView,
     CheckUsernameView,
     ClientLoginView,
+    ClientProfileView,
     ForgotPasswordView,
     LoginView,
     LogoutView,
@@ -62,6 +63,12 @@ urlpatterns = [
     path("logout/", LogoutView.as_view(), name="logout-slash"),
     path("me", MeView.as_view(), name="me"),
     path("me/", MeView.as_view(), name="me-slash"),
+    path("client/profile", ClientProfileView.as_view(), name="client-profile"),
+    path(
+        "client/profile/",
+        ClientProfileView.as_view(),
+        name="client-profile-slash",
+    ),
     path("users", AdminUserListCreateView.as_view(), name="admin-users"),
     path("users/", AdminUserListCreateView.as_view(), name="admin-users-slash"),
     path(
