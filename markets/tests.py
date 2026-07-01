@@ -286,6 +286,7 @@ class HomeAPITests(APITestCase):
                 "status": Market.Status.ACTIVE,
                 "delivery_areas": [self.local_area.id],
             },
+            format="json",
         )
 
         self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
@@ -311,6 +312,7 @@ class HomeAPITests(APITestCase):
                 "status": Market.Status.INACTIVE,
                 "delivery_areas": [self.remote_area.id],
             },
+            format="json",
         )
         delete_response = self.client.delete(f"{HOME_BASE}/markets/{market_id}/")
         deleted_detail_response = self.client.get(f"{HOME_BASE}/markets/{market_id}/")
@@ -389,11 +391,25 @@ class HomeAPITests(APITestCase):
             quiet_classification,
             self.local_area,
         )
+        extra_busiest_markets = [
+            self._create_market(
+                f"Busiest Extra Market {index}",
+                busiest_classification,
+                self.local_area,
+            )
+            for index in range(6)
+        ]
         for index in range(6):
             self._create_product(
                 f"Busiest Product {index}",
                 busiest_market,
                 200 + index,
+            )
+        for index, market in enumerate(extra_busiest_markets):
+            self._create_product(
+                f"Busiest Extra Product {index}",
+                market,
+                250 + index,
             )
         for index in range(4):
             self._create_product(
@@ -414,15 +430,15 @@ class HomeAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(
             response.data.keys(),
-            {"common_categories", "market_classifications"},
+            {"common_market_classifications", "market_classifications"},
         )
-        self.assertEqual(len(response.data["common_categories"]), 4)
+        self.assertEqual(len(response.data["common_market_classifications"]), 4)
 
         common_by_name = {
             classification["name"]: classification["product_count"]
-            for classification in response.data["common_categories"]
+            for classification in response.data["common_market_classifications"]
         }
-        self.assertEqual(common_by_name["Busiest local"], 6)
+        self.assertEqual(common_by_name["Busiest local"], 12)
         self.assertEqual(common_by_name["Local restaurants"], 5)
         self.assertEqual(common_by_name["Local supermarkets"], 5)
         self.assertEqual(common_by_name["Medium local"], 4)
@@ -433,18 +449,25 @@ class HomeAPITests(APITestCase):
             classification["name"]: classification
             for classification in response.data["market_classifications"]
         }
-        self.assertEqual(all_by_name["Busiest local"]["product_count"], 6)
+        self.assertEqual(all_by_name["Busiest local"]["product_count"], 12)
         self.assertEqual(all_by_name["Local restaurants"]["product_count"], 5)
         self.assertEqual(all_by_name["Local supermarkets"]["product_count"], 5)
         self.assertEqual(all_by_name["Medium local"]["product_count"], 4)
         self.assertEqual(all_by_name["Quiet local"]["product_count"], 2)
-        self.assertEqual(all_by_name["Remote bakeries"]["product_count"], 1)
-        self.assertEqual(len(all_by_name["Busiest local"]["products"]), 3)
-        self.assertEqual(len(all_by_name["Quiet local"]["products"]), 2)
+        self.assertNotIn("Remote bakeries", all_by_name)
+        self.assertEqual(len(all_by_name["Busiest local"]["markets"]), 5)
+        self.assertEqual(len(all_by_name["Quiet local"]["markets"]), 1)
+        busiest_market_payload = all_by_name["Busiest local"]["markets"][0]
+        self.assertIn("product_count", busiest_market_payload)
+        self.assertIn("products", busiest_market_payload)
+        self.assertNotIn("delivery_areas", busiest_market_payload)
+        self.assertGreaterEqual(busiest_market_payload["product_count"], 1)
+        self.assertGreaterEqual(len(busiest_market_payload["products"]), 1)
         self.assertTrue(
             all(
                 "market" not in product and "variants" not in product
-                for product in all_by_name["Busiest local"]["products"]
+                for market in all_by_name["Busiest local"]["markets"]
+                for product in market["products"]
             )
         )
 
@@ -580,7 +603,7 @@ class HomeAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["count"], 21)
-        self.assertEqual(len(response.data["results"]), 10)
+        self.assertEqual(len(response.data["results"]), 4)
         self.assertIsNotNone(response.data["next"])
         self.assertTrue(
             all(
@@ -594,6 +617,161 @@ class HomeAPITests(APITestCase):
                 product["name"] != self.remote_product.name
                 for product in response.data["results"]
             )
+        )
+
+    def test_address_products_requires_client_role(self):
+        self.authenticate(self.admin)
+
+        response = self.client.get(f"{HOME_BASE}/products/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(
+            response.data["detail"],
+            "Only client users can access address products.",
+        )
+
+    def test_address_products_requires_user_address(self):
+        self.default_address.delete()
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/products/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "A user address is required before loading address products.",
+        )
+
+    def test_address_products_returns_user_address_products_paginated_by_four(self):
+        unavailable_product = self.local_products[0]
+        unavailable_product.is_available = False
+        unavailable_product.save(update_fields=["is_available"])
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/products/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 9)
+        self.assertEqual(len(response.data["results"]), 4)
+        self.assertIsNotNone(response.data["next"])
+        self.assertIsNone(response.data["previous"])
+        local_market_ids = {self.local_market.id, self.second_local_market.id}
+        self.assertTrue(
+            all(
+                product["market"]["id"] in local_market_ids
+                for product in response.data["results"]
+            )
+        )
+        self.assertNotIn(
+            self.remote_product.id,
+            {product["id"] for product in response.data["results"]},
+        )
+        self.assertNotIn(
+            unavailable_product.id,
+            {product["id"] for product in response.data["results"]},
+        )
+
+    def test_address_products_second_page_uses_page_size_four(self):
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/products/", {"page": 2})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 10)
+        self.assertEqual(len(response.data["results"]), 4)
+        self.assertIsNotNone(response.data["previous"])
+
+    def test_address_products_can_order_by_name(self):
+        self.authenticate()
+
+        response = self.client.get(
+            f"{HOME_BASE}/products/",
+            {"order_by_name": "true"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [product["name"] for product in response.data["results"]],
+            [
+                "Local Product 1",
+                "Local Product 10",
+                "Local Product 2",
+                "Local Product 3",
+            ],
+        )
+
+    def test_address_products_can_order_by_high_price(self):
+        self.authenticate()
+
+        response = self.client.get(
+            f"{HOME_BASE}/products/",
+            {"order_by_high_price": "true"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [product["name"] for product in response.data["results"]],
+            [
+                "Local Product 10",
+                "Local Product 9",
+                "Local Product 8",
+                "Local Product 7",
+            ],
+        )
+
+    def test_address_products_can_order_by_low_price(self):
+        self.authenticate()
+
+        response = self.client.get(
+            f"{HOME_BASE}/products/",
+            {"order_by_low_price": "true"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [product["name"] for product in response.data["results"]],
+            [
+                "Local Product 1",
+                "Local Product 2",
+                "Local Product 3",
+                "Local Product 4",
+            ],
+        )
+
+    def test_address_products_can_order_by_latest(self):
+        self.authenticate()
+
+        response = self.client.get(
+            f"{HOME_BASE}/products/",
+            {"order_by_latest": "true"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [product["name"] for product in response.data["results"]],
+            [
+                "Local Product 10",
+                "Local Product 9",
+                "Local Product 8",
+                "Local Product 7",
+            ],
+        )
+
+    def test_address_products_rejects_multiple_order_params(self):
+        self.authenticate()
+
+        response = self.client.get(
+            f"{HOME_BASE}/products/",
+            {
+                "order_by_name": "true",
+                "order_by_low_price": "true",
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "Use only one order parameter at a time.",
         )
 
     def test_product_detail_requires_authentication(self):

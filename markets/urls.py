@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AddressProductListView,
     AdminMarketClassificationDetailView,
     AdminMarketClassificationListCreateView,
     AdminMarketDetailView,
@@ -35,6 +36,7 @@ urlpatterns = [
         name="admin-market-detail",
     ),
     path("search/", ProductSearchView.as_view(), name="product-search"),
+    path("products/", AddressProductListView.as_view(), name="address-product-list"),
     path(
         "products/<int:product_id>/",
         ProductDetailView.as_view(),

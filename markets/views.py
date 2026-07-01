@@ -1,5 +1,5 @@
 from django.db.models import ProtectedError
-from django.db.models import Count, Prefetch, Q
+from django.db.models import Count, Max, Min, Prefetch, Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.generics import get_object_or_404
@@ -20,9 +20,9 @@ from .serializers import (
     HomeOfferSerializer,
     HomeProductSerializer,
     MarketClassificationCountSerializer,
-    MarketClassificationWithProductsSerializer,
     MarketWithCommonProductsSerializer,
     ProductDetailSerializer,
+    StoreMarketClassificationSerializer,
 )
 from .services import markets_covering_address
 
@@ -38,6 +38,17 @@ class IsAdminRole(BasePermission):
         )
 
 
+class IsClientRole(BasePermission):
+    message = "Only client users can access address products."
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.role == User.Role.CLIENT
+        )
+
+
 def get_user_home_address(user):
     return (
         user.addresses.filter(is_default=True).order_by("-created_at").first()
@@ -46,7 +57,11 @@ def get_user_home_address(user):
 
 
 class ProductSearchPagination(PageNumberPagination):
-    page_size = 10
+    page_size = 4
+
+
+class AddressProductPagination(PageNumberPagination):
+    page_size = 4
 
 
 class AdminMarketClassificationListCreateView(APIView):
@@ -165,10 +180,7 @@ class AdminMarketDetailView(APIView):
                 {"detail": "Cannot delete market while orders are using it."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return Response(
-            {"details": "Deleted Successfully"},
-            status=status.HTTP_200_OK,
-        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class HomeView(APIView):
@@ -295,48 +307,64 @@ class MarketClassificationSummaryView(APIView):
             .order_by("-product_count", "name")[:4]
         )
         all_classifications = (
-            MarketClassification.objects.annotate(
+            MarketClassification.objects.filter(markets__id__in=market_ids)
+            .annotate(
                 product_count=Count(
                     "markets__products",
-                    filter=Q(markets__status=Market.Status.ACTIVE),
+                    filter=Q(markets__id__in=market_ids),
                     distinct=True,
                 )
             )
             .distinct()
             .order_by("name")
         )
-        products_by_classification = {
+        markets_by_classification = {
             classification.id: list(
-                Product.objects.filter(
-                    market__classification=classification,
-                    market__status=Market.Status.ACTIVE,
+                Market.objects.filter(
+                    id__in=market_ids,
+                    classification=classification,
+                    status=Market.Status.ACTIVE,
                 )
-                .select_related(
-                    "category__classification",
-                    "market__classification",
-                )
-                .prefetch_related(
-                    Prefetch(
-                        "variants",
-                        queryset=ProductVariant.objects.order_by("price", "id"),
+                .annotate(
+                    product_count=Count(
+                        "products",
+                        distinct=True,
                     )
                 )
-                .order_by("-created_at", "-id")[:3]
+                .prefetch_related("delivery_areas")
+                .order_by("-product_count", "name", "id")[:5]
             )
             for classification in all_classifications
         }
+        market_ids_for_response = [
+            market.id
+            for markets in markets_by_classification.values()
+            for market in markets
+        ]
+        products_by_market = {
+            market_id: list(
+                Product.objects.filter(
+                    market_id=market_id,
+                    market__status=Market.Status.ACTIVE,
+                )
+                .select_related("category__classification")
+                .order_by("-created_at", "-id")
+            )
+            for market_id in market_ids_for_response
+        }
         serializer_context = {
             "request": request,
-            "products_by_classification": products_by_classification,
+            "markets_by_classification": markets_by_classification,
+            "products_by_market": products_by_market,
         }
 
         return Response(
             {
-                "common_categories": MarketClassificationCountSerializer(
+                "common_market_classifications": MarketClassificationCountSerializer(
                     common_classifications,
                     many=True,
                 ).data,
-                "market_classifications": MarketClassificationWithProductsSerializer(
+                "market_classifications": StoreMarketClassificationSerializer(
                     all_classifications,
                     many=True,
                     context=serializer_context,
@@ -451,6 +479,90 @@ class ProductSearchView(APIView):
             .distinct()
             .order_by("-created_at", "-id")
         )
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(products, request, view=self)
+        serializer = HomeProductSerializer(
+            page,
+            many=True,
+            context={"request": request},
+        )
+        return paginator.get_paginated_response(serializer.data)
+
+
+class AddressProductListView(APIView):
+    permission_classes = [IsAuthenticated, IsClientRole]
+    pagination_class = AddressProductPagination
+    sort_params = (
+        "order_by_name",
+        "order_by_high_price",
+        "order_by_low_price",
+        "order_by_latest",
+    )
+
+    def get_sort_param(self, request):
+        selected_params = [
+            param
+            for param in self.sort_params
+            if request.query_params.get(param, "").lower() in {"1", "true", "yes"}
+        ]
+        if len(selected_params) > 1:
+            return None, Response(
+                {"detail": "Use only one order parameter at a time."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return selected_params[0] if selected_params else "order_by_latest", None
+
+    def apply_ordering(self, products, sort_param):
+        products = products.annotate(
+            lowest_variant_price=Min("variants__price"),
+            highest_variant_price=Max("variants__price"),
+        )
+        ordering = {
+            "order_by_name": ("name", "id"),
+            "order_by_high_price": ("-highest_variant_price", "-created_at", "-id"),
+            "order_by_low_price": ("lowest_variant_price", "-created_at", "-id"),
+            "order_by_latest": ("-created_at", "-id"),
+        }
+        return products.order_by(*ordering[sort_param])
+
+    def get(self, request):
+        address = get_user_home_address(request.user)
+        if address is None:
+            return Response(
+                {
+                    "detail": (
+                        "A user address is required before loading address products."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        sort_param, error_response = self.get_sort_param(request)
+        if error_response is not None:
+            return error_response
+
+        market_ids = markets_covering_address(address)
+        products = (
+            Product.objects.filter(
+                market_id__in=market_ids,
+                market__status=Market.Status.ACTIVE,
+                is_available=True,
+            )
+            .select_related(
+                "category__classification",
+                "market__classification",
+            )
+            .prefetch_related(
+                "market__delivery_areas",
+                Prefetch(
+                    "variants",
+                    queryset=ProductVariant.objects.order_by("price", "id"),
+                ),
+            )
+            .distinct()
+        )
+        products = self.apply_ordering(products, sort_param)
+
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(products, request, view=self)
         serializer = HomeProductSerializer(
