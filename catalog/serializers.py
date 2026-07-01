@@ -349,6 +349,31 @@ class AdminProductSerializer(serializers.ModelSerializer):
             )
 
 
+class LikedProductSerializer(serializers.ModelSerializer):
+    class LikedProductVariantSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = ProductVariant
+            fields = ("id", "price", "sku")
+
+    market = MarketSummarySerializer(read_only=True)
+    category = ProductCategorySerializer(read_only=True)
+    variants = LikedProductVariantSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Product
+        fields = (
+            "id",
+            "market",
+            "category",
+            "is_available",
+            "name",
+            "description",
+            "image",
+            "discount",
+            "variants",
+        )
+
+
 class ProductAdditionSerializer(serializers.ModelSerializer):
     classification_id = serializers.PrimaryKeyRelatedField(
         queryset=AdditionClassification.objects.all(),

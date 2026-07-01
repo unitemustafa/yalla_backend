@@ -133,6 +133,87 @@ class AdditionClassificationAPITests(APITestCase):
             [extras.id, sauce.id],
         )
 
+    def test_client_can_toggle_product_like(self):
+        self.authenticate(self.client_user)
+
+        like_response = self.client.post(
+            f"{CATALOG_BASE}/products/{self.product.id}/like/"
+        )
+        self.product.refresh_from_db()
+        self.assertTrue(self.product.liked_by.filter(id=self.client_user.id).exists())
+
+        unlike_response = self.client.post(
+            f"{CATALOG_BASE}/products/{self.product.id}/like/"
+        )
+        self.product.refresh_from_db()
+
+        self.assertEqual(like_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            like_response.data,
+            {
+                "product_id": self.product.id,
+                "liked": True,
+            },
+        )
+        self.assertFalse(self.product.liked_by.filter(id=self.client_user.id).exists())
+        self.assertEqual(unlike_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(unlike_response.data["liked"], False)
+
+    def test_client_can_list_liked_products(self):
+        self.product.liked_by.add(self.client_user)
+        ProductVariant.objects.create(
+            product=self.product,
+            price=Decimal("450.00"),
+            sku="COUSCOUS-S",
+        )
+        self.authenticate(self.client_user)
+
+        response = self.client.get(f"{CATALOG_BASE}/products/likes/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([product["id"] for product in response.data], [self.product.id])
+        product = response.data[0]
+        self.assertIn("market", product)
+        self.assertIn("category", product)
+        self.assertIn("variants", product)
+        self.assertNotIn("attribute_values", product)
+        self.assertNotIn("additions", product)
+        self.assertNotIn("created_at", product)
+        self.assertNotIn("updated_at", product)
+        self.assertNotIn("attribute_values", product["variants"][0])
+
+    def test_product_like_requires_client_role(self):
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{CATALOG_BASE}/products/{self.product.id}/like/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_client_can_unlike_product(self):
+        self.product.liked_by.add(self.client_user)
+        self.authenticate(self.client_user)
+
+        response = self.client.delete(
+            f"{CATALOG_BASE}/products/{self.product.id}/unlike/"
+        )
+        second_response = self.client.delete(
+            f"{CATALOG_BASE}/products/{self.product.id}/unlike/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data,
+            {
+                "product_id": self.product.id,
+                "liked": False,
+            },
+        )
+        self.assertFalse(self.product.liked_by.filter(id=self.client_user.id).exists())
+        self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(second_response.data["liked"], False)
+
     def test_duplicate_addition_classification_name_is_rejected(self):
         AdditionClassification.objects.create(name="صلصات")
         self.authenticate(self.admin)

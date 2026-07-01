@@ -54,6 +54,11 @@ class Product(models.Model):
     description = models.TextField(blank=True)
     image = models.ImageField(upload_to="products/", blank=True, null=True)
     discount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    liked_by = models.ManyToManyField(
+        "accounts.User",
+        related_name="liked_products",
+        blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
