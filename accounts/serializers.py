@@ -33,23 +33,37 @@ def no_whitespace_validator(value):
 
 
 def phone_candidates(value):
-    digits = re.sub(r"\D", "", value or "")
-    if len(digits) < 10:
+    try:
+        normalized = normalize_egyptian_phone(value)
+    except serializers.ValidationError:
         return []
 
-    candidates = {(value or "").strip(), digits, f"+{digits}"}
-    if digits.startswith("0"):
-        candidates.add(f"+20{digits[1:]}")
-        candidates.add(f"20{digits[1:]}")
-    elif digits.startswith("20"):
-        candidates.add(f"+{digits}")
-        candidates.add(f"0{digits[2:]}")
-    elif len(digits) == 10 and digits.startswith("1"):
-        candidates.add(f"+20{digits}")
-        candidates.add(f"20{digits}")
-        candidates.add(f"0{digits}")
+    national = normalized[3:]
+    candidates = {
+        normalized,
+        normalized[1:],
+        national,
+        f"0{national}",
+    }
 
     return list(candidates)
+
+
+def normalize_egyptian_phone(value):
+    phone = (value or "").strip()
+    pattern = r"(?:01[0125]\d{8}|1[0125]\d{8}|201[0125]\d{8}|\+201[0125]\d{8})"
+    if not re.fullmatch(pattern, phone):
+        raise serializers.ValidationError(
+            "Enter a valid Egyptian mobile number starting with 01, 1, 201, or +201."
+        )
+
+    if phone.startswith("+20"):
+        return phone
+    if phone.startswith("20"):
+        return f"+{phone}"
+    if phone.startswith("0"):
+        return f"+20{phone[1:]}"
+    return f"+20{phone}"
 
 
 class RequiredFieldMessagesMixin:
@@ -198,7 +212,7 @@ class RegisterSerializer(
 
     def validate_phone(self, value):
         reject_whitespace(value)
-        phone = value.strip()
+        phone = normalize_egyptian_phone(value)
         user = User.objects.filter(
             phone__in=phone_candidates(phone),
             deleted_at__isnull=True,
@@ -382,7 +396,7 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
         return username
 
     def validate_phone(self, value):
-        phone = value.strip()
+        phone = normalize_egyptian_phone(value)
         user = self.context["request"].user
         if (
             User.objects.filter(
@@ -479,7 +493,7 @@ class AdminUserWriteSerializer(
 
     def validate_phone(self, value):
         reject_whitespace(value)
-        phone = value.strip()
+        phone = normalize_egyptian_phone(value)
         queryset = User.objects.filter(
             phone__in=phone_candidates(phone),
             deleted_at__isnull=True,
