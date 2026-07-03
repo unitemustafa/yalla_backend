@@ -45,6 +45,13 @@ class CourierProfile(models.Model):
         "locations.DeliveryArea",
         on_delete=models.PROTECT,
         related_name="courier_profiles",
+        blank=True,
+        null=True,
+    )
+    service_city = models.ForeignKey(
+        "locations.ServiceCity",
+        on_delete=models.PROTECT,
+        related_name="courier_profiles",
     )
     max_active_orders = models.PositiveSmallIntegerField(default=3)
     is_available = models.BooleanField(default=True)

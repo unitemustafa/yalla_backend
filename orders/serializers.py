@@ -5,13 +5,25 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from catalog.models import ProductVariant
-from locations.models import Address
+from locations.models import Address, ServiceCity
 from markets.models import Market
 from offers.models import Offer
 
 from .models import Order, OrderItem, OrderOffer
 
 User = get_user_model()
+
+
+class ServiceCitySummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ServiceCity
+        fields = ("id", "name", "delivery_price", "is_active")
+
+
+class MarketSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Market
+        fields = ("id", "name", "branch", "status")
 
 
 class OrderPreviewItemSerializer(serializers.Serializer):
@@ -35,6 +47,9 @@ class OrderPreviewOfferSerializer(serializers.Serializer):
 
 
 class OrderPreviewAddressSerializer(serializers.ModelSerializer):
+    service_city = ServiceCitySummarySerializer(read_only=True)
+    service_city_id = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = Address
         fields = (
@@ -42,12 +57,20 @@ class OrderPreviewAddressSerializer(serializers.ModelSerializer):
             "name",
             "latitude",
             "longitude",
+            "service_city",
+            "service_city_id",
             "is_default",
             "created_at",
         )
 
 
 class OrderPreviewSerializer(serializers.Serializer):
+    service_city_id = serializers.PrimaryKeyRelatedField(
+        queryset=ServiceCity.objects.filter(is_active=True),
+        source="service_city",
+        required=False,
+        write_only=True,
+    )
     items = OrderPreviewItemSerializer(many=True, required=False)
     offers = OrderPreviewOfferSerializer(many=True, required=False)
 
@@ -62,13 +85,28 @@ class OrderPreviewSerializer(serializers.Serializer):
                 {"items": "Choose at least one product variant or offer."}
             )
 
+        service_city = self._service_city_for_order(
+            address,
+            attrs.get("service_city"),
+        )
+        if service_city is None:
+            raise serializers.ValidationError(
+                {"service_city_id": "Service city is required."}
+            )
+        if not service_city.is_active:
+            raise serializers.ValidationError(
+                {"service_city_id": "Service city must be active."}
+            )
+
         attrs["user"] = user
         attrs["delivery_address"] = address
+        attrs["service_city"] = service_city
         return attrs
 
     def preview_data(self):
         user = self.validated_data["user"]
         address = self.validated_data.get("delivery_address")
+        service_city = self.validated_data["service_city"]
         items = self.validated_data.get("items", [])
         offers = self.validated_data.get("offers", [])
         market_groups = {}
@@ -134,14 +172,13 @@ class OrderPreviewSerializer(serializers.Serializer):
 
         for market_id in sorted(market_groups):
             group = market_groups[market_id]
-            delivery_area = (
-                self._delivery_area_for_address(group["market"], address)
-                if address is not None
-                else None
+            delivery_available = self._market_serves_city(
+                group["market"],
+                service_city,
             )
             delivery_price = (
-                delivery_area.delivery_price
-                if delivery_area is not None
+                service_city.delivery_price
+                if delivery_available
                 else Decimal("0.00")
             )
             market_total = (
@@ -160,15 +197,8 @@ class OrderPreviewSerializer(serializers.Serializer):
                         "name": group["market"].name,
                         "branch": group["market"].branch,
                     },
-                    "delivery_area": (
-                        {
-                            "id": delivery_area.id,
-                            "name": delivery_area.name,
-                        }
-                        if delivery_area is not None
-                        else None
-                    ),
-                    "delivery_available": delivery_area is not None,
+                    "service_city": ServiceCitySummarySerializer(service_city).data,
+                    "delivery_available": delivery_available,
                     "selected_products": group["selected_products"],
                     "selected_offers": group["selected_offers"],
                     "pricing": {
@@ -196,6 +226,7 @@ class OrderPreviewSerializer(serializers.Serializer):
                 if address is not None
                 else None
             ),
+            "service_city": ServiceCitySummarySerializer(service_city).data,
             "market_groups": market_groups_data,
             "summary": {
                 "subtotal": self._money(subtotal),
@@ -208,9 +239,20 @@ class OrderPreviewSerializer(serializers.Serializer):
     @staticmethod
     def _default_address(user):
         return (
-            user.addresses.filter(is_default=True).order_by("-created_at").first()
-            or user.addresses.order_by("-created_at").first()
+            user.addresses.select_related("service_city")
+            .filter(is_default=True)
+            .order_by("-created_at")
+            .first()
+            or user.addresses.select_related("service_city")
+            .order_by("-created_at")
+            .first()
         )
+
+    @staticmethod
+    def _service_city_for_order(address, request_service_city):
+        if address is not None and address.service_city_id:
+            return address.service_city
+        return request_service_city
 
     @staticmethod
     def _market_group(groups, market):
@@ -303,33 +345,11 @@ class OrderPreviewSerializer(serializers.Serializer):
         return f"{value:.2f}"
 
     @staticmethod
-    def _delivery_area_for_address(market, address):
-        from markets.services import _distance_km
-
-        latitude = float(address.latitude)
-        longitude = float(address.longitude)
-        matching_areas = [
-            area
-            for area in market.delivery_areas.filter(is_active=True).order_by("id")
-            if _distance_km(
-                latitude,
-                longitude,
-                float(area.center_latitude),
-                float(area.center_longitude),
-            )
-            <= float(area.radius_km)
-        ]
-        if not matching_areas:
-            return None
-        return min(
-            matching_areas,
-            key=lambda area: _distance_km(
-                latitude,
-                longitude,
-                float(area.center_latitude),
-                float(area.center_longitude),
-            ),
-        )
+    def _market_serves_city(market, service_city):
+        return market.service_cities.filter(
+            pk=service_city.pk,
+            is_active=True,
+        ).exists()
 
 
 class ClientOrderCreateSerializer(OrderPreviewSerializer):
@@ -347,19 +367,19 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
         order_groups = self._order_groups(
             attrs.get("items", []),
             attrs.get("offers", []),
-            attrs["delivery_address"],
+            attrs["service_city"],
         )
         unavailable_market_ids = [
             group["market"].id
             for group in order_groups.values()
-            if group["delivery_area"] is None
+            if not group["delivery_available"]
         ]
         if unavailable_market_ids:
             raise serializers.ValidationError(
                 {
-                    "address": (
-                        "Selected address is outside the delivery area for "
-                        f"markets: {unavailable_market_ids}."
+                    "service_city_id": (
+                        "Selected service city is not served by markets: "
+                        f"{unavailable_market_ids}."
                     )
                 }
             )
@@ -369,6 +389,7 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
     def create_orders(self):
         user = self.validated_data["user"]
         address = self.validated_data["delivery_address"]
+        service_city = self.validated_data["service_city"]
         payment_method = self.validated_data["payment_method"].strip()
         description = self.validated_data.get("description", "").strip()
         delivery_note = self.validated_data.get("delivery_note", "").strip()
@@ -379,8 +400,11 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
             order = Order.objects.create(
                 user=user,
                 delivery_address=address,
+                service_city=service_city,
                 market=group["market"],
                 payment_method=payment_method,
+                status=Order.Status.PENDING,
+                review_status=Order.ReviewStatus.PENDING_REVIEW,
                 discount=group["total_offer_discounts"],
                 description=description,
                 delivery_price=group["delivery_price"],
@@ -400,10 +424,13 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
                 OrderOffer(order=order, **item)
                 for item in group["offers"]
             )
+            from notifications.services import create_new_order_review_notification
+
+            create_new_order_review_notification(order)
             orders.append(order)
         return orders
 
-    def _order_groups(self, items, offers, address):
+    def _order_groups(self, items, offers, service_city):
         groups = {}
         selected_lines_by_product = {}
 
@@ -412,7 +439,7 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
             product = variant.product
             quantity = item["quantity"]
             subtotal = variant.price * quantity
-            group = self._create_group(groups, product.market, address)
+            group = self._create_group(groups, product.market, service_city)
             group["items"].append(
                 {
                     "variant": variant,
@@ -431,7 +458,7 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
 
         for item in offers:
             offer = item["offer"]
-            group = self._create_group(groups, offer.market, address)
+            group = self._create_group(groups, offer.market, service_city)
             offer_products_subtotal = Decimal("0.00")
             for product in offer.products.all():
                 selected_lines = selected_lines_by_product.get(product.id, [])
@@ -468,15 +495,15 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
 
         return groups
 
-    def _create_group(self, groups, market, address):
+    def _create_group(self, groups, market, service_city):
         if market.id not in groups:
-            delivery_area = self._delivery_area_for_address(market, address)
+            delivery_available = self._market_serves_city(market, service_city)
             groups[market.id] = {
                 "market": market,
-                "delivery_area": delivery_area,
+                "delivery_available": delivery_available,
                 "delivery_price": (
-                    delivery_area.delivery_price
-                    if delivery_area is not None
+                    service_city.delivery_price
+                    if delivery_available
                     else Decimal("0.00")
                 ),
                 "items": [],
@@ -511,13 +538,22 @@ class OrderOfferSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "created_at")
 
 
+def user_summary(user):
+    full_name = user.get_full_name().strip()
+    return {
+        "id": user.id,
+        "name": full_name or user.username,
+        "phone": user.phone,
+    }
+
+
 class OrderSerializer(serializers.ModelSerializer):
     user_id = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(role=User.Role.CLIENT),
         source="user",
     )
     delivery_address_id = serializers.PrimaryKeyRelatedField(
-        queryset=Address.objects.all(),
+        queryset=Address.objects.select_related("service_city").all(),
         source="delivery_address",
         required=False,
         allow_null=True,
@@ -533,9 +569,18 @@ class OrderSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     market_id = serializers.PrimaryKeyRelatedField(
-        queryset=Market.objects.all(),
+        queryset=Market.objects.prefetch_related("service_cities").all(),
         source="market",
     )
+    service_city_id = serializers.PrimaryKeyRelatedField(
+        queryset=ServiceCity.objects.filter(is_active=True),
+        source="service_city",
+        required=False,
+    )
+    customer = serializers.SerializerMethodField()
+    market = MarketSummarySerializer(read_only=True)
+    service_city = ServiceCitySummarySerializer(read_only=True)
+    delivery_address = serializers.SerializerMethodField()
     items = OrderItemSerializer(many=True, required=False)
     offers = OrderOfferSerializer(
         source="order_offers",
@@ -548,13 +593,19 @@ class OrderSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "user_id",
+            "customer",
             "delivery_address_id",
+            "delivery_address",
             "assigned_representative_id",
             "market_id",
+            "market",
+            "service_city_id",
+            "service_city",
             "payment_method",
             "discount",
             "description",
             "status",
+            "review_status",
             "delivery_price",
             "subtotal_price",
             "total_price",
@@ -563,12 +614,47 @@ class OrderSerializer(serializers.ModelSerializer):
             "delivered_at",
             "delivery_note",
             "delivery_proof",
+            "approved_by",
+            "approved_at",
+            "rejected_by",
+            "rejected_at",
+            "rejection_reason",
             "items",
             "offers",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "review_status",
+            "approved_by",
+            "approved_at",
+            "rejected_by",
+            "rejected_at",
+            "rejection_reason",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_customer(self, instance):
+        return user_summary(instance.user)
+
+    def get_delivery_address(self, instance):
+        address = instance.delivery_address
+        if address is None:
+            return None
+        return {
+            "id": address.id,
+            "name": address.name,
+            "details": address.details,
+            "latitude": address.latitude,
+            "longitude": address.longitude,
+            "service_city": (
+                ServiceCitySummarySerializer(address.service_city).data
+                if address.service_city_id
+                else None
+            ),
+        }
 
     def validate(self, attrs):
         user = attrs.get("user", getattr(self.instance, "user", None))
@@ -577,6 +663,10 @@ class OrderSerializer(serializers.ModelSerializer):
             getattr(self.instance, "delivery_address", None),
         )
         market = attrs.get("market", getattr(self.instance, "market", None))
+        service_city = attrs.get(
+            "service_city",
+            getattr(self.instance, "service_city", None),
+        )
         representative = attrs.get(
             "assigned_representative",
             getattr(self.instance, "assigned_representative", None),
@@ -587,6 +677,25 @@ class OrderSerializer(serializers.ModelSerializer):
         if address and user and address.user_id != user.id:
             raise serializers.ValidationError(
                 {"delivery_address_id": "Address does not belong to the order user."}
+            )
+        if service_city is None and address is not None and address.service_city_id:
+            service_city = address.service_city
+            attrs["service_city"] = service_city
+        if service_city is None and market is not None:
+            service_city = market.service_cities.filter(is_active=True).first()
+            if service_city is not None:
+                attrs["service_city"] = service_city
+        if service_city is None:
+            raise serializers.ValidationError(
+                {"service_city_id": "Service city is required."}
+            )
+        if not service_city.is_active:
+            raise serializers.ValidationError(
+                {"service_city_id": "Service city must be active."}
+            )
+        if market and not market.service_cities.filter(pk=service_city.pk).exists():
+            raise serializers.ValidationError(
+                {"service_city_id": "Market does not serve this service city."}
             )
         if items is not None and market:
             if any(item["variant"].product.market_id != market.id for item in items):
@@ -600,6 +709,31 @@ class OrderSerializer(serializers.ModelSerializer):
                 )
         if "assigned_representative" in attrs:
             if representative:
+                review_status = attrs.get(
+                    "review_status",
+                    getattr(
+                        self.instance,
+                        "review_status",
+                        Order.ReviewStatus.PENDING_REVIEW,
+                    ),
+                )
+                if review_status != Order.ReviewStatus.APPROVED:
+                    raise serializers.ValidationError(
+                        {"assigned_representative_id": "Order must be approved before assignment."}
+                    )
+                profile = getattr(representative, "courier_profile", None)
+                if profile is None:
+                    raise serializers.ValidationError(
+                        {"assigned_representative_id": "Representative must have a courier profile."}
+                    )
+                if profile.service_city_id != service_city.id:
+                    raise serializers.ValidationError(
+                        {
+                            "assigned_representative_id": (
+                                "هذا المندوب لا يعمل في نفس مدينة الطلب."
+                            )
+                        }
+                    )
                 attrs["status"] = Order.Status.READY
                 if not attrs.get("assigned_at"):
                     attrs["assigned_at"] = timezone.now()
@@ -654,5 +788,151 @@ class OrderAssignmentSerializer(serializers.Serializer):
             deleted_at__isnull=True,
         ),
         source="representative",
-        allow_null=True,
+    )
+
+
+class RepresentativeSummarySerializer(serializers.ModelSerializer):
+    representative_id = serializers.IntegerField(source="id", read_only=True)
+    user_id = serializers.IntegerField(source="id", read_only=True)
+    name = serializers.SerializerMethodField()
+    service_city_id = serializers.IntegerField(
+        source="courier_profile.service_city_id",
+        read_only=True,
+    )
+    service_city = serializers.CharField(
+        source="courier_profile.service_city.name",
+        read_only=True,
+    )
+
+    class Meta:
+        model = User
+        fields = (
+            "representative_id",
+            "user_id",
+            "name",
+            "phone",
+            "service_city_id",
+            "service_city",
+        )
+
+    def get_name(self, instance):
+        return user_summary(instance)["name"]
+
+
+class OrderReviewActionSerializer(serializers.Serializer):
+    rejection_reason = serializers.CharField(required=False, allow_blank=True)
+
+
+class CourierOrderItemSerializer(serializers.ModelSerializer):
+    product = serializers.SerializerMethodField()
+    variant = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrderItem
+        fields = ("id", "quantity", "unit_price", "product", "variant")
+
+    def get_product(self, instance):
+        product = instance.variant.product
+        return {
+            "id": product.id,
+            "name": product.name,
+            "description": product.description,
+            "image": self._image_url(product.image),
+        }
+
+    def get_variant(self, instance):
+        variant = instance.variant
+        return {
+            "id": variant.id,
+            "sku": variant.sku,
+            "price": variant.price,
+        }
+
+    def _image_url(self, image):
+        if not image:
+            return None
+        request = self.context.get("request")
+        return request.build_absolute_uri(image.url) if request else image.url
+
+
+class CourierOrderOfferSerializer(serializers.ModelSerializer):
+    offer = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrderOffer
+        fields = ("id", "offer", "discount_amount", "created_at")
+
+    def get_offer(self, instance):
+        offer = instance.offer
+        return {
+            "id": offer.id,
+            "title": offer.title,
+            "description": offer.description,
+            "type": offer.type,
+            "discount": offer.discount,
+        }
+
+
+class CourierOrderListSerializer(serializers.ModelSerializer):
+    service_city = ServiceCitySummarySerializer(read_only=True)
+    market = MarketSummarySerializer(read_only=True)
+    customer = serializers.SerializerMethodField()
+    delivery_address = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = (
+            "id",
+            "status",
+            "service_city",
+            "market",
+            "customer",
+            "delivery_address",
+            "total_price",
+            "delivery_price",
+            "created_at",
+            "assigned_at",
+        )
+
+    def get_customer(self, instance):
+        return user_summary(instance.user)
+
+    def get_delivery_address(self, instance):
+        if instance.delivery_address is None:
+            return None
+        return {
+            "id": instance.delivery_address.id,
+            "name": instance.delivery_address.name,
+            "details": instance.delivery_address.details,
+        }
+
+
+class CourierOrderDetailSerializer(CourierOrderListSerializer):
+    items = CourierOrderItemSerializer(many=True, read_only=True)
+    offers = CourierOrderOfferSerializer(
+        source="order_offers",
+        many=True,
+        read_only=True,
+    )
+
+    class Meta(CourierOrderListSerializer.Meta):
+        fields = CourierOrderListSerializer.Meta.fields + (
+            "items",
+            "offers",
+            "subtotal_price",
+            "discount",
+            "delivery_note",
+            "delivery_proof",
+            "delivered_at",
+        )
+
+
+class CourierOrderStatusSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(
+        choices=(
+            (Order.Status.PICKED_UP, Order.Status.PICKED_UP.label),
+            (Order.Status.ON_THE_WAY, Order.Status.ON_THE_WAY.label),
+            (Order.Status.DELIVERED, Order.Status.DELIVERED.label),
+            (Order.Status.FAILED_DELIVERY, Order.Status.FAILED_DELIVERY.label),
+        )
     )

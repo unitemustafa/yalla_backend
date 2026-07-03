@@ -8,7 +8,7 @@ from catalog.models import (
     ProductVariant,
     VariantAttributeValue,
 )
-from locations.models import DeliveryArea
+from locations.models import DeliveryArea, ServiceCity
 from offers.models import Offer
 
 from .models import Market, MarketClassification
@@ -48,13 +48,30 @@ class DeliveryAreaSummarySerializer(serializers.ModelSerializer):
         )
 
 
+class ServiceCitySummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ServiceCity
+        fields = (
+            "id",
+            "name",
+            "delivery_price",
+            "is_active",
+        )
+
+
 class DeliveryAreaRelatedField(serializers.PrimaryKeyRelatedField):
     def to_representation(self, value):
         return DeliveryAreaSummarySerializer(value).data
 
 
+class ServiceCityRelatedField(serializers.PrimaryKeyRelatedField):
+    def to_representation(self, value):
+        return ServiceCitySummarySerializer(value).data
+
+
 class HomeMarketSerializer(serializers.ModelSerializer):
     classification_id = serializers.IntegerField(read_only=True)
+    service_cities = ServiceCitySummarySerializer(many=True, read_only=True)
     delivery_areas = DeliveryAreaSummarySerializer(many=True, read_only=True)
 
     class Meta:
@@ -65,6 +82,7 @@ class HomeMarketSerializer(serializers.ModelSerializer):
             "branch",
             "status",
             "classification_id",
+            "service_cities",
             "delivery_areas",
         )
 
@@ -81,7 +99,7 @@ class HomeMarketClassificationSerializer(serializers.ModelSerializer):
         markets = classification.markets.filter(
             id__in=eligible_market_ids,
             status=Market.Status.ACTIVE,
-        ).prefetch_related("delivery_areas").order_by("name")
+        ).prefetch_related("service_cities", "delivery_areas").order_by("name")
         return HomeMarketSerializer(markets, many=True).data
 
 
@@ -99,6 +117,18 @@ class AdminMarketSerializer(serializers.ModelSerializer):
         required=False,
         write_only=True,
     )
+    service_city_ids = serializers.PrimaryKeyRelatedField(
+        queryset=ServiceCity.objects.filter(is_active=True),
+        source="service_cities",
+        many=True,
+        required=False,
+        write_only=True,
+    )
+    service_cities = ServiceCityRelatedField(
+        queryset=ServiceCity.objects.filter(is_active=True),
+        many=True,
+        required=False,
+    )
     delivery_areas = DeliveryAreaRelatedField(
         queryset=DeliveryArea.objects.all(),
         many=True,
@@ -114,6 +144,8 @@ class AdminMarketSerializer(serializers.ModelSerializer):
             "name",
             "branch",
             "status",
+            "service_cities",
+            "service_city_ids",
             "delivery_areas",
             "delivery_area_ids",
             "created_at",
@@ -127,10 +159,7 @@ class AdminMarketSerializer(serializers.ModelSerializer):
         return value.strip()
 
     def validate(self, attrs):
-        if (
-            "delivery_areas" in self.initial_data
-            and "delivery_area_ids" in self.initial_data
-        ):
+        if "delivery_areas" in self.initial_data and "delivery_area_ids" in self.initial_data:
             raise serializers.ValidationError(
                 {
                     "delivery_areas": (
@@ -138,17 +167,56 @@ class AdminMarketSerializer(serializers.ModelSerializer):
                     )
                 }
             )
+        if "service_cities" in self.initial_data and "service_city_ids" in self.initial_data:
+            raise serializers.ValidationError(
+                {
+                    "service_cities": (
+                        "Use either service_cities or service_city_ids, not both."
+                    )
+                }
+            )
+
+        service_cities = attrs.get("service_cities")
+        delivery_areas = attrs.get("delivery_areas")
+        if service_cities is None and delivery_areas is not None:
+            service_cities = list(
+                ServiceCity.objects.filter(
+                    delivery_areas__in=delivery_areas,
+                    is_active=True,
+                ).distinct()
+            )
+            attrs["service_cities"] = service_cities
+
+        existing_count = (
+            self.instance.service_cities.count()
+            if self.instance is not None and service_cities is None
+            else 0
+        )
+        if service_cities is not None:
+            if not service_cities:
+                raise serializers.ValidationError(
+                    {"service_city_ids": "At least one service city is required."}
+                )
+        elif self.instance is None or existing_count == 0:
+            raise serializers.ValidationError(
+                {"service_city_ids": "At least one service city is required."}
+            )
         return attrs
 
     def create(self, validated_data):
         delivery_areas = validated_data.pop("delivery_areas", [])
+        service_cities = validated_data.pop("service_cities", [])
         market = Market.objects.create(**validated_data)
+        market.service_cities.set(service_cities)
         market.delivery_areas.set(delivery_areas)
         return market
 
     def update(self, instance, validated_data):
         delivery_areas = validated_data.pop("delivery_areas", None)
+        service_cities = validated_data.pop("service_cities", None)
         instance = super().update(instance, validated_data)
+        if service_cities is not None:
+            instance.service_cities.set(service_cities)
         if delivery_areas is not None:
             instance.delivery_areas.set(delivery_areas)
         return instance

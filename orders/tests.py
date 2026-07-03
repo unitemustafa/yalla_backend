@@ -7,6 +7,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from accounts.models import CourierProfile
 from catalog.models import (
     CategoryClassification,
     Product,
@@ -16,6 +17,7 @@ from catalog.models import (
 from locations.models import Address, DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
 from offers.models import Offer
+from notifications.models import Notification
 
 from .models import Order, OrderItem, OrderOffer
 
@@ -59,19 +61,29 @@ class OrderAPITests(APITestCase):
             latitude=Decimal("36.7525000"),
             longitude=Decimal("3.0420000"),
         )
-        service_city = ServiceCity.objects.create(
+        self.service_city = ServiceCity.objects.create(
             name="Algiers",
             center_latitude=Decimal("36.7525000"),
             center_longitude=Decimal("3.0420000"),
             radius_km=Decimal("20.00"),
+            delivery_price=Decimal("120.00"),
         )
+        self.address.service_city = self.service_city
+        self.address.save(update_fields=["service_city"])
         self.delivery_area = DeliveryArea.objects.create(
-            service_city=service_city,
+            service_city=self.service_city,
             name="Central Algiers",
             center_latitude=Decimal("36.7525000"),
             center_longitude=Decimal("3.0420000"),
             radius_km=Decimal("5.00"),
             delivery_price=Decimal("120.00"),
+        )
+        CourierProfile.objects.create(
+            user=self.representative,
+            vehicle_type="Motorcycle",
+            plate_number="ORD-1",
+            delivery_area=self.delivery_area,
+            service_city=self.service_city,
         )
         market_classification = MarketClassification.objects.create(name="Food")
         self.market = Market.objects.create(
@@ -79,11 +91,13 @@ class OrderAPITests(APITestCase):
             name="Order Market",
         )
         self.market.delivery_areas.add(self.delivery_area)
+        self.market.service_cities.add(self.service_city)
         self.second_market = Market.objects.create(
             classification=market_classification,
             name="Second Order Market",
         )
         self.second_market.delivery_areas.add(self.delivery_area)
+        self.second_market.service_cities.add(self.service_city)
         category_classification = CategoryClassification.objects.create(name="Meals")
         category = ProductCategory.objects.create(
             classification=category_classification,
@@ -135,6 +149,7 @@ class OrderAPITests(APITestCase):
             "delivery_address_id": self.address.id,
             "assigned_representative_id": None,
             "market_id": self.market.id,
+            "service_city_id": self.service_city.id,
             "payment_method": "cash_on_delivery",
             "discount": "50.00",
             "description": "Call on arrival",
@@ -181,10 +196,17 @@ class OrderAPITests(APITestCase):
         self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(detail_response.data["items"]), 1)
         self.assertEqual(len(detail_response.data["offers"]), 1)
+        self.assertEqual(detail_response.data["service_city"]["id"], self.service_city.id)
+        self.assertEqual(detail_response.data["review_status"], Order.ReviewStatus.PENDING_REVIEW)
         self.assertEqual(update_response.data["description"], "Updated description")
 
     def test_assignment_sets_order_status_to_ready(self):
         order_id = self.create_order().data["id"]
+        approve_response = self.client.post(
+            f"/api/v1/admin/orders/{order_id}/approve/",
+            format="json",
+        )
+        self.assertEqual(approve_response.status_code, status.HTTP_200_OK)
 
         response = self.client.patch(
             f"{ORDERS_BASE}/{order_id}/assignment/",
@@ -193,12 +215,19 @@ class OrderAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["status"], Order.Status.READY)
+        self.assertEqual(response.data["order"]["status"], Order.Status.READY)
         self.assertEqual(
-            response.data["assigned_representative_id"],
+            response.data["order"]["assigned_representative_id"],
             self.representative.id,
         )
-        self.assertIsNotNone(response.data["assigned_at"])
+        self.assertIsNotNone(response.data["order"]["assigned_at"])
+        self.assertTrue(
+            Notification.objects.filter(
+                audience=Notification.Audience.COURIER,
+                type=Notification.Type.ORDER_ASSIGNED,
+                recipient=self.representative,
+            ).exists()
+        )
 
     def test_status_api_changes_status(self):
         order_id = self.create_order().data["id"]
@@ -226,6 +255,7 @@ class OrderAPITests(APITestCase):
         other_order = Order.objects.create(
             user=self.other_customer,
             market=self.market,
+            service_city=self.service_city,
             payment_method="cash_on_delivery",
             status=Order.Status.PENDING,
             delivery_price=Decimal("100.00"),
@@ -246,6 +276,7 @@ class OrderAPITests(APITestCase):
         Order.objects.create(
             user=self.customer,
             market=self.market,
+            service_city=self.service_city,
             payment_method="cash_on_delivery",
             status=Order.Status.PENDING,
             delivery_price=Decimal("100.00"),
@@ -415,6 +446,12 @@ class OrderAPITests(APITestCase):
         second_order = Order.objects.get(id=response.data[1]["id"])
         self.assertEqual(first_order.market_id, self.market.id)
         self.assertEqual(first_order.delivery_address_id, self.address.id)
+        self.assertEqual(first_order.service_city_id, self.service_city.id)
+        self.assertEqual(first_order.status, Order.Status.PENDING)
+        self.assertEqual(
+            first_order.review_status,
+            Order.ReviewStatus.PENDING_REVIEW,
+        )
         self.assertEqual(first_order.subtotal_price, Decimal("1000.00"))
         self.assertEqual(first_order.discount, Decimal("100.00"))
         self.assertEqual(first_order.delivery_price, Decimal("120.00"))
@@ -429,13 +466,24 @@ class OrderAPITests(APITestCase):
         )
 
         self.assertEqual(second_order.market_id, self.second_market.id)
+        self.assertEqual(second_order.service_city_id, self.service_city.id)
         self.assertEqual(second_order.subtotal_price, Decimal("700.00"))
         self.assertEqual(second_order.discount, Decimal("140.00"))
         self.assertEqual(second_order.delivery_price, Decimal("120.00"))
         self.assertEqual(second_order.total_price, Decimal("680.00"))
+        self.assertEqual(
+            Notification.objects.filter(
+                audience=Notification.Audience.ADMIN,
+                type=Notification.Type.NEW_ORDER_REVIEW,
+                is_blocking=True,
+                is_resolved=False,
+            ).count(),
+            2,
+        )
 
     def test_client_create_order_requires_market_delivery_coverage(self):
         self.second_market.delivery_areas.clear()
+        self.second_market.service_cities.clear()
         token = RefreshToken.for_user(self.customer).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
@@ -454,10 +502,124 @@ class OrderAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("address", response.data)
+        self.assertIn("service_city_id", response.data)
         self.assertFalse(
             Order.objects.filter(
                 user=self.customer,
                 market=self.second_market,
             ).exists()
         )
+
+    def test_service_city_review_assignment_and_courier_flow(self):
+        remote_city = ServiceCity.objects.create(
+            name="Cairo",
+            delivery_price=Decimal("90.00"),
+        )
+        remote_area = DeliveryArea.objects.create(
+            service_city=remote_city,
+            name="Cairo Center",
+            center_latitude=Decimal("30.0444000"),
+            center_longitude=Decimal("31.2357000"),
+            radius_km=Decimal("5.00"),
+            delivery_price=Decimal("90.00"),
+        )
+        remote_representative = User.objects.create_user(
+            username="cairo-representative",
+            email="cairo-representative@example.com",
+            phone="+213555700005",
+            password="Password1!",
+            role=User.Role.REPRESENTATIVE,
+        )
+        CourierProfile.objects.create(
+            user=remote_representative,
+            vehicle_type="Motorcycle",
+            plate_number="CAI-1",
+            delivery_area=remote_area,
+            service_city=remote_city,
+        )
+        token = RefreshToken.for_user(self.customer).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        create_response = self.client.post(
+            f"{ORDERS_BASE}/create/",
+            {
+                "payment_method": "cash_on_delivery",
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        order_id = create_response.data[0]["id"]
+        order = Order.objects.get(pk=order_id)
+        self.assertEqual(order.service_city_id, self.service_city.id)
+        self.assertEqual(order.delivery_price, self.service_city.delivery_price)
+        self.assertEqual(order.review_status, Order.ReviewStatus.PENDING_REVIEW)
+
+        admin_token = RefreshToken.for_user(self.admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {admin_token}")
+        blocker_response = self.client.get("/api/v1/admin/order-review/blocker/")
+        self.assertEqual(blocker_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(blocker_response.data["blocked"])
+        self.assertEqual(blocker_response.data["pending_count"], 1)
+        self.assertEqual(blocker_response.data["orders"][0]["id"], order_id)
+
+        approve_response = self.client.post(
+            f"/api/v1/admin/orders/{order_id}/approve/",
+            format="json",
+        )
+        self.assertEqual(approve_response.status_code, status.HTTP_200_OK)
+        representative_ids = {
+            item["representative_id"]
+            for item in approve_response.data["available_representatives"]
+        }
+        self.assertIn(self.representative.id, representative_ids)
+        self.assertNotIn(remote_representative.id, representative_ids)
+
+        mismatch_response = self.client.patch(
+            f"{ORDERS_BASE}/{order_id}/assignment/",
+            {"representative_id": remote_representative.id},
+            format="json",
+        )
+        self.assertEqual(mismatch_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            mismatch_response.data["representative_id"],
+            "هذا المندوب لا يعمل في نفس مدينة الطلب.",
+        )
+
+        assign_response = self.client.patch(
+            f"{ORDERS_BASE}/{order_id}/assignment/",
+            {"representative_id": self.representative.id},
+            format="json",
+        )
+        self.assertEqual(assign_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(assign_response.data["order"]["status"], Order.Status.READY)
+
+        courier_token = RefreshToken.for_user(self.representative).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {courier_token}")
+        courier_list = self.client.get("/api/v1/courier/orders/")
+        self.assertEqual(courier_list.status_code, status.HTTP_200_OK)
+        self.assertEqual([item["id"] for item in courier_list.data], [order_id])
+
+        remote_token = RefreshToken.for_user(remote_representative).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {remote_token}")
+        remote_list = self.client.get("/api/v1/courier/orders/")
+        self.assertEqual(remote_list.status_code, status.HTTP_200_OK)
+        self.assertEqual(remote_list.data, [])
+        remote_detail = self.client.get(f"/api/v1/courier/orders/{order_id}/")
+        self.assertEqual(remote_detail.status_code, status.HTTP_404_NOT_FOUND)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {courier_token}")
+        for next_status in (
+            Order.Status.PICKED_UP,
+            Order.Status.ON_THE_WAY,
+            Order.Status.DELIVERED,
+        ):
+            status_response = self.client.patch(
+                f"/api/v1/courier/orders/{order_id}/status/",
+                {"status": next_status},
+                format="json",
+            )
+            self.assertEqual(status_response.status_code, status.HTTP_200_OK)
+            self.assertEqual(status_response.data["status"], next_status)
+        order.refresh_from_db()
+        self.assertIsNotNone(order.delivered_at)

@@ -7,6 +7,19 @@ EARTH_RADIUS_KM = 6371.0088
 
 
 def markets_covering_address(address):
+    if address.service_city_id:
+        return list(
+            Market.objects.filter(
+                status=Market.Status.ACTIVE,
+                service_cities__id=address.service_city_id,
+                service_cities__is_active=True,
+            )
+            .distinct()
+            .values_list("id", flat=True)
+        )
+
+    # Deprecated fallback for legacy addresses that were saved before
+    # Address.service_city existed. New order logic must not use DeliveryArea.
     market_ids = []
     markets = (
         Market.objects.filter(

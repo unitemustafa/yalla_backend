@@ -54,7 +54,9 @@ class DashboardOverviewAPITests(APITestCase):
             center_latitude=Decimal("36.7525000"),
             center_longitude=Decimal("3.0420000"),
             radius_km=Decimal("30.00"),
+            delivery_price=Decimal("100.00"),
         )
+        self.city = city
         area = DeliveryArea.objects.create(
             service_city=city,
             name="Central",
@@ -70,10 +72,12 @@ class DashboardOverviewAPITests(APITestCase):
             branch="Main",
         )
         self.main_market.delivery_areas.add(area)
+        self.main_market.service_cities.add(city)
         self.second_market = Market.objects.create(
             classification=market_classification,
             name="Second Market",
         )
+        self.second_market.service_cities.add(city)
         category_classification = CategoryClassification.objects.create(name="Meals")
         category = ProductCategory.objects.create(
             classification=category_classification,
@@ -113,6 +117,7 @@ class DashboardOverviewAPITests(APITestCase):
         order = Order.objects.create(
             user=user,
             market=market,
+            service_city=market.service_cities.first(),
             payment_method="cash",
             status=order_status,
             subtotal_price=total,

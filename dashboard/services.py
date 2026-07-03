@@ -134,7 +134,8 @@ def build_dashboard_overview(from_date, to_date):
     markets = {
         market.id: market
         for market in Market.objects.filter(id__in=market_ids).prefetch_related(
-            "delivery_areas__service_city"
+            "service_cities",
+            "delivery_areas__service_city",
         )
     }
     units_by_market = {
@@ -151,8 +152,13 @@ def build_dashboard_overview(from_date, to_date):
     top_shops = []
     for row in top_shop_rows:
         market = markets[row["market_id"]]
+        first_city = next(iter(market.service_cities.all()), None)
         first_area = next(iter(market.delivery_areas.all()), None)
-        zone = first_area.service_city.name if first_area else ""
+        zone = (
+            first_city.name
+            if first_city is not None
+            else first_area.service_city.name if first_area else ""
+        )
         display_name = row["market_name"]
         if row["market_branch"]:
             display_name = f"{display_name} - {row['market_branch']}"

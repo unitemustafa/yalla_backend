@@ -211,19 +211,20 @@ class Command(BaseCommand):
 
     def _seed_locations(self, users):
         city_definitions = [
-            ("الجزائر", "36.7538000", "3.0588000", "35.00"),
-            ("وهران", "35.6969000", "-0.6331000", "30.00"),
-            ("قسنطينة", "36.3650000", "6.6147000", "25.00"),
-            ("عنابة", "36.9000000", "7.7667000", "22.00"),
+            ("الجزائر", "36.7538000", "3.0588000", "35.00", "250.00"),
+            ("وهران", "35.6969000", "-0.6331000", "30.00", "280.00"),
+            ("قسنطينة", "36.3650000", "6.6147000", "25.00", "270.00"),
+            ("عنابة", "36.9000000", "7.7667000", "22.00", "260.00"),
         ]
         cities = {}
-        for name, latitude, longitude, radius in city_definitions:
+        for name, latitude, longitude, radius, delivery_price in city_definitions:
             city, _ = ServiceCity.objects.update_or_create(
                 name=name,
                 defaults={
                     "center_latitude": Decimal(latitude),
                     "center_longitude": Decimal(longitude),
                     "radius_km": Decimal(radius),
+                    "delivery_price": Decimal(delivery_price),
                     "is_active": True,
                 },
             )
@@ -281,6 +282,7 @@ class Command(BaseCommand):
                 "المنزل",
                 "36.7525000",
                 "3.0419000",
+                "الجزائر",
                 True,
             ),
             (
@@ -288,6 +290,7 @@ class Command(BaseCommand):
                 "العمل",
                 "36.7110000",
                 "3.1810000",
+                "الجزائر",
                 False,
             ),
             (
@@ -295,6 +298,7 @@ class Command(BaseCommand):
                 "المنزل",
                 "35.7002000",
                 "-0.6401000",
+                "وهران",
                 True,
             ),
             (
@@ -302,21 +306,23 @@ class Command(BaseCommand):
                 "منطقة المندوب",
                 "36.7525000",
                 "3.0419000",
+                "الجزائر",
                 True,
             ),
-            (users["seed.sara@yalla.test"], "المنزل", "36.3600000", "6.6100000", True),
-            (users["seed.sara@yalla.test"], "الجامعة", "36.3700000", "6.6200000", False),
-            (users["seed.nadir@yalla.test"], "المنزل", "36.8950000", "7.7600000", True),
-            (users["seed.courier2@yalla.test"], "منطقة المندوب", "35.7200000", "-0.5500000", True),
-            (users["seed.courier3@yalla.test"], "منطقة المندوب", "36.3650000", "6.6147000", True),
+            (users["seed.sara@yalla.test"], "المنزل", "36.3600000", "6.6100000", "قسنطينة", True),
+            (users["seed.sara@yalla.test"], "الجامعة", "36.3700000", "6.6200000", "قسنطينة", False),
+            (users["seed.nadir@yalla.test"], "المنزل", "36.8950000", "7.7600000", "عنابة", True),
+            (users["seed.courier2@yalla.test"], "منطقة المندوب", "35.7200000", "-0.5500000", "وهران", True),
+            (users["seed.courier3@yalla.test"], "منطقة المندوب", "36.3650000", "6.6147000", "قسنطينة", True),
         ]
-        for user, name, latitude, longitude, is_default in addresses:
+        for user, name, latitude, longitude, city_name, is_default in addresses:
             Address.objects.update_or_create(
                 user=user,
                 name=name,
                 defaults={
                     "latitude": Decimal(latitude),
                     "longitude": Decimal(longitude),
+                    "service_city": cities[city_name],
                     "is_default": is_default,
                 },
             )
@@ -335,6 +341,7 @@ class Command(BaseCommand):
                     "vehicle_type": vehicle,
                     "plate_number": plate,
                     "delivery_area": areas[area],
+                    "service_city": areas[area].service_city,
                     "max_active_orders": maximum,
                     "is_available": available,
                 },
@@ -382,6 +389,9 @@ class Command(BaseCommand):
                 },
             )
             market.delivery_areas.set([areas[name] for name in area_names])
+            market.service_cities.set(
+                {areas[name].service_city_id for name in area_names}
+            )
             markets[name] = market
         return markets
 
@@ -707,21 +717,30 @@ class Command(BaseCommand):
             )
             discount = definition["offer_discount"]
             total = subtotal + definition["delivery_price"] - discount
+            delivery_address = (
+                definition["user"].addresses.filter(is_default=True).first()
+                or definition["user"].addresses.order_by("-created_at").first()
+            )
+            service_city = (
+                definition["market"]
+                .service_cities.filter(pk=getattr(delivery_address, "service_city_id", None))
+                .first()
+                or definition["market"].service_cities.order_by("id").first()
+            )
             order, _ = Order.objects.update_or_create(
                 description=definition["marker"],
                 defaults={
                     "user": definition["user"],
                     "market": definition["market"],
+                    "service_city": service_city,
                     "payment_method": definition["payment_method"],
                     "discount": discount,
                     "status": definition["status"],
+                    "review_status": Order.ReviewStatus.APPROVED,
                     "delivery_price": definition["delivery_price"],
                     "subtotal_price": subtotal,
                     "total_price": total,
-                    "delivery_address": definition["user"].addresses.filter(
-                        is_default=True
-                    ).first()
-                    or definition["user"].addresses.order_by("-created_at").first(),
+                    "delivery_address": delivery_address,
                     "assigned_representative": self._representative_for_order(
                         users, definition["status"]
                     ),

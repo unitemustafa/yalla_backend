@@ -8,6 +8,7 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from catalog.models import CategoryClassification, Product, ProductCategory
+from locations.models import ServiceCity
 from markets.models import Market, MarketClassification
 from orders.models import Order, OrderOffer
 
@@ -40,14 +41,20 @@ class OfferAPITests(APITestCase):
         market_classification = MarketClassification.objects.create(
             name="مطاعم"
         )
+        self.service_city = ServiceCity.objects.create(
+            name="Offer City",
+            delivery_price=Decimal("100.00"),
+        )
         self.market = Market.objects.create(
             classification=market_classification,
             name="مطعم العروض",
         )
+        self.market.service_cities.add(self.service_city)
         self.other_market = Market.objects.create(
             classification=market_classification,
             name="سوق آخر",
         )
+        self.other_market.service_cities.add(self.service_city)
         category_classification = CategoryClassification.objects.create(
             name="وجبات"
         )
@@ -220,6 +227,7 @@ class OfferAPITests(APITestCase):
         order = Order.objects.create(
             user=self.client_user,
             market=self.market,
+            service_city=self.service_city,
             payment_method="cash",
             discount=Decimal("0.00"),
             description="طلب مرتبط بعرض",

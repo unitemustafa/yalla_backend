@@ -14,6 +14,7 @@ class ServiceCitySerializer(serializers.ModelSerializer):
             "center_latitude",
             "center_longitude",
             "radius_km",
+            "delivery_price",
             "is_active",
         )
         read_only_fields = ("id",)
@@ -22,11 +23,15 @@ class ServiceCitySerializer(serializers.ModelSerializer):
         return value.strip()
 
     def validate_center_latitude(self, value):
+        if value is None:
+            return value
         if not Decimal("-90") <= value <= Decimal("90"):
             raise serializers.ValidationError("Latitude must be between -90 and 90.")
         return value
 
     def validate_center_longitude(self, value):
+        if value is None:
+            return value
         if not Decimal("-180") <= value <= Decimal("180"):
             raise serializers.ValidationError(
                 "Longitude must be between -180 and 180."
@@ -34,8 +39,15 @@ class ServiceCitySerializer(serializers.ModelSerializer):
         return value
 
     def validate_radius_km(self, value):
+        if value is None:
+            return value
         if value <= 0:
             raise serializers.ValidationError("Radius must be greater than zero.")
+        return value
+
+    def validate_delivery_price(self, value):
+        if value < 0:
+            raise serializers.ValidationError("Delivery price cannot be negative.")
         return value
 
 
@@ -76,6 +88,8 @@ class AddressSerializer(serializers.ModelSerializer):
     country = serializers.SerializerMethodField()
     postalCode = serializers.SerializerMethodField()
     isDefault = serializers.BooleanField(source="is_default", read_only=True)
+    service_city = ServiceCitySerializer(read_only=True)
+    service_city_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Address
@@ -93,6 +107,8 @@ class AddressSerializer(serializers.ModelSerializer):
             "postalCode",
             "latitude",
             "longitude",
+            "service_city",
+            "service_city_id",
             "is_default",
             "isDefault",
             "created_at",
@@ -105,6 +121,8 @@ class AddressSerializer(serializers.ModelSerializer):
         return self.get_phone(instance)
 
     def get_city(self, instance):
+        if instance.service_city_id:
+            return instance.service_city.name
         return ""
 
     def get_state(self, instance):
@@ -119,6 +137,12 @@ class AddressSerializer(serializers.ModelSerializer):
 
 class AddressWriteSerializer(serializers.Serializer):
     user_id = serializers.IntegerField(required=False)
+    service_city_id = serializers.PrimaryKeyRelatedField(
+        queryset=ServiceCity.objects.filter(is_active=True),
+        source="service_city",
+        required=False,
+        allow_null=True,
+    )
     name = serializers.CharField(required=False, allow_blank=True)
     fullName = serializers.CharField(required=False, allow_blank=True)
     full_name = serializers.CharField(required=False, allow_blank=True)
@@ -134,11 +158,13 @@ class AddressWriteSerializer(serializers.Serializer):
         max_digits=10,
         decimal_places=7,
         required=False,
+        allow_null=True,
     )
     longitude = serializers.DecimalField(
         max_digits=10,
         decimal_places=7,
         required=False,
+        allow_null=True,
     )
     isDefault = serializers.BooleanField(required=False)
     is_default = serializers.BooleanField(required=False)
@@ -171,24 +197,30 @@ class AddressWriteSerializer(serializers.Serializer):
 
         latitude = attrs.get("latitude")
         longitude = attrs.get("longitude")
-        if latitude is None or longitude is None:
-            area = self._matching_area(attrs, name)
-            if area is None:
+        service_city = attrs.get(
+            "service_city",
+            getattr(self.instance, "service_city", None),
+        )
+        if service_city is None:
+            service_city = self._matching_service_city(attrs, name)
+
+        if latitude is None and longitude is None:
+            if service_city is None:
                 raise serializers.ValidationError(
                     {
-                        "city": (
-                            "Latitude and longitude are required unless the "
-                            "address matches an active delivery area."
-                        )
+                        "service_city_id": "Service city is required when coordinates are not provided."
                     }
                 )
-            latitude = area.center_latitude
-            longitude = area.center_longitude
+        elif latitude is None or longitude is None:
+            raise serializers.ValidationError(
+                {"latitude": "Latitude and longitude must be provided together."}
+            )
 
         attrs["user"] = user
         attrs["normalized_name"] = name
-        attrs["normalized_latitude"] = Decimal(latitude)
-        attrs["normalized_longitude"] = Decimal(longitude)
+        attrs["normalized_latitude"] = Decimal(latitude) if latitude is not None else None
+        attrs["normalized_longitude"] = Decimal(longitude) if longitude is not None else None
+        attrs["normalized_service_city"] = service_city
         attrs["normalized_default"] = attrs.get(
             "is_default",
             attrs.get(
@@ -204,6 +236,7 @@ class AddressWriteSerializer(serializers.Serializer):
             name=validated_data["normalized_name"],
             latitude=validated_data["normalized_latitude"],
             longitude=validated_data["normalized_longitude"],
+            service_city=validated_data["normalized_service_city"],
             is_default=validated_data["normalized_default"],
         )
 
@@ -211,8 +244,17 @@ class AddressWriteSerializer(serializers.Serializer):
         instance.name = validated_data["normalized_name"]
         instance.latitude = validated_data["normalized_latitude"]
         instance.longitude = validated_data["normalized_longitude"]
+        instance.service_city = validated_data["normalized_service_city"]
         instance.is_default = validated_data["normalized_default"]
-        instance.save(update_fields=["name", "latitude", "longitude", "is_default"])
+        instance.save(
+            update_fields=[
+                "name",
+                "latitude",
+                "longitude",
+                "service_city",
+                "is_default",
+            ]
+        )
         return instance
 
     def _address_name(self, attrs):
@@ -235,7 +277,7 @@ class AddressWriteSerializer(serializers.Serializer):
             or ""
         ).strip()
 
-    def _matching_area(self, attrs, name):
+    def _matching_service_city(self, attrs, name):
         candidates = [
             attrs.get("city"),
             attrs.get("state"),
@@ -248,16 +290,16 @@ class AddressWriteSerializer(serializers.Serializer):
             text = (candidate or "").strip()
             if not text:
                 continue
-            area = DeliveryArea.objects.filter(
+            city = ServiceCity.objects.filter(
                 is_active=True,
                 name__iexact=text,
             ).first()
-            if area is not None:
-                return area
-            area = DeliveryArea.objects.filter(
+            if city is not None:
+                return city
+            city = ServiceCity.objects.filter(
                 is_active=True,
                 name__icontains=text,
             ).first()
-            if area is not None:
-                return area
+            if city is not None:
+                return city
         return None

@@ -87,7 +87,11 @@ class DeliveryAreaListView(APIView):
 
 
 def address_queryset_for_request(request):
-    queryset = Address.objects.select_related("user").order_by("-is_default", "-created_at", "-id")
+    queryset = Address.objects.select_related("user", "service_city").order_by(
+        "-is_default",
+        "-created_at",
+        "-id",
+    )
     if request.user.role == request.user.Role.ADMIN:
         user_id = request.query_params.get("user_id")
         if user_id:
@@ -119,7 +123,7 @@ class AddressListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         address = serializer.save()
         set_default_address(address)
-        addresses = Address.objects.select_related("user").filter(
+        addresses = Address.objects.select_related("user", "service_city").filter(
             user=address.user
         ).order_by("-is_default", "-created_at", "-id")
         return Response(
@@ -133,11 +137,11 @@ class AddressDefaultView(APIView):
 
     def get(self, request):
         address = (
-            Address.objects.select_related("user")
+            Address.objects.select_related("user", "service_city")
             .filter(user=request.user, is_default=True)
             .order_by("-created_at", "-id")
             .first()
-            or Address.objects.select_related("user")
+            or Address.objects.select_related("user", "service_city")
             .filter(user=request.user)
             .order_by("-created_at", "-id")
             .first()
@@ -149,7 +153,7 @@ class AddressDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_address(self, request, address_id):
-        queryset = Address.objects.select_related("user")
+        queryset = Address.objects.select_related("user", "service_city")
         if request.user.role != request.user.Role.ADMIN:
             queryset = queryset.filter(user=request.user)
         try:
@@ -171,7 +175,7 @@ class AddressDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         address = serializer.save()
         set_default_address(address)
-        addresses = Address.objects.select_related("user").filter(
+        addresses = Address.objects.select_related("user", "service_city").filter(
             user=address.user
         ).order_by("-is_default", "-created_at", "-id")
         return Response(AddressSerializer(addresses, many=True).data)
@@ -193,7 +197,7 @@ class AddressDetailView(APIView):
             if next_address is not None:
                 next_address.is_default = True
                 next_address.save(update_fields=["is_default"])
-        addresses = Address.objects.select_related("user").filter(
+        addresses = Address.objects.select_related("user", "service_city").filter(
             user=user
         ).order_by("-is_default", "-created_at", "-id")
         return Response(AddressSerializer(addresses, many=True).data)
@@ -204,7 +208,7 @@ class AddressSetDefaultView(APIView):
 
     @transaction.atomic
     def patch(self, request, address_id):
-        queryset = Address.objects.select_related("user")
+        queryset = Address.objects.select_related("user", "service_city")
         if request.user.role != request.user.Role.ADMIN:
             queryset = queryset.filter(user=request.user)
         try:
@@ -214,7 +218,7 @@ class AddressSetDefaultView(APIView):
         Address.objects.filter(user=address.user).update(is_default=False)
         address.is_default = True
         address.save(update_fields=["is_default"])
-        addresses = Address.objects.select_related("user").filter(
+        addresses = Address.objects.select_related("user", "service_city").filter(
             user=address.user
         ).order_by("-is_default", "-created_at", "-id")
         return Response(AddressSerializer(addresses, many=True).data)

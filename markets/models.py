@@ -29,6 +29,11 @@ class Market(models.Model):
         related_name="markets",
         blank=True,
     )
+    service_cities = models.ManyToManyField(
+        "locations.ServiceCity",
+        related_name="markets",
+        blank=True,
+    )
 
     def __str__(self):
         return self.name

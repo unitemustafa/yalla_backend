@@ -12,6 +12,8 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from locations.models import ServiceCity
+
 from .models import CourierProfile, OneTimePassword
 from .services import normalize_email, verify_otp
 
@@ -83,6 +85,14 @@ class CourierProfileSerializer(RequiredFieldMessagesMixin, serializers.ModelSeri
         source="delivery_area.name",
         read_only=True,
     )
+    service_city_name = serializers.CharField(
+        source="service_city.name",
+        read_only=True,
+    )
+    service_city = serializers.PrimaryKeyRelatedField(
+        queryset=ServiceCity.objects.filter(is_active=True),
+        required=False,
+    )
 
     class Meta:
         model = CourierProfile
@@ -91,14 +101,46 @@ class CourierProfileSerializer(RequiredFieldMessagesMixin, serializers.ModelSeri
             "plate_number",
             "delivery_area",
             "delivery_area_name",
+            "service_city",
+            "service_city_name",
             "max_active_orders",
             "is_available",
         )
+        extra_kwargs = {
+            "delivery_area": {"required": False, "allow_null": True},
+        }
 
     def validate_max_active_orders(self, value):
         if value < 1:
             raise serializers.ValidationError("Must be at least 1.")
         return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        delivery_area = attrs.get(
+            "delivery_area",
+            getattr(self.instance, "delivery_area", None),
+        )
+        service_city = attrs.get(
+            "service_city",
+            getattr(self.instance, "service_city", None),
+        )
+        if service_city is None and delivery_area is not None:
+            service_city = delivery_area.service_city
+            attrs["service_city"] = service_city
+        if service_city is None:
+            raise serializers.ValidationError(
+                {"service_city": "Service city is required for couriers."}
+            )
+        if not service_city.is_active:
+            raise serializers.ValidationError(
+                {"service_city": "Service city must be active."}
+            )
+        if delivery_area is not None and delivery_area.service_city_id != service_city.id:
+            raise serializers.ValidationError(
+                {"delivery_area": "Delivery area must belong to the service city."}
+            )
+        return attrs
 
 
 class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):

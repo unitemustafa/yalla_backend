@@ -317,7 +317,10 @@ class AdminRepresentativeListView(APIView):
                 role=User.Role.REPRESENTATIVE,
                 deleted_at__isnull=True,
             )
-            .select_related("courier_profile__delivery_area")
+            .select_related(
+                "courier_profile__delivery_area",
+                "courier_profile__service_city",
+            )
             .order_by("-created_at", "-id")
         )
         return Response(AdminUserSerializer(representatives, many=True).data)

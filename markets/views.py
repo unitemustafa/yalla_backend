@@ -130,7 +130,7 @@ class AdminMarketListCreateView(APIView):
     def get(self, request):
         markets = (
             Market.objects.select_related("classification")
-            .prefetch_related("delivery_areas")
+            .prefetch_related("service_cities", "delivery_areas")
             .order_by("name", "id")
         )
         return Response(AdminMarketSerializer(markets, many=True).data)
@@ -151,6 +151,7 @@ class AdminMarketDetailView(APIView):
     def get_market(self, market_id):
         return get_object_or_404(
             Market.objects.select_related("classification").prefetch_related(
+                "service_cities",
                 "delivery_areas"
             ),
             id=market_id,
@@ -205,6 +206,7 @@ class HomeView(APIView):
             Product.objects.filter(market_id__in=market_ids)
             .select_related("category__classification", "market__classification")
             .prefetch_related(
+                "market__service_cities",
                 "market__delivery_areas",
                 Prefetch(
                     "variants",
@@ -222,6 +224,7 @@ class HomeView(APIView):
             )
             .select_related("market__classification")
             .prefetch_related(
+                "market__service_cities",
                 "market__delivery_areas",
                 Prefetch(
                     "products",
@@ -232,7 +235,11 @@ class HomeView(APIView):
                         "category__classification",
                         "market__classification",
                     )
-                    .prefetch_related("variants", "market__delivery_areas"),
+                    .prefetch_related(
+                        "variants",
+                        "market__service_cities",
+                        "market__delivery_areas",
+                    ),
                 )
             )
             .order_by("-created_at", "-id")[:4]
@@ -331,7 +338,7 @@ class MarketClassificationSummaryView(APIView):
                         distinct=True,
                     )
                 )
-                .prefetch_related("delivery_areas")
+                .prefetch_related("service_cities", "delivery_areas")
                 .order_by("-product_count", "name", "id")[:5]
             )
             for classification in all_classifications
@@ -402,7 +409,7 @@ class MarketClassificationMarketsView(APIView):
                 status=Market.Status.ACTIVE,
             )
             .distinct()
-            .prefetch_related("delivery_areas")
+            .prefetch_related("service_cities", "delivery_areas")
             .order_by("name", "id")
         )
         products_by_market = {
@@ -470,6 +477,7 @@ class ProductSearchView(APIView):
                 "market__classification",
             )
             .prefetch_related(
+                "market__service_cities",
                 "market__delivery_areas",
                 Prefetch(
                     "variants",
@@ -553,6 +561,7 @@ class AddressProductListView(APIView):
                 "market__classification",
             )
             .prefetch_related(
+                "market__service_cities",
                 "market__delivery_areas",
                 Prefetch(
                     "variants",
@@ -601,6 +610,7 @@ class ProductDetailView(APIView):
                 "market__classification",
             )
             .prefetch_related(
+                "market__service_cities",
                 "market__delivery_areas",
                 Prefetch(
                     "variants",
