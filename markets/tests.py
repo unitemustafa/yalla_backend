@@ -57,6 +57,24 @@ class HomeAPITests(APITestCase):
             center_longitude=Decimal("3.0419000"),
             radius_km=Decimal("30.00"),
         )
+        self.remote_city = ServiceCity.objects.create(
+            name="Remote City",
+            center_latitude=Decimal("35.6969000"),
+            center_longitude=Decimal("-0.6331000"),
+            radius_km=Decimal("30.00"),
+        )
+        self.default_address.service_city = self.service_city
+        self.default_address.save(update_fields=["service_city"])
+        self.user.market_region_mode = User.MarketRegionMode.SERVICE_CITY
+        self.user.market_region_service_city = self.service_city
+        self.user.market_region_updated_at = timezone.now()
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
         self.local_area = DeliveryArea.objects.create(
             service_city=self.service_city,
             name="Local",
@@ -66,7 +84,7 @@ class HomeAPITests(APITestCase):
             radius_km=Decimal("8.00"),
         )
         self.remote_area = DeliveryArea.objects.create(
-            service_city=self.service_city,
+            service_city=self.remote_city,
             name="Remote",
             delivery_price=Decimal("280.00"),
             center_latitude=Decimal("35.6969000"),
@@ -75,13 +93,16 @@ class HomeAPITests(APITestCase):
         )
 
         self.local_classification = MarketClassification.objects.create(
-            name="Local supermarkets"
+            name="Local supermarkets",
+            classification_type=MarketClassification.ClassificationType.POPULAR,
         )
         self.second_local_classification = MarketClassification.objects.create(
-            name="Local restaurants"
+            name="Local restaurants",
+            classification_type=MarketClassification.ClassificationType.FEATURED,
         )
         self.remote_classification = MarketClassification.objects.create(
-            name="Remote bakeries"
+            name="Remote bakeries",
+            classification_type=MarketClassification.ClassificationType.NORMAL,
         )
         self.local_market = self._create_market(
             "Local Market",
@@ -153,17 +174,335 @@ class HomeAPITests(APITestCase):
         response = self.client.get(f"{HOME_BASE}/")
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_home_requires_user_address(self):
-        self.default_address.delete()
+    def test_market_region_options_me_and_patch(self):
+        self.authenticate()
+
+        options_response = self.client.get("/api/v1/market-region/options/")
+        me_response = self.client.get("/api/v1/market-region/me/")
+        general_response = self.client.patch(
+            "/api/v1/market-region/me/",
+            {"mode": User.MarketRegionMode.GENERAL},
+            format="json",
+        )
+        city_response = self.client.patch(
+            "/api/v1/market-region/me/",
+            {
+                "mode": User.MarketRegionMode.SERVICE_CITY,
+                "service_city_id": self.service_city.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(options_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(options_response.data["options"][0]["mode"], "general")
+        self.assertIn(
+            self.service_city.id,
+            [
+                option["service_city"]["id"]
+                for option in options_response.data["options"]
+                if option["service_city"] is not None
+            ],
+        )
+        self.assertEqual(me_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            me_response.data["current_selection"]["service_city"]["id"],
+            self.service_city.id,
+        )
+        self.assertEqual(general_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            general_response.data["current_selection"]["mode"],
+            User.MarketRegionMode.GENERAL,
+        )
+        self.assertIsNone(
+            general_response.data["current_selection"]["service_city"]
+        )
+        self.assertEqual(city_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            city_response.data["current_selection"]["service_city"]["id"],
+            self.service_city.id,
+        )
+
+    def test_market_region_patch_rejects_inactive_city(self):
+        inactive_city = ServiceCity.objects.create(
+            name="Inactive City",
+            is_active=False,
+        )
+        self.authenticate()
+
+        response = self.client.patch(
+            "/api/v1/market-region/me/",
+            {
+                "mode": User.MarketRegionMode.SERVICE_CITY,
+                "service_city_id": inactive_city.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["service_city_id"][0],
+            "Service city must be active.",
+        )
+
+    def test_market_region_detect_same_region(self):
+        self.authenticate()
+
+        response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {
+                "latitude": "36.7525000",
+                "longitude": "3.0419000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "same_region")
+        self.assertEqual(
+            response.data["current_selection"]["service_city"]["id"],
+            self.service_city.id,
+        )
+        self.assertEqual(
+            response.data["detected_region"]["service_city"]["id"],
+            self.service_city.id,
+        )
+        self.assertNotIn(
+            "delivery_price",
+            response.data["detected_region"]["service_city"],
+        )
+
+    def test_market_region_detect_different_city_suggests_switch(self):
+        self.user.market_region_service_city = self.remote_city
+        self.user.save(update_fields=["market_region_service_city"])
+        self.authenticate()
+
+        response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {
+                "latitude": "36.7525000",
+                "longitude": "3.0419000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "suggest_switch")
+        self.assertEqual(
+            response.data["current_selection"]["service_city"]["id"],
+            self.remote_city.id,
+        )
+        self.assertEqual(
+            response.data["detected_region"]["service_city"]["id"],
+            self.service_city.id,
+        )
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.market_region_service_city_id, self.remote_city.id)
+
+    def test_market_region_detect_general_region_suggests_switch(self):
+        self.user.market_region_mode = User.MarketRegionMode.GENERAL
+        self.user.market_region_service_city = None
+        self.user.save(
+            update_fields=["market_region_mode", "market_region_service_city"]
+        )
+        self.authenticate()
+
+        response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {
+                "latitude": "36.7525000",
+                "longitude": "3.0419000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "suggest_switch")
+        self.assertEqual(
+            response.data["current_selection"]["mode"],
+            User.MarketRegionMode.GENERAL,
+        )
+        self.assertIsNone(response.data["current_selection"]["service_city"])
+        self.assertEqual(
+            response.data["detected_region"]["service_city"]["id"],
+            self.service_city.id,
+        )
+
+    def test_market_region_detect_no_selection_selects_detected_region(self):
+        self.user.market_region_mode = None
+        self.user.market_region_service_city = None
+        self.user.market_region_updated_at = None
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+        self.authenticate()
+
+        response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {
+                "latitude": "36.7525000",
+                "longitude": "3.0419000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "select_detected_region")
+        self.assertIsNone(response.data["current_selection"])
+        self.assertEqual(
+            response.data["detected_region"]["service_city"]["id"],
+            self.service_city.id,
+        )
+        self.user.refresh_from_db()
+        self.assertIsNone(self.user.market_region_mode)
+        self.assertIsNone(self.user.market_region_service_city_id)
+
+    def test_market_region_detect_unsupported_location(self):
+        self.authenticate()
+
+        response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {
+                "latitude": "0.0000000",
+                "longitude": "0.0000000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "unsupported_location")
+        self.assertIsNone(response.data["detected_region"])
+        self.assertEqual(
+            response.data["current_selection"]["service_city"]["id"],
+            self.service_city.id,
+        )
+
+    def test_market_region_detect_rejects_invalid_latitude(self):
+        self.authenticate()
+
+        response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {
+                "latitude": "91.0000000",
+                "longitude": "3.0419000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("latitude", response.data)
+
+    def test_market_region_detect_rejects_invalid_longitude(self):
+        self.authenticate()
+
+        response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {
+                "latitude": "36.7525000",
+                "longitude": "181.0000000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("longitude", response.data)
+
+    def test_market_region_detect_ignores_inactive_service_city(self):
+        ServiceCity.objects.create(
+            name="Inactive GPS City",
+            center_latitude=Decimal("10.0000000"),
+            center_longitude=Decimal("10.0000000"),
+            radius_km=Decimal("50.00"),
+            is_active=False,
+        )
+        self.authenticate()
+
+        response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {
+                "latitude": "10.0000000",
+                "longitude": "10.0000000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "unsupported_location")
+        self.assertIsNone(response.data["detected_region"])
+
+    def test_market_region_detect_ignores_service_city_without_geo_fields(self):
+        ServiceCity.objects.create(name="No Geo City")
+        self.authenticate()
+
+        response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {
+                "latitude": "10.0000000",
+                "longitude": "10.0000000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "unsupported_location")
+        self.assertIsNone(response.data["detected_region"])
+
+    def test_market_region_detect_returns_nearest_matching_service_city(self):
+        farther_city = ServiceCity.objects.create(
+            name="Farther GPS City",
+            center_latitude=Decimal("10.0500000"),
+            center_longitude=Decimal("10.0000000"),
+            radius_km=Decimal("10.00"),
+        )
+        nearer_city = ServiceCity.objects.create(
+            name="Nearer GPS City",
+            center_latitude=Decimal("10.0100000"),
+            center_longitude=Decimal("10.0000000"),
+            radius_km=Decimal("10.00"),
+        )
+        self.authenticate()
+
+        response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {
+                "latitude": "10.0000000",
+                "longitude": "10.0000000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "suggest_switch")
+        self.assertEqual(
+            response.data["detected_region"]["service_city"]["id"],
+            nearer_city.id,
+        )
+        self.assertNotEqual(
+            response.data["detected_region"]["service_city"]["id"],
+            farther_city.id,
+        )
+
+    def test_home_requires_saved_market_region(self):
+        self.user.market_region_mode = None
+        self.user.market_region_service_city = None
+        self.user.market_region_updated_at = None
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
         self.authenticate()
 
         response = self.client.get(f"{HOME_BASE}/")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            response.data["detail"],
-            "A user address is required before loading the home page.",
-        )
+        self.assertTrue(response.data["requires_region_selection"])
+        self.assertIsNone(response.data["current_selection"])
 
     def test_home_returns_limited_content_from_user_location_only(self):
         self.authenticate()
@@ -205,6 +544,63 @@ class HomeAPITests(APITestCase):
             )
         )
 
+    def test_home_returns_general_region_content_only(self):
+        general_classification = MarketClassification.objects.create(
+            name="General stores"
+        )
+        general_market = Market.objects.create(
+            name="General Market",
+            branch="Online",
+            scope=Market.Scope.GENERAL,
+            classification=general_classification,
+        )
+        general_market.service_cities.add(self.service_city)
+        general_product = self._create_product(
+            "General Product",
+            general_market,
+            1000,
+        )
+        general_offer = Offer.objects.create(
+            market=general_market,
+            scope=Offer.Scope.GENERAL,
+            service_city=None,
+            title="General Offer",
+            description="General offer",
+            type=Offer.OfferType.DISCOUNT,
+            discount=Decimal("5.00"),
+            start_time=timezone.now() - timedelta(days=1),
+            end_time=timezone.now() + timedelta(days=1),
+            status=Offer.Status.ACTIVE,
+        )
+        general_offer.products.set([general_product])
+        self.user.market_region_mode = User.MarketRegionMode.GENERAL
+        self.user.market_region_service_city = None
+        self.user.market_region_updated_at = timezone.now()
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["current_selection"]["mode"],
+            User.MarketRegionMode.GENERAL,
+        )
+        self.assertEqual(
+            {product["id"] for product in response.data["products"]},
+            {general_product.id},
+        )
+        self.assertEqual(
+            {offer["id"] for offer in response.data["offers"]},
+            {general_offer.id},
+        )
+
     def test_market_classification_crud_requires_admin_role(self):
         self.authenticate()
 
@@ -226,6 +622,10 @@ class HomeAPITests(APITestCase):
 
         self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(create_response.data["name"], "صيدليات")
+        self.assertEqual(
+            create_response.data["classification_type"],
+            MarketClassification.ClassificationType.NORMAL,
+        )
         classification_id = create_response.data["id"]
 
         list_response = self.client.get(f"{HOME_BASE}/market-classifications/")
@@ -234,7 +634,10 @@ class HomeAPITests(APITestCase):
         )
         update_response = self.client.patch(
             f"{HOME_BASE}/market-classifications/{classification_id}/",
-            {"name": "محلات"},
+            {
+                "name": "محلات",
+                "classification_type": MarketClassification.ClassificationType.POPULAR,
+            },
         )
         delete_response = self.client.delete(
             f"{HOME_BASE}/market-classifications/{classification_id}/"
@@ -247,12 +650,87 @@ class HomeAPITests(APITestCase):
         self.assertIn(classification_id, [item["id"] for item in list_response.data])
         self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
         self.assertEqual(detail_response.data["name"], "صيدليات")
+        self.assertEqual(
+            detail_response.data["classification_type"],
+            MarketClassification.ClassificationType.NORMAL,
+        )
         self.assertEqual(update_response.status_code, status.HTTP_200_OK)
         self.assertEqual(update_response.data["name"], "محلات")
+        self.assertEqual(
+            update_response.data["classification_type"],
+            MarketClassification.ClassificationType.POPULAR,
+        )
         self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertEqual(
             deleted_detail_response.status_code,
             status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_admin_can_create_market_classifications_with_each_type(self):
+        self.authenticate(self.admin)
+
+        normal_response = self.client.post(
+            f"{HOME_BASE}/market-classifications/",
+            {
+                "name": "Normal classification",
+                "classification_type": MarketClassification.ClassificationType.NORMAL,
+            },
+            format="json",
+        )
+        popular_response = self.client.post(
+            f"{HOME_BASE}/market-classifications/",
+            {
+                "name": "Popular classification",
+                "classification_type": MarketClassification.ClassificationType.POPULAR,
+            },
+            format="json",
+        )
+        featured_response = self.client.post(
+            f"{HOME_BASE}/market-classifications/",
+            {
+                "name": "Featured classification",
+                "classification_type": MarketClassification.ClassificationType.FEATURED,
+            },
+            format="json",
+        )
+
+        self.assertEqual(normal_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(popular_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(featured_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            normal_response.data["classification_type"],
+            MarketClassification.ClassificationType.NORMAL,
+        )
+        self.assertEqual(
+            popular_response.data["classification_type"],
+            MarketClassification.ClassificationType.POPULAR,
+        )
+        self.assertEqual(
+            featured_response.data["classification_type"],
+            MarketClassification.ClassificationType.FEATURED,
+        )
+
+    def test_admin_market_classification_rejects_invalid_type(self):
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{HOME_BASE}/market-classifications/",
+            {
+                "name": "Invalid type classification",
+                "classification_type": "invalid",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("classification_type", response.data)
+
+    def test_market_classification_defaults_to_normal_type(self):
+        classification = MarketClassification.objects.create(name="Default Type")
+
+        self.assertEqual(
+            classification.classification_type,
+            MarketClassification.ClassificationType.NORMAL,
         )
 
     def test_market_classification_delete_rejects_used_classification(self):
@@ -354,17 +832,23 @@ class HomeAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_classification_summary_requires_user_address(self):
-        self.default_address.delete()
+    def test_classification_summary_requires_saved_market_region(self):
+        self.user.market_region_mode = None
+        self.user.market_region_service_city = None
+        self.user.market_region_updated_at = None
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
         self.authenticate()
 
         response = self.client.get(f"{HOME_BASE}/classifications/")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            response.data["detail"],
-            "A user address is required before loading market classifications.",
-        )
+        self.assertTrue(response.data["requires_region_selection"])
 
     def test_classification_summary_returns_common_and_all_counts(self):
         busiest_classification = MarketClassification.objects.create(
@@ -449,6 +933,14 @@ class HomeAPITests(APITestCase):
             classification["name"]: classification
             for classification in response.data["market_classifications"]
         }
+        self.assertEqual(
+            all_by_name["Local supermarkets"]["classification_type"],
+            MarketClassification.ClassificationType.POPULAR,
+        )
+        self.assertEqual(
+            all_by_name["Local restaurants"]["classification_type"],
+            MarketClassification.ClassificationType.FEATURED,
+        )
         self.assertEqual(all_by_name["Busiest local"]["product_count"], 12)
         self.assertEqual(all_by_name["Local restaurants"]["product_count"], 5)
         self.assertEqual(all_by_name["Local supermarkets"]["product_count"], 5)
@@ -469,6 +961,125 @@ class HomeAPITests(APITestCase):
                 for market in all_by_name["Busiest local"]["markets"]
                 for product in market["products"]
             )
+        )
+
+    def test_typed_classification_endpoints_return_only_requested_type(self):
+        normal_classification = MarketClassification.objects.create(
+            name="Normal local",
+            classification_type=MarketClassification.ClassificationType.NORMAL,
+        )
+        normal_market = self._create_market(
+            "Normal Market",
+            normal_classification,
+            self.local_area,
+        )
+        self._create_product("Normal Product", normal_market, 700)
+        self.authenticate()
+
+        featured_response = self.client.get(f"{HOME_BASE}/classifications/featured/")
+        popular_response = self.client.get(f"{HOME_BASE}/classifications/popular/")
+        normal_response = self.client.get(f"{HOME_BASE}/classifications/normal/")
+
+        self.assertEqual(featured_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(popular_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(normal_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            {
+                item["classification_type"]
+                for item in featured_response.data["classifications"]
+            },
+            {MarketClassification.ClassificationType.FEATURED},
+        )
+        self.assertEqual(
+            {
+                item["classification_type"]
+                for item in popular_response.data["classifications"]
+            },
+            {MarketClassification.ClassificationType.POPULAR},
+        )
+        self.assertEqual(
+            {
+                item["classification_type"]
+                for item in normal_response.data["classifications"]
+            },
+            {MarketClassification.ClassificationType.NORMAL},
+        )
+        self.assertEqual(
+            [item["id"] for item in featured_response.data["classifications"]],
+            [self.second_local_classification.id],
+        )
+        self.assertIn(
+            self.local_classification.id,
+            [item["id"] for item in popular_response.data["classifications"]],
+        )
+        self.assertEqual(
+            [item["id"] for item in normal_response.data["classifications"]],
+            [normal_classification.id],
+        )
+        self.assertEqual(
+            featured_response.data["current_selection"]["service_city"]["id"],
+            self.service_city.id,
+        )
+        self.assertTrue(normal_response.data["classifications"][0]["markets"])
+
+    def test_typed_classification_endpoint_requires_saved_market_region(self):
+        self.user.market_region_mode = None
+        self.user.market_region_service_city = None
+        self.user.market_region_updated_at = None
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/classifications/featured/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(response.data["requires_region_selection"])
+
+    def test_classification_endpoints_filter_general_region_markets(self):
+        general_classification = MarketClassification.objects.create(
+            name="General featured",
+            classification_type=MarketClassification.ClassificationType.FEATURED,
+        )
+        general_market = Market.objects.create(
+            classification=general_classification,
+            name="General Featured Market",
+            scope=Market.Scope.GENERAL,
+        )
+        general_market.service_cities.add(self.service_city)
+        self._create_product("General Featured Product", general_market, 701)
+        self.user.market_region_mode = User.MarketRegionMode.GENERAL
+        self.user.market_region_service_city = None
+        self.user.market_region_updated_at = timezone.now()
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+        self.authenticate()
+
+        all_response = self.client.get(f"{HOME_BASE}/classifications/")
+        featured_response = self.client.get(f"{HOME_BASE}/classifications/featured/")
+
+        self.assertEqual(all_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(featured_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [item["id"] for item in all_response.data["market_classifications"]],
+            [general_classification.id],
+        )
+        self.assertEqual(
+            [item["id"] for item in featured_response.data["classifications"]],
+            [general_classification.id],
+        )
+        self.assertEqual(
+            featured_response.data["classifications"][0]["markets"][0]["id"],
+            general_market.id,
         )
 
     def test_classification_markets_requires_authentication(self):
@@ -499,6 +1110,9 @@ class HomeAPITests(APITestCase):
             {
                 "id": self.local_classification.id,
                 "name": self.local_classification.name,
+                "classification_type": (
+                    MarketClassification.ClassificationType.POPULAR
+                ),
             },
         )
         self.assertEqual(len(response.data["markets"]), 1)
@@ -531,17 +1145,23 @@ class HomeAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_product_search_requires_user_address(self):
-        self.default_address.delete()
+    def test_product_search_requires_saved_market_region(self):
+        self.user.market_region_mode = None
+        self.user.market_region_service_city = None
+        self.user.market_region_updated_at = None
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
         self.authenticate()
 
         response = self.client.get(f"{HOME_BASE}/search/", {"q": "Local"})
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            response.data["detail"],
-            "A user address is required before searching products.",
-        )
+        self.assertTrue(response.data["requires_region_selection"])
 
     def test_product_search_matches_product_market_and_classification(self):
         unique_product = self._create_product(
@@ -630,17 +1250,23 @@ class HomeAPITests(APITestCase):
             "Only client users can access address products.",
         )
 
-    def test_address_products_requires_user_address(self):
-        self.default_address.delete()
+    def test_address_products_requires_saved_market_region(self):
+        self.user.market_region_mode = None
+        self.user.market_region_service_city = None
+        self.user.market_region_updated_at = None
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
         self.authenticate()
 
         response = self.client.get(f"{HOME_BASE}/products/")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            response.data["detail"],
-            "A user address is required before loading address products.",
-        )
+        self.assertTrue(response.data["requires_region_selection"])
 
     def test_address_products_returns_user_address_products_paginated_by_four(self):
         unavailable_product = self.local_products[0]
@@ -779,17 +1405,23 @@ class HomeAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_product_detail_requires_user_address(self):
-        self.default_address.delete()
+    def test_product_detail_requires_saved_market_region(self):
+        self.user.market_region_mode = None
+        self.user.market_region_service_city = None
+        self.user.market_region_updated_at = None
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
         self.authenticate()
 
         response = self.client.get(f"{HOME_BASE}/products/{self.local_products[0].id}/")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            response.data["detail"],
-            "A user address is required before loading product details.",
-        )
+        self.assertTrue(response.data["requires_region_selection"])
 
     def test_product_detail_returns_all_product_information(self):
         product = self.local_products[0]
@@ -859,6 +1491,7 @@ class HomeAPITests(APITestCase):
             classification=classification,
         )
         market.delivery_areas.add(area)
+        market.service_cities.add(area.service_city)
         return market
 
     def _create_product(self, name, market, index):
@@ -878,6 +1511,8 @@ class HomeAPITests(APITestCase):
     def _create_offer(self, title, market, product, now):
         offer = Offer.objects.create(
             market=market,
+            scope=Offer.Scope.SERVICE_CITY,
+            service_city=market.service_cities.filter(is_active=True).first(),
             title=title,
             description=f"Description for {title}",
             type=Offer.OfferType.DISCOUNT,

@@ -59,9 +59,13 @@ def order_queryset():
             "user",
             "delivery_address",
             "delivery_address__service_city",
+            "delivery_address__delivery_area",
+            "delivery_address__delivery_area__service_city",
             "assigned_representative",
             "market",
             "service_city",
+            "delivery_area",
+            "delivery_area__service_city",
             "approved_by",
             "rejected_by",
         )

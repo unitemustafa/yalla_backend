@@ -1,8 +1,9 @@
 from rest_framework import serializers
 
 from catalog.models import Product
+from locations.models import ServiceCity
 from markets.models import Market
-from markets.serializers import AdminMarketSerializer
+from markets.serializers import AdminMarketSerializer, ServiceCitySummarySerializer
 
 from .models import Offer
 
@@ -32,8 +33,17 @@ class AdminOfferSerializer(serializers.ModelSerializer):
         queryset=Market.objects.all(),
         source="market",
         write_only=True,
+        required=False,
     )
     market = AdminMarketSerializer(read_only=True)
+    service_city_id = serializers.PrimaryKeyRelatedField(
+        queryset=ServiceCity.objects.all(),
+        source="service_city",
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+    service_city = ServiceCitySummarySerializer(read_only=True)
     product_ids = serializers.PrimaryKeyRelatedField(
         queryset=Product.objects.all(),
         source="products",
@@ -48,6 +58,9 @@ class AdminOfferSerializer(serializers.ModelSerializer):
             "id",
             "market",
             "market_id",
+            "scope",
+            "service_city",
+            "service_city_id",
             "products",
             "product_ids",
             "title",
@@ -85,6 +98,14 @@ class AdminOfferSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         market = attrs.get("market") or getattr(self.instance, "market", None)
         products = attrs.get("products")
+        scope = attrs.get(
+            "scope",
+            getattr(self.instance, "scope", Offer.Scope.SERVICE_CITY),
+        )
+        service_city = attrs.get(
+            "service_city",
+            getattr(self.instance, "service_city", None),
+        )
         start_time = attrs.get("start_time") or getattr(
             self.instance,
             "start_time",
@@ -111,22 +132,95 @@ class AdminOfferSerializer(serializers.ModelSerializer):
                     {"product_ids": "Choose at least one product for this offer."}
                 )
             if market is None:
-                return attrs
+                market = products_to_check[0].market
+                attrs["market"] = market
+
+        if market is None:
+            raise serializers.ValidationError(
+                {"market_id": "Offer market is required."}
+            )
+
+        if scope == Offer.Scope.GENERAL:
+            if service_city is not None:
+                raise serializers.ValidationError(
+                    {
+                        "service_city_id": (
+                            "Service city must be empty for general offers."
+                        )
+                    }
+                )
+            if market.scope != Market.Scope.GENERAL:
+                raise serializers.ValidationError(
+                    {"market_id": "Offer market must be a general market."}
+                )
+            if products_to_check is not None:
+                invalid_product_ids = [
+                    product.id
+                    for product in products_to_check
+                    if product.market.scope != Market.Scope.GENERAL
+                ]
+                if invalid_product_ids:
+                    raise serializers.ValidationError(
+                        {
+                            "product_ids": (
+                                "All selected products must belong to the "
+                                "offer region."
+                            )
+                        }
+                    )
+            return attrs
+
+        if service_city is None:
+            raise serializers.ValidationError(
+                {
+                    "service_city_id": (
+                        "Service city is required for service-city offers."
+                    )
+                }
+            )
+        if not service_city.is_active:
+            raise serializers.ValidationError(
+                {"service_city_id": "Service city must be active."}
+            )
+        if not self._market_serves_service_city(market, service_city):
+            raise serializers.ValidationError(
+                {
+                    "market_id": (
+                        "Offer market must belong to the selected service "
+                        "city region."
+                    )
+                }
+            )
+        if products_to_check is not None:
             invalid_product_ids = [
                 product.id
                 for product in products_to_check
-                if product.market_id != market.id
+                if not self._market_serves_service_city(
+                    product.market,
+                    service_city,
+                )
             ]
             if invalid_product_ids:
                 raise serializers.ValidationError(
                     {
                         "product_ids": (
-                            "All selected products must belong to the offer market."
+                            "All selected products must belong to the offer "
+                            "region."
                         )
                     }
                 )
 
         return attrs
+
+    @staticmethod
+    def _market_serves_service_city(market, service_city):
+        return (
+            market.scope == Market.Scope.SERVICE_CITY
+            and market.service_cities.filter(
+                pk=service_city.pk,
+                is_active=True,
+            ).exists()
+        )
 
     def create(self, validated_data):
         products = validated_data.pop("products")

@@ -7,8 +7,11 @@ from .views import (
     AdminMarketDetailView,
     AdminMarketListCreateView,
     HomeView,
+    FeaturedMarketClassificationSummaryView,
     MarketClassificationMarketsView,
     MarketClassificationSummaryView,
+    NormalMarketClassificationSummaryView,
+    PopularMarketClassificationSummaryView,
     ProductDetailView,
     ProductSearchView,
 )
@@ -46,6 +49,21 @@ urlpatterns = [
         "classifications/",
         MarketClassificationSummaryView.as_view(),
         name="market-classification-summary",
+    ),
+    path(
+        "classifications/featured/",
+        FeaturedMarketClassificationSummaryView.as_view(),
+        name="market-classification-featured",
+    ),
+    path(
+        "classifications/popular/",
+        PopularMarketClassificationSummaryView.as_view(),
+        name="market-classification-popular",
+    ),
+    path(
+        "classifications/normal/",
+        NormalMarketClassificationSummaryView.as_view(),
+        name="market-classification-normal",
     ),
     path(
         "classifications/<int:classification_id>/markets/",

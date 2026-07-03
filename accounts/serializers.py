@@ -40,25 +40,44 @@ def phone_candidates(value):
     except serializers.ValidationError:
         return []
 
-    national = normalized[3:]
-    candidates = {
-        normalized,
-        normalized[1:],
-        national,
-        f"0{national}",
-    }
+    if normalized.startswith("+213"):
+        national = normalized[4:]
+        candidates = {
+            normalized,
+            normalized[1:],
+            national,
+            f"0{national}",
+        }
+    else:
+        national = normalized[3:]
+        candidates = {
+            normalized,
+            normalized[1:],
+            national,
+            f"0{national}",
+        }
 
     return list(candidates)
 
 
 def normalize_egyptian_phone(value):
     phone = (value or "").strip()
-    pattern = r"(?:01[0125]\d{8}|1[0125]\d{8}|201[0125]\d{8}|\+201[0125]\d{8})"
+    egypt_pattern = r"(?:01[0125]\d{8}|1[0125]\d{8}|201[0125]\d{8}|\+201[0125]\d{8})"
+    algeria_pattern = r"(?:0[567]\d{8}|[567]\d{8}|213[567]\d{8}|\+213[567]\d{8})"
+    pattern = rf"(?:{egypt_pattern}|{algeria_pattern})"
     if not re.fullmatch(pattern, phone):
         raise serializers.ValidationError(
-            "Enter a valid Egyptian mobile number starting with 01, 1, 201, or +201."
+            "Enter a valid mobile number."
         )
 
+    if phone.startswith("+213"):
+        return phone
+    if phone.startswith("213"):
+        return f"+{phone}"
+    if re.fullmatch(r"0[567]\d{8}", phone):
+        return f"+213{phone[1:]}"
+    if re.fullmatch(r"[567]\d{8}", phone):
+        return f"+213{phone}"
     if phone.startswith("+20"):
         return phone
     if phone.startswith("20"):

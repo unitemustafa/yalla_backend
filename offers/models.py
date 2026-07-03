@@ -14,10 +14,26 @@ class Offer(models.Model):
         INACTIVE = "inactive", "Inactive"
         EXPIRED = "expired", "Expired"
 
+    class Scope(models.TextChoices):
+        GENERAL = "general", "General"
+        SERVICE_CITY = "service_city", "Service city"
+
     market = models.ForeignKey(
         "markets.Market",
         on_delete=models.CASCADE,
         related_name="offers",
+    )
+    scope = models.CharField(
+        max_length=20,
+        choices=Scope.choices,
+        default=Scope.SERVICE_CITY,
+    )
+    service_city = models.ForeignKey(
+        "locations.ServiceCity",
+        on_delete=models.PROTECT,
+        related_name="offers",
+        null=True,
+        blank=True,
     )
 
     products = models.ManyToManyField(
@@ -53,6 +69,23 @@ class Offer(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    (
+                        models.Q(scope="general")
+                        & models.Q(service_city__isnull=True)
+                    )
+                    | (
+                        models.Q(scope="service_city")
+                        & models.Q(service_city__isnull=False)
+                    )
+                ),
+                name="offers_offer_region_valid",
+            ),
+        ]
 
     def __str__(self):
         return self.title

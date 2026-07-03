@@ -1,7 +1,7 @@
 from django.db import transaction
 from django.db.models.deletion import ProtectedError
 from rest_framework import generics
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, SAFE_METHODS
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.views import APIView
@@ -49,14 +49,28 @@ class ServiceCityDetailView(
     )
 
 
+class DeliveryAreaPermission(IsAuthenticated):
+    def has_permission(self, request, view):
+        if not super().has_permission(request, view):
+            return False
+        if request.method in SAFE_METHODS:
+            return True
+        return request.user.role == request.user.Role.ADMIN
+
+
 class DeliveryAreaListCreateView(generics.ListCreateAPIView):
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    permission_classes = [DeliveryAreaPermission]
     serializer_class = DeliveryAreaSerializer
 
     def get_queryset(self):
         queryset = DeliveryArea.objects.select_related("service_city").order_by(
             "name", "id"
         )
+        if self.request.user.role != self.request.user.Role.ADMIN:
+            queryset = queryset.filter(
+                is_active=True,
+                service_city__is_active=True,
+            )
         city_id = self.request.query_params.get("service_city_id")
         if city_id:
             queryset = queryset.filter(service_city_id=city_id)
@@ -67,13 +81,21 @@ class DeliveryAreaDetailView(
     ProtectedDeleteMixin,
     generics.RetrieveUpdateDestroyAPIView,
 ):
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    permission_classes = [DeliveryAreaPermission]
     serializer_class = DeliveryAreaSerializer
-    queryset = DeliveryArea.objects.select_related("service_city")
     lookup_url_kwarg = "area_id"
     protected_error_message = (
         "Delivery area cannot be deleted while representatives are using it."
     )
+
+    def get_queryset(self):
+        queryset = DeliveryArea.objects.select_related("service_city")
+        if self.request.user.role != self.request.user.Role.ADMIN:
+            queryset = queryset.filter(
+                is_active=True,
+                service_city__is_active=True,
+            )
+        return queryset
 
 
 class DeliveryAreaListView(APIView):
@@ -87,7 +109,12 @@ class DeliveryAreaListView(APIView):
 
 
 def address_queryset_for_request(request):
-    queryset = Address.objects.select_related("user", "service_city").order_by(
+    queryset = Address.objects.select_related(
+        "user",
+        "service_city",
+        "delivery_area",
+        "delivery_area__service_city",
+    ).order_by(
         "-is_default",
         "-created_at",
         "-id",
@@ -123,9 +150,7 @@ class AddressListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         address = serializer.save()
         set_default_address(address)
-        addresses = Address.objects.select_related("user", "service_city").filter(
-            user=address.user
-        ).order_by("-is_default", "-created_at", "-id")
+        addresses = address_queryset_for_request(request).filter(user=address.user)
         return Response(
             AddressSerializer(addresses, many=True).data,
             status=status.HTTP_201_CREATED,
@@ -137,11 +162,21 @@ class AddressDefaultView(APIView):
 
     def get(self, request):
         address = (
-            Address.objects.select_related("user", "service_city")
+            Address.objects.select_related(
+                "user",
+                "service_city",
+                "delivery_area",
+                "delivery_area__service_city",
+            )
             .filter(user=request.user, is_default=True)
             .order_by("-created_at", "-id")
             .first()
-            or Address.objects.select_related("user", "service_city")
+            or Address.objects.select_related(
+                "user",
+                "service_city",
+                "delivery_area",
+                "delivery_area__service_city",
+            )
             .filter(user=request.user)
             .order_by("-created_at", "-id")
             .first()
@@ -153,7 +188,12 @@ class AddressDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_address(self, request, address_id):
-        queryset = Address.objects.select_related("user", "service_city")
+        queryset = Address.objects.select_related(
+            "user",
+            "service_city",
+            "delivery_area",
+            "delivery_area__service_city",
+        )
         if request.user.role != request.user.Role.ADMIN:
             queryset = queryset.filter(user=request.user)
         try:
@@ -175,9 +215,7 @@ class AddressDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         address = serializer.save()
         set_default_address(address)
-        addresses = Address.objects.select_related("user", "service_city").filter(
-            user=address.user
-        ).order_by("-is_default", "-created_at", "-id")
+        addresses = address_queryset_for_request(request).filter(user=address.user)
         return Response(AddressSerializer(addresses, many=True).data)
 
     @transaction.atomic
@@ -197,9 +235,7 @@ class AddressDetailView(APIView):
             if next_address is not None:
                 next_address.is_default = True
                 next_address.save(update_fields=["is_default"])
-        addresses = Address.objects.select_related("user", "service_city").filter(
-            user=user
-        ).order_by("-is_default", "-created_at", "-id")
+        addresses = address_queryset_for_request(request).filter(user=user)
         return Response(AddressSerializer(addresses, many=True).data)
 
 
@@ -208,7 +244,12 @@ class AddressSetDefaultView(APIView):
 
     @transaction.atomic
     def patch(self, request, address_id):
-        queryset = Address.objects.select_related("user", "service_city")
+        queryset = Address.objects.select_related(
+            "user",
+            "service_city",
+            "delivery_area",
+            "delivery_area__service_city",
+        )
         if request.user.role != request.user.Role.ADMIN:
             queryset = queryset.filter(user=request.user)
         try:
@@ -218,7 +259,5 @@ class AddressSetDefaultView(APIView):
         Address.objects.filter(user=address.user).update(is_default=False)
         address.is_default = True
         address.save(update_fields=["is_default"])
-        addresses = Address.objects.select_related("user", "service_city").filter(
-            user=address.user
-        ).order_by("-is_default", "-created_at", "-id")
+        addresses = address_queryset_for_request(request).filter(user=address.user)
         return Response(AddressSerializer(addresses, many=True).data)

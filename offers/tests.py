@@ -45,6 +45,20 @@ class OfferAPITests(APITestCase):
             name="Offer City",
             delivery_price=Decimal("100.00"),
         )
+        self.remote_city = ServiceCity.objects.create(
+            name="Remote Offer City",
+            delivery_price=Decimal("120.00"),
+        )
+        self.client_user.market_region_mode = User.MarketRegionMode.SERVICE_CITY
+        self.client_user.market_region_service_city = self.service_city
+        self.client_user.market_region_updated_at = timezone.now()
+        self.client_user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
         self.market = Market.objects.create(
             classification=market_classification,
             name="مطعم العروض",
@@ -55,6 +69,11 @@ class OfferAPITests(APITestCase):
             name="سوق آخر",
         )
         self.other_market.service_cities.add(self.service_city)
+        self.remote_market = Market.objects.create(
+            classification=market_classification,
+            name="سوق بعيد",
+        )
+        self.remote_market.service_cities.add(self.remote_city)
         category_classification = CategoryClassification.objects.create(
             name="وجبات"
         )
@@ -80,6 +99,12 @@ class OfferAPITests(APITestCase):
             name="بيتزا",
             description="بيتزا جبن",
         )
+        self.remote_market_product = Product.objects.create(
+            market=self.remote_market,
+            category=self.category,
+            name="سلطة بعيدة",
+            description="سلطة",
+        )
         self.now = timezone.now()
 
     def authenticate(self, user):
@@ -91,6 +116,8 @@ class OfferAPITests(APITestCase):
     def offer_payload(self, **overrides):
         payload = {
             "market_id": self.market.id,
+            "scope": Offer.Scope.SERVICE_CITY,
+            "service_city_id": self.service_city.id,
             "product_ids": [self.product.id, self.second_product.id],
             "title": " عرض الغداء ",
             "description": " خصم على وجبات الغداء ",
@@ -109,6 +136,8 @@ class OfferAPITests(APITestCase):
     def create_offer(self):
         offer = Offer.objects.create(
             market=self.market,
+            scope=Offer.Scope.SERVICE_CITY,
+            service_city=self.service_city,
             title="عرض موجود",
             description="وصف العرض",
             type=Offer.OfferType.PACKAGE,
@@ -123,10 +152,14 @@ class OfferAPITests(APITestCase):
         offer.products.set([self.product])
         return offer
 
-    def test_offer_crud_requires_admin_role(self):
+    def test_offer_write_requires_admin_role(self):
         self.authenticate(self.client_user)
 
-        response = self.client.get(f"{OFFERS_BASE}/")
+        response = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(),
+            format="json",
+        )
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(
@@ -176,7 +209,7 @@ class OfferAPITests(APITestCase):
             status.HTTP_404_NOT_FOUND,
         )
 
-    def test_offer_create_rejects_products_from_other_market(self):
+    def test_offer_create_allows_products_from_same_region_markets(self):
         self.authenticate(self.admin)
 
         response = self.client.post(
@@ -185,10 +218,54 @@ class OfferAPITests(APITestCase):
             format="json",
         )
 
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(
+            {product["id"] for product in response.data["products"]},
+            {self.product.id, self.other_market_product.id},
+        )
+
+    def test_admin_can_create_general_offer(self):
+        general_market = Market.objects.create(
+            classification=self.market.classification,
+            name="سوق عام",
+            scope=Market.Scope.GENERAL,
+        )
+        general_product = Product.objects.create(
+            market=general_market,
+            category=self.category,
+            name="منتج عام",
+            description="متاح عام",
+        )
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(
+                market_id=general_market.id,
+                scope=Offer.Scope.GENERAL,
+                service_city_id=None,
+                product_ids=[general_product.id],
+            ),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(response.data["scope"], Offer.Scope.GENERAL)
+        self.assertIsNone(response.data["service_city"])
+
+    def test_offer_create_rejects_products_from_other_region(self):
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(product_ids=[self.product.id, self.remote_market_product.id]),
+            format="json",
+        )
+
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             response.data["product_ids"][0],
-            "All selected products must belong to the offer market.",
+            "All selected products must belong to the offer region.",
         )
 
     def test_offer_create_requires_products(self):
@@ -206,21 +283,65 @@ class OfferAPITests(APITestCase):
             "Choose at least one product for this offer.",
         )
 
-    def test_offer_update_rejects_market_change_when_products_do_not_match(self):
+    def test_offer_update_rejects_market_change_when_region_does_not_match(self):
         offer = self.create_offer()
         self.authenticate(self.admin)
 
         response = self.client.patch(
             f"{OFFERS_BASE}/{offer.id}/",
-            {"market_id": self.other_market.id},
+            {"market_id": self.remote_market.id},
             format="json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
-            response.data["product_ids"][0],
-            "All selected products must belong to the offer market.",
+            response.data["market_id"][0],
+            "Offer market must belong to the selected service city region.",
         )
+
+    def test_client_offer_list_and_detail_are_region_filtered(self):
+        visible_offer = self.create_offer()
+        hidden_offer = Offer.objects.create(
+            market=self.remote_market,
+            scope=Offer.Scope.SERVICE_CITY,
+            service_city=self.remote_city,
+            title="عرض بعيد",
+            description="بعيد",
+            type=Offer.OfferType.PACKAGE,
+            discount=Decimal("10.00"),
+            start_time=self.now - timedelta(hours=1),
+            end_time=self.now + timedelta(days=1),
+            status=Offer.Status.ACTIVE,
+        )
+        hidden_offer.products.set([self.remote_market_product])
+        self.authenticate(self.client_user)
+
+        list_response = self.client.get(f"{OFFERS_BASE}/")
+        visible_detail = self.client.get(f"{OFFERS_BASE}/{visible_offer.id}/")
+        hidden_detail = self.client.get(f"{OFFERS_BASE}/{hidden_offer.id}/")
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual([offer["id"] for offer in list_response.data], [visible_offer.id])
+        self.assertEqual(visible_detail.status_code, status.HTTP_200_OK)
+        self.assertEqual(hidden_detail.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_client_offer_list_requires_saved_market_region(self):
+        self.client_user.market_region_mode = None
+        self.client_user.market_region_service_city = None
+        self.client_user.market_region_updated_at = None
+        self.client_user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+        self.authenticate(self.client_user)
+
+        response = self.client.get(f"{OFFERS_BASE}/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(response.data["requires_region_selection"])
 
     def test_offer_delete_rejects_used_offer(self):
         offer = self.create_offer()
@@ -231,7 +352,6 @@ class OfferAPITests(APITestCase):
             payment_method="cash",
             discount=Decimal("0.00"),
             description="طلب مرتبط بعرض",
-            delivery_price=Decimal("100.00"),
             subtotal_price=Decimal("500.00"),
             total_price=Decimal("600.00"),
         )

@@ -283,6 +283,7 @@ class Command(BaseCommand):
                 "36.7525000",
                 "3.0419000",
                 "الجزائر",
+                "وسط الجزائر",
                 True,
             ),
             (
@@ -291,6 +292,7 @@ class Command(BaseCommand):
                 "36.7110000",
                 "3.1810000",
                 "الجزائر",
+                "باب الزوار",
                 False,
             ),
             (
@@ -299,6 +301,7 @@ class Command(BaseCommand):
                 "35.7002000",
                 "-0.6401000",
                 "وهران",
+                "وسط وهران",
                 True,
             ),
             (
@@ -307,15 +310,17 @@ class Command(BaseCommand):
                 "36.7525000",
                 "3.0419000",
                 "الجزائر",
+                "وسط الجزائر",
                 True,
             ),
-            (users["seed.sara@yalla.test"], "المنزل", "36.3600000", "6.6100000", "قسنطينة", True),
-            (users["seed.sara@yalla.test"], "الجامعة", "36.3700000", "6.6200000", "قسنطينة", False),
-            (users["seed.nadir@yalla.test"], "المنزل", "36.8950000", "7.7600000", "عنابة", True),
-            (users["seed.courier2@yalla.test"], "منطقة المندوب", "35.7200000", "-0.5500000", "وهران", True),
-            (users["seed.courier3@yalla.test"], "منطقة المندوب", "36.3650000", "6.6147000", "قسنطينة", True),
+            (users["seed.sara@yalla.test"], "المنزل", "36.3600000", "6.6100000", "قسنطينة", "وسط قسنطينة", True),
+            (users["seed.sara@yalla.test"], "الجامعة", "36.3700000", "6.6200000", "قسنطينة", "الخروب", False),
+            (users["seed.nadir@yalla.test"], "المنزل", "36.8950000", "7.7600000", "عنابة", "وسط عنابة", True),
+            (users["seed.courier2@yalla.test"], "منطقة المندوب", "35.7200000", "-0.5500000", "وهران", "بئر الجير", True),
+            (users["seed.courier3@yalla.test"], "منطقة المندوب", "36.3650000", "6.6147000", "قسنطينة", "وسط قسنطينة", True),
         ]
-        for user, name, latitude, longitude, city_name, is_default in addresses:
+        for user, name, latitude, longitude, city_name, area_name, is_default in addresses:
+            delivery_area = areas[area_name]
             Address.objects.update_or_create(
                 user=user,
                 name=name,
@@ -323,6 +328,8 @@ class Command(BaseCommand):
                     "latitude": Decimal(latitude),
                     "longitude": Decimal(longitude),
                     "service_city": cities[city_name],
+                    "delivery_area": delivery_area,
+                    "delivery_type": Address.DeliveryType.FIXED_AREA,
                     "is_default": is_default,
                 },
             )
@@ -349,8 +356,18 @@ class Command(BaseCommand):
 
     def _seed_markets(self, areas):
         classifications = {}
-        for name in ("سوبرماركت", "مطعم", "مخبزة", "حلويات", "منتجات عضوية"):
-            obj, _ = MarketClassification.objects.get_or_create(name=name)
+        classification_types = {
+            "سوبرماركت": MarketClassification.ClassificationType.POPULAR,
+            "مطعم": MarketClassification.ClassificationType.FEATURED,
+            "مخبزة": MarketClassification.ClassificationType.NORMAL,
+            "حلويات": MarketClassification.ClassificationType.NORMAL,
+            "منتجات عضوية": MarketClassification.ClassificationType.NORMAL,
+        }
+        for name, classification_type in classification_types.items():
+            obj, _ = MarketClassification.objects.update_or_create(
+                name=name,
+                defaults={"classification_type": classification_type},
+            )
             classifications[name] = obj
 
         definitions = [
@@ -359,32 +376,36 @@ class Command(BaseCommand):
                 "وسط الجزائر",
                 "سوبرماركت",
                 ["وسط الجزائر", "باب الزوار"],
+                Market.Scope.GENERAL,
             ),
             (
                 "مطبخ أطلس العائلي",
                 "باب الزوار",
                 "مطعم",
                 ["وسط الجزائر", "باب الزوار"],
+                Market.Scope.SERVICE_CITY,
             ),
             (
                 "مخبزة وهران الذهبية",
                 "وسط وهران",
                 "مخبزة",
                 ["وسط وهران"],
+                Market.Scope.SERVICE_CITY,
             ),
-            ("متجر الواحة", "بئر الجير", "سوبرماركت", ["وسط وهران", "بئر الجير"]),
-            ("نكهة قسنطينة", "وسط قسنطينة", "مطعم", ["وسط قسنطينة", "الخروب"]),
-            ("حلويات الجسور", "الخروب", "حلويات", ["وسط قسنطينة", "الخروب"]),
-            ("خيرات عنابة", "وسط عنابة", "منتجات عضوية", ["وسط عنابة", "البوني"]),
-            ("مخبزة المرجان", "البوني", "مخبزة", ["وسط عنابة", "البوني"]),
+            ("متجر الواحة", "بئر الجير", "سوبرماركت", ["وسط وهران", "بئر الجير"], Market.Scope.SERVICE_CITY),
+            ("نكهة قسنطينة", "وسط قسنطينة", "مطعم", ["وسط قسنطينة", "الخروب"], Market.Scope.SERVICE_CITY),
+            ("حلويات الجسور", "الخروب", "حلويات", ["وسط قسنطينة", "الخروب"], Market.Scope.SERVICE_CITY),
+            ("خيرات عنابة", "وسط عنابة", "منتجات عضوية", ["وسط عنابة", "البوني"], Market.Scope.SERVICE_CITY),
+            ("مخبزة المرجان", "البوني", "مخبزة", ["وسط عنابة", "البوني"], Market.Scope.SERVICE_CITY),
         ]
         markets = {}
-        for name, branch, classification, area_names in definitions:
+        for name, branch, classification, area_names, scope in definitions:
             market, _ = Market.objects.update_or_create(
                 name=name,
                 branch=branch,
                 defaults={
                     "classification": classifications[classification],
+                    "scope": scope,
                     "status": Market.Status.ACTIVE,
                 },
             )
@@ -562,6 +583,7 @@ class Command(BaseCommand):
             (
                 "عرض الفواكه الطازجة",
                 "سوق يلا الطازج",
+                Offer.Scope.GENERAL,
                 Offer.OfferType.DISCOUNT,
                 "10.00",
                 ["تفاح أحمر", "موز"],
@@ -569,6 +591,7 @@ class Command(BaseCommand):
             (
                 "عرض عشاء العائلة",
                 "مطبخ أطلس العائلي",
+                Offer.Scope.SERVICE_CITY,
                 Offer.OfferType.PACKAGE,
                 "15.00",
                 ["كسكس بالدجاج", "شوربة خضار"],
@@ -576,6 +599,7 @@ class Command(BaseCommand):
             (
                 "أساسيات الانتعاش",
                 "سوق يلا الطازج",
+                Offer.Scope.GENERAL,
                 Offer.OfferType.DELIVERY,
                 "8.00",
                 ["مياه معدنية", "عصير برتقال"],
@@ -583,6 +607,7 @@ class Command(BaseCommand):
             (
                 "غداء الجزائر السريع",
                 "مطبخ أطلس العائلي",
+                Offer.Scope.SERVICE_CITY,
                 Offer.OfferType.FLASH,
                 "12.00",
                 ["دجاج مشوي", "شوربة خضار"],
@@ -590,21 +615,30 @@ class Command(BaseCommand):
             (
                 "عرض المخبزة الصباحي",
                 "مخبزة وهران الذهبية",
+                Offer.Scope.SERVICE_CITY,
                 Offer.OfferType.FLASH,
                 "12.00",
                 ["خبز باغيت تقليدي", "كرواسون بالشوكولاتة"],
             ),
-            ("أطباق قسنطينة", "نكهة قسنطينة", Offer.OfferType.PACKAGE, "18.00", ["شخشوخة قسنطينية", "طاجين الزيتون"]),
-            ("حلويات الجسور", "حلويات الجسور", Offer.OfferType.DISCOUNT, "10.00", ["بقلاوة", "مقروط بالعسل"]),
-            ("أسبوع المنتجات العضوية", "خيرات عنابة", Offer.OfferType.ANNOUNCEMENT, "5.00", ["عسل جبلي", "زيت زيتون"]),
-            ("توصيل مخبزة المرجان", "مخبزة المرجان", Offer.OfferType.DELIVERY, "7.00", ["خبز كامل", "بريوش"]),
+            ("أطباق قسنطينة", "نكهة قسنطينة", Offer.Scope.SERVICE_CITY, Offer.OfferType.PACKAGE, "18.00", ["شخشوخة قسنطينية", "طاجين الزيتون"]),
+            ("حلويات الجسور", "حلويات الجسور", Offer.Scope.SERVICE_CITY, Offer.OfferType.DISCOUNT, "10.00", ["بقلاوة", "مقروط بالعسل"]),
+            ("أسبوع المنتجات العضوية", "خيرات عنابة", Offer.Scope.SERVICE_CITY, Offer.OfferType.ANNOUNCEMENT, "5.00", ["عسل جبلي", "زيت زيتون"]),
+            ("توصيل مخبزة المرجان", "مخبزة المرجان", Offer.Scope.SERVICE_CITY, Offer.OfferType.DELIVERY, "7.00", ["خبز كامل", "بريوش"]),
         ]
         offers = {}
-        for title, market_name, offer_type, discount, product_names in definitions:
+        for title, market_name, scope, offer_type, discount, product_names in definitions:
+            market = markets[market_name]
+            service_city = None
+            if scope == Offer.Scope.SERVICE_CITY:
+                service_city = market.service_cities.filter(
+                    is_active=True,
+                ).order_by("id").first()
             offer, _ = Offer.objects.update_or_create(
-                market=markets[market_name],
+                market=market,
                 title=title,
                 defaults={
+                    "scope": scope,
+                    "service_city": service_city,
                     "description": f"عرض تجريبي: {title}.",
                     "type": offer_type,
                     "discount": Decimal(discount),
@@ -716,7 +750,6 @@ class Command(BaseCommand):
                 for variant, quantity in definition["items"]
             )
             discount = definition["offer_discount"]
-            total = subtotal + definition["delivery_price"] - discount
             delivery_address = (
                 definition["user"].addresses.filter(is_default=True).first()
                 or definition["user"].addresses.order_by("-created_at").first()
@@ -727,17 +760,37 @@ class Command(BaseCommand):
                 .first()
                 or definition["market"].service_cities.order_by("id").first()
             )
+            delivery_area = (
+                delivery_address.delivery_area
+                if delivery_address
+                and delivery_address.delivery_area_id
+                and delivery_address.delivery_area.service_city_id == service_city.id
+                else None
+            )
+            delivery_type = (
+                Order.DeliveryType.FIXED_AREA
+                if delivery_area is not None
+                else Order.DeliveryType.DELIVERY
+            )
+            delivery_price = (
+                delivery_area.delivery_price
+                if delivery_area is not None
+                else None
+            )
+            total = subtotal + (delivery_price or Decimal("0.00")) - discount
             order, _ = Order.objects.update_or_create(
                 description=definition["marker"],
                 defaults={
                     "user": definition["user"],
                     "market": definition["market"],
                     "service_city": service_city,
+                    "delivery_area": delivery_area,
+                    "delivery_type": delivery_type,
                     "payment_method": definition["payment_method"],
                     "discount": discount,
                     "status": definition["status"],
                     "review_status": Order.ReviewStatus.APPROVED,
-                    "delivery_price": definition["delivery_price"],
+                    "delivery_price": delivery_price,
                     "subtotal_price": subtotal,
                     "total_price": total,
                     "delivery_address": delivery_address,

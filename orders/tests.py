@@ -55,12 +55,6 @@ class OrderAPITests(APITestCase):
             password="Password1!",
             role=User.Role.CLIENT,
         )
-        self.address = Address.objects.create(
-            user=self.customer,
-            name="Home",
-            latitude=Decimal("36.7525000"),
-            longitude=Decimal("3.0420000"),
-        )
         self.service_city = ServiceCity.objects.create(
             name="Algiers",
             center_latitude=Decimal("36.7525000"),
@@ -68,8 +62,6 @@ class OrderAPITests(APITestCase):
             radius_km=Decimal("20.00"),
             delivery_price=Decimal("120.00"),
         )
-        self.address.service_city = self.service_city
-        self.address.save(update_fields=["service_city"])
         self.delivery_area = DeliveryArea.objects.create(
             service_city=self.service_city,
             name="Central Algiers",
@@ -77,6 +69,26 @@ class OrderAPITests(APITestCase):
             center_longitude=Decimal("3.0420000"),
             radius_km=Decimal("5.00"),
             delivery_price=Decimal("120.00"),
+        )
+        self.address = Address.objects.create(
+            user=self.customer,
+            name="Home",
+            latitude=Decimal("36.7525000"),
+            longitude=Decimal("3.0420000"),
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+            is_default=True,
+        )
+        self.customer.market_region_mode = User.MarketRegionMode.SERVICE_CITY
+        self.customer.market_region_service_city = self.service_city
+        self.customer.market_region_updated_at = timezone.now()
+        self.customer.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
         )
         CourierProfile.objects.create(
             user=self.representative,
@@ -126,6 +138,8 @@ class OrderAPITests(APITestCase):
         now = timezone.now()
         self.offer = Offer.objects.create(
             market=self.market,
+            scope=Offer.Scope.SERVICE_CITY,
+            service_city=self.service_city,
             title="Lunch",
             discount=Decimal("10.00"),
             start_time=now - timedelta(hours=1),
@@ -134,6 +148,8 @@ class OrderAPITests(APITestCase):
         self.offer.products.set([self.product])
         self.second_offer = Offer.objects.create(
             market=self.second_market,
+            scope=Offer.Scope.SERVICE_CITY,
+            service_city=self.service_city,
             title="Pizza Deal",
             discount=Decimal("20.00"),
             start_time=now - timedelta(hours=1),
@@ -256,11 +272,13 @@ class OrderAPITests(APITestCase):
             user=self.other_customer,
             market=self.market,
             service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Order.DeliveryType.FIXED_AREA,
             payment_method="cash_on_delivery",
             status=Order.Status.PENDING,
-            delivery_price=Decimal("100.00"),
+            delivery_price=self.delivery_area.delivery_price,
             subtotal_price=Decimal("500.00"),
-            total_price=Decimal("600.00"),
+            total_price=Decimal("620.00"),
         )
         token = RefreshToken.for_user(self.customer).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
@@ -277,11 +295,13 @@ class OrderAPITests(APITestCase):
             user=self.customer,
             market=self.market,
             service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Order.DeliveryType.FIXED_AREA,
             payment_method="cash_on_delivery",
             status=Order.Status.PENDING,
-            delivery_price=Decimal("100.00"),
+            delivery_price=self.delivery_area.delivery_price,
             subtotal_price=Decimal("500.00"),
-            total_price=Decimal("600.00"),
+            total_price=Decimal("620.00"),
         )
         token = RefreshToken.for_user(self.customer).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
@@ -298,6 +318,98 @@ class OrderAPITests(APITestCase):
         response = self.client.get(f"{ORDERS_BASE}/my/")
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_client_preview_requires_saved_market_region(self):
+        self.customer.market_region_mode = None
+        self.customer.market_region_service_city = None
+        self.customer.market_region_updated_at = None
+        self.customer.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+        token = RefreshToken.for_user(self.customer).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {"items": [{"variant_id": self.variant.id, "quantity": 1}]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(response.data["requires_region_selection"])
+
+    def test_client_preview_rejects_product_outside_saved_region(self):
+        remote_city = ServiceCity.objects.create(
+            name="Remote Preview City",
+            delivery_price=Decimal("90.00"),
+        )
+        remote_market = Market.objects.create(
+            classification=self.market.classification,
+            name="Remote Preview Market",
+        )
+        remote_market.service_cities.add(remote_city)
+        remote_product = Product.objects.create(
+            market=remote_market,
+            category=self.product.category,
+            name="Remote Product",
+        )
+        remote_variant = ProductVariant.objects.create(
+            product=remote_product,
+            price=Decimal("300.00"),
+            sku="REMOTE-1",
+        )
+        token = RefreshToken.for_user(self.customer).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {"items": [{"variant_id": remote_variant.id, "quantity": 1}]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("outside the saved market region", response.data["items"][0])
+
+    def test_client_create_order_allows_general_region_with_delivery_city(self):
+        self.market.scope = Market.Scope.GENERAL
+        self.market.save(update_fields=["scope"])
+        self.offer.scope = Offer.Scope.GENERAL
+        self.offer.service_city = None
+        self.offer.save(update_fields=["scope", "service_city"])
+        self.customer.market_region_mode = User.MarketRegionMode.GENERAL
+        self.customer.market_region_service_city = None
+        self.customer.market_region_updated_at = timezone.now()
+        self.customer.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+        token = RefreshToken.for_user(self.customer).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/create/",
+            {
+                "payment_method": "cash_on_delivery",
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+                "offers": [{"offer_id": self.offer.id}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        order = Order.objects.get(id=response.data[0]["id"])
+        self.assertEqual(order.market_id, self.market.id)
+        self.assertEqual(order.service_city_id, self.service_city.id)
+        self.assertEqual(order.delivery_area_id, self.delivery_area.id)
+        self.assertEqual(order.delivery_type, Order.DeliveryType.FIXED_AREA)
+        self.assertEqual(order.delivery_price, self.delivery_area.delivery_price)
 
     def test_client_can_preview_order_grouped_by_market(self):
         token = RefreshToken.for_user(self.customer).access_token
@@ -337,6 +449,10 @@ class OrderAPITests(APITestCase):
         first_market = response.data["market_groups"][0]
         second_market = response.data["market_groups"][1]
         self.assertEqual(first_market["market"]["id"], self.market.id)
+        self.assertEqual(first_market["delivery_area"]["id"], self.delivery_area.id)
+        self.assertEqual(first_market["delivery_type"], Order.DeliveryType.FIXED_AREA)
+        self.assertEqual(first_market["delivery_price"], "120.00")
+        self.assertEqual(first_market["delivery_message"], "")
         self.assertEqual(first_market["pricing"]["products_subtotal"], "1000.00")
         self.assertEqual(first_market["pricing"]["total_offer_discounts"], "100.00")
         self.assertEqual(first_market["pricing"]["delivery_price"], "120.00")
@@ -368,6 +484,36 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.data["summary"]["discount_total"], "240.00")
         self.assertEqual(response.data["summary"]["delivery_total"], "240.00")
         self.assertEqual(response.data["summary"]["grand_total"], "1700.00")
+
+    def test_client_preview_other_delivery_has_null_delivery_price(self):
+        other_address = Address.objects.create(
+            user=self.customer,
+            name="Other Area",
+            service_city=self.service_city,
+            delivery_type=Address.DeliveryType.DELIVERY,
+        )
+        token = RefreshToken.for_user(self.customer).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "address_id": other_address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        group = response.data["market_groups"][0]
+        self.assertIsNone(group["delivery_area"])
+        self.assertEqual(group["delivery_type"], Order.DeliveryType.DELIVERY)
+        self.assertIsNone(group["delivery_price"])
+        self.assertIsNone(group["pricing"]["delivery_price"])
+        self.assertIn("not fixed", group["delivery_message"])
+        self.assertEqual(group["pricing"]["market_total"], "500.00")
+        self.assertEqual(response.data["summary"]["delivery_total"], "0.00")
+        self.assertEqual(response.data["summary"]["grand_total"], "500.00")
 
     def test_preview_offer_uses_product_variant_price_when_product_is_not_selected(self):
         token = RefreshToken.for_user(self.customer).access_token
@@ -447,6 +593,8 @@ class OrderAPITests(APITestCase):
         self.assertEqual(first_order.market_id, self.market.id)
         self.assertEqual(first_order.delivery_address_id, self.address.id)
         self.assertEqual(first_order.service_city_id, self.service_city.id)
+        self.assertEqual(first_order.delivery_area_id, self.delivery_area.id)
+        self.assertEqual(first_order.delivery_type, Order.DeliveryType.FIXED_AREA)
         self.assertEqual(first_order.status, Order.Status.PENDING)
         self.assertEqual(
             first_order.review_status,
@@ -467,6 +615,8 @@ class OrderAPITests(APITestCase):
 
         self.assertEqual(second_order.market_id, self.second_market.id)
         self.assertEqual(second_order.service_city_id, self.service_city.id)
+        self.assertEqual(second_order.delivery_area_id, self.delivery_area.id)
+        self.assertEqual(second_order.delivery_type, Order.DeliveryType.FIXED_AREA)
         self.assertEqual(second_order.subtotal_price, Decimal("700.00"))
         self.assertEqual(second_order.discount, Decimal("140.00"))
         self.assertEqual(second_order.delivery_price, Decimal("120.00"))
@@ -481,7 +631,50 @@ class OrderAPITests(APITestCase):
             2,
         )
 
+    def test_client_create_other_delivery_stores_null_delivery_price(self):
+        other_address = Address.objects.create(
+            user=self.customer,
+            name="Other Area",
+            service_city=self.service_city,
+            delivery_type=Address.DeliveryType.DELIVERY,
+        )
+        token = RefreshToken.for_user(self.customer).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/create/",
+            {
+                "address_id": other_address.id,
+                "payment_method": "cash_on_delivery",
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        order = Order.objects.get(id=response.data[0]["id"])
+        self.assertEqual(order.service_city_id, self.service_city.id)
+        self.assertIsNone(order.delivery_area_id)
+        self.assertEqual(order.delivery_type, Order.DeliveryType.DELIVERY)
+        self.assertIsNone(order.delivery_price)
+        self.assertEqual(order.total_price, Decimal("500.00"))
+        self.assertIsNone(response.data[0]["delivery_area"])
+        self.assertEqual(response.data[0]["delivery_type"], Order.DeliveryType.DELIVERY)
+        self.assertIsNone(response.data[0]["delivery_price"])
+
     def test_client_create_order_requires_market_delivery_coverage(self):
+        self.customer.market_region_mode = User.MarketRegionMode.GENERAL
+        self.customer.market_region_service_city = None
+        self.customer.market_region_updated_at = timezone.now()
+        self.customer.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+        self.second_market.scope = Market.Scope.GENERAL
+        self.second_market.save(update_fields=["scope"])
         self.second_market.delivery_areas.clear()
         self.second_market.service_cities.clear()
         token = RefreshToken.for_user(self.customer).access_token
@@ -552,7 +745,9 @@ class OrderAPITests(APITestCase):
         order_id = create_response.data[0]["id"]
         order = Order.objects.get(pk=order_id)
         self.assertEqual(order.service_city_id, self.service_city.id)
-        self.assertEqual(order.delivery_price, self.service_city.delivery_price)
+        self.assertEqual(order.delivery_area_id, self.delivery_area.id)
+        self.assertEqual(order.delivery_type, Order.DeliveryType.FIXED_AREA)
+        self.assertEqual(order.delivery_price, self.delivery_area.delivery_price)
         self.assertEqual(order.review_status, Order.ReviewStatus.PENDING_REVIEW)
 
         admin_token = RefreshToken.for_user(self.admin).access_token

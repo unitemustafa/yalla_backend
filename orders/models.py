@@ -2,6 +2,10 @@ from django.db import models
 
 
 class Order(models.Model):
+    class DeliveryType(models.TextChoices):
+        FIXED_AREA = "fixed_area", "Fixed area"
+        DELIVERY = "delivery", "Delivery"
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         CONFIRMED = "confirmed", "Confirmed"
@@ -47,6 +51,18 @@ class Order(models.Model):
         on_delete=models.PROTECT,
         related_name="orders",
     )
+    delivery_area = models.ForeignKey(
+        "locations.DeliveryArea",
+        on_delete=models.PROTECT,
+        related_name="orders",
+        blank=True,
+        null=True,
+    )
+    delivery_type = models.CharField(
+        max_length=20,
+        choices=DeliveryType.choices,
+        default=DeliveryType.DELIVERY,
+    )
     offers = models.ManyToManyField(
         "offers.Offer",
         through="OrderOffer",
@@ -62,7 +78,13 @@ class Order(models.Model):
         choices=ReviewStatus.choices,
         default=ReviewStatus.PENDING_REVIEW,
     )
-    delivery_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    delivery_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        blank=True,
+        null=True,
+        default=None,
+    )
     subtotal_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     total_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     image = models.ImageField(upload_to="orders/", blank=True, null=True)
@@ -93,6 +115,32 @@ class Order(models.Model):
     rejection_reason = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(delivery_price__isnull=True)
+                    | models.Q(delivery_price__gte=0)
+                ),
+                name="orders_order_delivery_price_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (
+                        models.Q(delivery_type="fixed_area")
+                        & models.Q(delivery_area__isnull=False)
+                        & models.Q(delivery_price__isnull=False)
+                    )
+                    | (
+                        models.Q(delivery_type="delivery")
+                        & models.Q(delivery_area__isnull=True)
+                        & models.Q(delivery_price__isnull=True)
+                    )
+                ),
+                name="orders_order_delivery_type_valid",
+            ),
+        ]
 
 
 class OrderItem(models.Model):

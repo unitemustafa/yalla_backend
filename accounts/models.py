@@ -9,6 +9,10 @@ class User(AbstractUser):
         CLIENT = "client", "Client"
         REPRESENTATIVE = "representative", "Representative"
 
+    class MarketRegionMode(models.TextChoices):
+        GENERAL = "general", "General"
+        SERVICE_CITY = "service_city", "Service city"
+
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=30, unique=True)
     role = models.CharField(max_length=30, choices=Role.choices, default=Role.CLIENT)
@@ -21,6 +25,20 @@ class User(AbstractUser):
     terms_accepted_at = models.DateTimeField(null=True, blank=True)
     privacy_policy_version = models.CharField(max_length=20, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    market_region_mode = models.CharField(
+        max_length=20,
+        choices=MarketRegionMode.choices,
+        null=True,
+        blank=True,
+    )
+    market_region_service_city = models.ForeignKey(
+        "locations.ServiceCity",
+        on_delete=models.PROTECT,
+        related_name="market_region_users",
+        null=True,
+        blank=True,
+    )
+    market_region_updated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -29,6 +47,23 @@ class User(AbstractUser):
             models.UniqueConstraint(
                 Lower("username"),
                 name="accounts_user_username_ci_unique",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (
+                        models.Q(market_region_mode__isnull=True)
+                        & models.Q(market_region_service_city__isnull=True)
+                    )
+                    | (
+                        models.Q(market_region_mode="general")
+                        & models.Q(market_region_service_city__isnull=True)
+                    )
+                    | (
+                        models.Q(market_region_mode="service_city")
+                        & models.Q(market_region_service_city__isnull=False)
+                    )
+                ),
+                name="accounts_user_market_region_valid",
             ),
         ]
 

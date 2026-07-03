@@ -1,47 +1,75 @@
 from django.db.models import ProtectedError
 
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import get_object_or_404
-from rest_framework.permissions import BasePermission, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
+from markets.region import (
+    current_market_region_selection,
+    no_market_region_selection_response,
+    visible_offer_queryset,
+)
+from markets.serializers import HomeOfferSerializer
 
 from .models import Offer
 from .serializers import AdminOfferSerializer
 
 
-class IsAdminRole(BasePermission):
-    message = "Only admin users can manage offers."
-
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.role == User.Role.ADMIN
-        )
-
-
 class OfferListCreateView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         return (
             Offer.objects.select_related(
                 "market__classification",
+                "service_city",
             )
             .prefetch_related(
                 "market__delivery_areas",
+                "market__service_cities",
                 "products",
             )
             .order_by("-created_at", "-id")
         )
 
     def get(self, request):
-        return Response(AdminOfferSerializer(self.get_queryset(), many=True).data)
+        if request.user.role == User.Role.ADMIN:
+            return Response(
+                AdminOfferSerializer(self.get_queryset(), many=True).data
+            )
+        if request.user.role != User.Role.CLIENT:
+            raise PermissionDenied("Only admin or client users can access offers.")
+        if current_market_region_selection(request.user) is None:
+            return no_market_region_selection_response()
+
+        offers = (
+            visible_offer_queryset(request.user)
+            .select_related("market__classification")
+            .prefetch_related(
+                "market__service_cities",
+                "market__delivery_areas",
+                "products__category__classification",
+                "products__market__classification",
+                "products__market__service_cities",
+                "products__market__delivery_areas",
+                "products__variants",
+            )
+            .order_by("-created_at", "-id")
+        )
+        return Response(
+            HomeOfferSerializer(
+                offers,
+                many=True,
+                context={"request": request},
+            ).data
+        )
 
     def post(self, request):
+        self._require_admin(request)
         serializer = AdminOfferSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         offer = serializer.save()
@@ -51,17 +79,24 @@ class OfferListCreateView(APIView):
             status=status.HTTP_201_CREATED,
         )
 
+    @staticmethod
+    def _require_admin(request):
+        if request.user.role != User.Role.ADMIN:
+            raise PermissionDenied("Only admin users can manage offers.")
+
 
 class OfferDetailView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         return (
             Offer.objects.select_related(
                 "market__classification",
+                "service_city",
             )
             .prefetch_related(
                 "market__delivery_areas",
+                "market__service_cities",
                 "products",
             )
         )
@@ -70,10 +105,33 @@ class OfferDetailView(APIView):
         return get_object_or_404(self.get_queryset(), id=offer_id)
 
     def get(self, request, offer_id):
+        if request.user.role == User.Role.CLIENT:
+            if current_market_region_selection(request.user) is None:
+                return no_market_region_selection_response()
+            offer = get_object_or_404(
+                visible_offer_queryset(request.user)
+                .select_related("market__classification")
+                .prefetch_related(
+                    "market__service_cities",
+                    "market__delivery_areas",
+                    "products__category__classification",
+                    "products__market__classification",
+                    "products__market__service_cities",
+                    "products__market__delivery_areas",
+                    "products__variants",
+                ),
+                id=offer_id,
+            )
+            return Response(
+                HomeOfferSerializer(offer, context={"request": request}).data
+            )
+        if request.user.role != User.Role.ADMIN:
+            raise PermissionDenied("Only admin or client users can access offers.")
         offer = self.get_offer(offer_id)
         return Response(AdminOfferSerializer(offer).data)
 
     def patch(self, request, offer_id):
+        self._require_admin(request)
         offer = self.get_offer(offer_id)
         serializer = AdminOfferSerializer(
             offer,
@@ -86,6 +144,7 @@ class OfferDetailView(APIView):
         return Response(AdminOfferSerializer(offer).data)
 
     def delete(self, request, offer_id):
+        self._require_admin(request)
         offer = self.get_offer(offer_id)
         try:
             offer.delete()
@@ -98,3 +157,8 @@ class OfferDetailView(APIView):
             {"details": "Deleted Successfully"},
             status=status.HTTP_200_OK,
         )
+
+    @staticmethod
+    def _require_admin(request):
+        if request.user.role != User.Role.ADMIN:
+            raise PermissionDenied("Only admin users can manage offers.")

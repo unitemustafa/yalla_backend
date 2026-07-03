@@ -17,7 +17,7 @@ from .models import Market, MarketClassification
 class AdminMarketClassificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = MarketClassification
-        fields = ("id", "name")
+        fields = ("id", "name", "classification_type")
 
     def validate_name(self, value):
         name = value.strip()
@@ -80,6 +80,7 @@ class HomeMarketSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "branch",
+            "scope",
             "status",
             "classification_id",
             "service_cities",
@@ -92,7 +93,7 @@ class HomeMarketClassificationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = MarketClassification
-        fields = ("id", "name", "markets")
+        fields = ("id", "name", "classification_type", "markets")
 
     def get_markets(self, classification):
         eligible_market_ids = self.context["eligible_market_ids"]
@@ -143,6 +144,7 @@ class AdminMarketSerializer(serializers.ModelSerializer):
             "classification_id",
             "name",
             "branch",
+            "scope",
             "status",
             "service_cities",
             "service_city_ids",
@@ -176,6 +178,10 @@ class AdminMarketSerializer(serializers.ModelSerializer):
                 }
             )
 
+        scope = attrs.get(
+            "scope",
+            getattr(self.instance, "scope", Market.Scope.SERVICE_CITY),
+        )
         service_cities = attrs.get("service_cities")
         delivery_areas = attrs.get("delivery_areas")
         if service_cities is None and delivery_areas is not None:
@@ -186,6 +192,9 @@ class AdminMarketSerializer(serializers.ModelSerializer):
                 ).distinct()
             )
             attrs["service_cities"] = service_cities
+
+        if scope == Market.Scope.GENERAL:
+            return attrs
 
         existing_count = (
             self.instance.service_cities.count()
@@ -227,7 +236,7 @@ class MarketClassificationCountSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = MarketClassification
-        fields = ("id", "name", "product_count")
+        fields = ("id", "name", "classification_type", "product_count")
 
 
 class HomeCategorySerializer(serializers.ModelSerializer):

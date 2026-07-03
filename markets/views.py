@@ -1,6 +1,5 @@
 from django.db.models import ProtectedError
 from django.db.models import Count, Max, Min, Prefetch, Q
-from django.utils import timezone
 from rest_framework import status
 from rest_framework.generics import get_object_or_404
 from rest_framework.pagination import PageNumberPagination
@@ -10,9 +9,15 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 from catalog.models import Product, ProductVariant
-from offers.models import Offer
 
 from .models import Market, MarketClassification
+from .region import (
+    current_market_region_selection,
+    no_market_region_selection_response,
+    visible_market_queryset,
+    visible_offer_queryset,
+    visible_product_queryset,
+)
 from .serializers import (
     AdminMarketClassificationSerializer,
     AdminMarketSerializer,
@@ -24,7 +29,6 @@ from .serializers import (
     ProductDetailSerializer,
     StoreMarketClassificationSerializer,
 )
-from .services import markets_covering_address
 
 
 class IsAdminRole(BasePermission):
@@ -188,19 +192,14 @@ class HomeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        address = get_user_home_address(request.user)
-        if address is None:
-            return Response(
-                {
-                    "detail": (
-                        "A user address is required before loading the home page."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        current_selection = current_market_region_selection(request.user)
+        if current_selection is None:
+            return no_market_region_selection_response()
 
-        market_ids = markets_covering_address(address)
-        now = timezone.now()
+        address = get_user_home_address(request.user)
+        market_ids = list(
+            visible_market_queryset(request.user).values_list("id", flat=True)
+        )
 
         products = (
             Product.objects.filter(market_id__in=market_ids)
@@ -216,12 +215,7 @@ class HomeView(APIView):
             .order_by("-created_at", "-id")[:8]
         )
         offers = (
-            Offer.objects.filter(
-                market_id__in=market_ids,
-                status=Offer.Status.ACTIVE,
-                start_time__lte=now,
-                end_time__gte=now,
-            )
+            visible_offer_queryset(request.user)
             .select_related("market__classification")
             .prefetch_related(
                 "market__service_cities",
@@ -258,12 +252,15 @@ class HomeView(APIView):
         }
         return Response(
             {
+                "current_selection": current_selection,
                 "location": {
                     "address_id": address.id,
                     "name": address.name,
                     "latitude": address.latitude,
                     "longitude": address.longitude,
-                },
+                }
+                if address is not None
+                else None,
                 "offers": HomeOfferSerializer(
                     offers,
                     many=True,
@@ -286,23 +283,22 @@ class HomeView(APIView):
 
 class MarketClassificationSummaryView(APIView):
     permission_classes = [IsAuthenticated]
+    classification_type = None
 
     def get(self, request):
-        address = get_user_home_address(request.user)
-        if address is None:
-            return Response(
-                {
-                    "detail": (
-                        "A user address is required before loading market "
-                        "classifications."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        current_selection = current_market_region_selection(request.user)
+        if current_selection is None:
+            return no_market_region_selection_response()
 
-        market_ids = markets_covering_address(address)
+        market_ids = list(
+            visible_market_queryset(request.user).values_list("id", flat=True)
+        )
+        classification_filters = {"markets__id__in": market_ids}
+        if self.classification_type is not None:
+            classification_filters["classification_type"] = self.classification_type
+
         common_classifications = (
-            MarketClassification.objects.filter(markets__id__in=market_ids)
+            MarketClassification.objects.filter(**classification_filters)
             .annotate(
                 product_count=Count(
                     "markets__products",
@@ -314,7 +310,7 @@ class MarketClassificationSummaryView(APIView):
             .order_by("-product_count", "name")[:4]
         )
         all_classifications = (
-            MarketClassification.objects.filter(markets__id__in=market_ids)
+            MarketClassification.objects.filter(**classification_filters)
             .annotate(
                 product_count=Count(
                     "markets__products",
@@ -365,6 +361,19 @@ class MarketClassificationSummaryView(APIView):
             "products_by_market": products_by_market,
         }
 
+        if self.classification_type is not None:
+            return Response(
+                {
+                    "current_selection": current_selection,
+                    "classifications": StoreMarketClassificationSerializer(
+                        all_classifications,
+                        many=True,
+                        context=serializer_context,
+                    ).data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
         return Response(
             {
                 "common_market_classifications": MarketClassificationCountSerializer(
@@ -381,27 +390,32 @@ class MarketClassificationSummaryView(APIView):
         )
 
 
+class FeaturedMarketClassificationSummaryView(MarketClassificationSummaryView):
+    classification_type = MarketClassification.ClassificationType.FEATURED
+
+
+class PopularMarketClassificationSummaryView(MarketClassificationSummaryView):
+    classification_type = MarketClassification.ClassificationType.POPULAR
+
+
+class NormalMarketClassificationSummaryView(MarketClassificationSummaryView):
+    classification_type = MarketClassification.ClassificationType.NORMAL
+
+
 class MarketClassificationMarketsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, classification_id):
+        if current_market_region_selection(request.user) is None:
+            return no_market_region_selection_response()
+
         classification = get_object_or_404(
             MarketClassification,
             id=classification_id,
         )
-        address = get_user_home_address(request.user)
-        if address is None:
-            return Response(
-                {
-                    "detail": (
-                        "A user address is required before loading "
-                        "classification markets."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        market_ids = markets_covering_address(address)
+        market_ids = list(
+            visible_market_queryset(request.user).values_list("id", flat=True)
+        )
         markets = (
             Market.objects.filter(
                 id__in=market_ids,
@@ -426,6 +440,7 @@ class MarketClassificationMarketsView(APIView):
                 "classification": {
                     "id": classification.id,
                     "name": classification.name,
+                    "classification_type": classification.classification_type,
                 },
                 "markets": MarketWithCommonProductsSerializer(
                     markets,
@@ -445,21 +460,11 @@ class ProductSearchView(APIView):
     pagination_class = ProductSearchPagination
 
     def get(self, request):
-        address = get_user_home_address(request.user)
-        if address is None:
-            return Response(
-                {
-                    "detail": (
-                        "A user address is required before searching products."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if current_market_region_selection(request.user) is None:
+            return no_market_region_selection_response()
 
-        market_ids = markets_covering_address(address)
         search_query = request.query_params.get("q", "").strip()
-        products = Product.objects.filter(
-            market_id__in=market_ids,
+        products = visible_product_queryset(request.user).filter(
             market__status=Market.Status.ACTIVE,
         )
         if search_query:
@@ -534,25 +539,16 @@ class AddressProductListView(APIView):
         return products.order_by(*ordering[sort_param])
 
     def get(self, request):
-        address = get_user_home_address(request.user)
-        if address is None:
-            return Response(
-                {
-                    "detail": (
-                        "A user address is required before loading address products."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if current_market_region_selection(request.user) is None:
+            return no_market_region_selection_response()
 
         sort_param, error_response = self.get_sort_param(request)
         if error_response is not None:
             return error_response
 
-        market_ids = markets_covering_address(address)
         products = (
-            Product.objects.filter(
-                market_id__in=market_ids,
+            visible_product_queryset(request.user)
+            .filter(
                 market__status=Market.Status.ACTIVE,
                 is_available=True,
             )
@@ -586,23 +582,13 @@ class ProductDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, product_id):
-        address = get_user_home_address(request.user)
-        if address is None:
-            return Response(
-                {
-                    "detail": (
-                        "A user address is required before loading product "
-                        "details."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if current_market_region_selection(request.user) is None:
+            return no_market_region_selection_response()
 
-        market_ids = markets_covering_address(address)
         product = get_object_or_404(
-            Product.objects.filter(
+            visible_product_queryset(request.user)
+            .filter(
                 id=product_id,
-                market_id__in=market_ids,
                 market__status=Market.Status.ACTIVE,
             )
             .select_related(

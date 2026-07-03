@@ -52,7 +52,6 @@ class NotificationAPITests(APITestCase):
             market=market,
             service_city=city,
             payment_method="cash",
-            delivery_price=Decimal("25.00"),
             subtotal_price=Decimal("100.00"),
             total_price=Decimal("125.00"),
         )

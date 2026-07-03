@@ -2,7 +2,31 @@ from django.db import models
 
 
 class MarketClassification(models.Model):
+    class ClassificationType(models.TextChoices):
+        POPULAR = "popular", "Popular"
+        FEATURED = "featured", "Featured"
+        NORMAL = "normal", "Normal"
+
     name = models.CharField(max_length=100)
+    classification_type = models.CharField(
+        max_length=20,
+        choices=ClassificationType.choices,
+        default=ClassificationType.NORMAL,
+    )
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(
+                    classification_type__in=[
+                        "popular",
+                        "featured",
+                        "normal",
+                    ]
+                ),
+                name="markets_market_classification_type_valid",
+            ),
+        ]
 
     def __str__(self):
         return self.name
@@ -13,6 +37,10 @@ class Market(models.Model):
         ACTIVE = "active", "Active"
         INACTIVE = "inactive", "Inactive"
 
+    class Scope(models.TextChoices):
+        GENERAL = "general", "General"
+        SERVICE_CITY = "service_city", "Service city"
+
     classification = models.ForeignKey(
         MarketClassification,
         on_delete=models.PROTECT,
@@ -20,6 +48,11 @@ class Market(models.Model):
     )
     name = models.CharField(max_length=255)
     branch = models.CharField(max_length=255, blank=True)
+    scope = models.CharField(
+        max_length=20,
+        choices=Scope.choices,
+        default=Scope.SERVICE_CITY,
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
