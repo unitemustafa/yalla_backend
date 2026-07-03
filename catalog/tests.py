@@ -815,6 +815,7 @@ class AdditionClassificationAPITests(APITestCase):
                 "name_ar": " جبن ",
                 "name_en": " Cheese ",
                 "price": "120.00",
+                "products": [self.product.id],
                 "is_active": True,
             },
         )
@@ -827,11 +828,10 @@ class AdditionClassificationAPITests(APITestCase):
             create_response.data["classification"]["id"],
             classification.id,
         )
-        self.assertEqual(create_response.data["products"], [])
+        self.assertEqual(create_response.data["products"], [self.product.id])
 
         addition = ProductAddition.objects.get(id=create_response.data["id"])
         self.assertEqual(addition.price, Decimal("120.00"))
-        addition.products.add(self.product)
 
         list_response = self.client.get(f"{CATALOG_BASE}/product-additions/")
         detail_response = self.client.get(
@@ -843,8 +843,10 @@ class AdditionClassificationAPITests(APITestCase):
                 "classification_id": updated_classification.id,
                 "name_ar": "صلصة حارة",
                 "price": "150.00",
+                "products": [],
                 "is_active": False,
             },
+            format="json",
         )
         delete_response = self.client.delete(
             f"{CATALOG_BASE}/product-additions/{addition.id}/"
@@ -864,6 +866,7 @@ class AdditionClassificationAPITests(APITestCase):
         self.assertEqual(update_response.data["name_ar"], "صلصة حارة")
         self.assertEqual(update_response.data["price"], "150.00")
         self.assertFalse(update_response.data["is_active"])
+        self.assertEqual(update_response.data["products"], [])
         self.assertEqual(
             update_response.data["classification"]["id"],
             updated_classification.id,

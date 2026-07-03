@@ -381,7 +381,11 @@ class ProductAdditionSerializer(serializers.ModelSerializer):
         write_only=True,
     )
     classification = AdditionClassificationSerializer(read_only=True)
-    products = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    products = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=Product.objects.all(),
+        required=False,
+    )
 
     class Meta:
         model = ProductAddition
@@ -402,3 +406,16 @@ class ProductAdditionSerializer(serializers.ModelSerializer):
 
     def validate_name_en(self, value):
         return value.strip()
+
+    def create(self, validated_data):
+        products = validated_data.pop("products", [])
+        addition = super().create(validated_data)
+        addition.products.set(products)
+        return addition
+
+    def update(self, instance, validated_data):
+        products = validated_data.pop("products", None)
+        addition = super().update(instance, validated_data)
+        if products is not None:
+            addition.products.set(products)
+        return addition
