@@ -6,6 +6,9 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from markets.models import Market, MarketClassification
+from orders.models import Order
+
 from .models import Address, DeliveryArea, ServiceCity
 from .serializers import AddressSerializer
 
@@ -30,6 +33,30 @@ class AddressAPITests(TestCase):
             delivery_price=Decimal("50.00"),
         )
         self.client.force_authenticate(self.user)
+
+    def create_market(self):
+        classification = MarketClassification.objects.create(name="Food")
+        market = Market.objects.create(
+            classification=classification,
+            name="Address Market",
+        )
+        market.service_cities.add(self.service_city)
+        market.delivery_areas.add(self.delivery_area)
+        return market
+
+    def create_order_for_address(self, address):
+        return Order.objects.create(
+            user=address.user,
+            delivery_address=address,
+            market=self.create_market(),
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Order.DeliveryType.FIXED_AREA,
+            payment_method="cash_on_delivery",
+            delivery_price=self.delivery_area.delivery_price,
+            subtotal_price=Decimal("100.00"),
+            total_price=Decimal("150.00"),
+        )
 
     def test_client_can_create_address_with_address_model_fields(self):
         response = self.client.post(
@@ -393,6 +420,173 @@ class AddressAPITests(TestCase):
         self.assertEqual(address.details, "Saved street")
         self.assertEqual(response.data[0]["name"], "Work")
         self.assertEqual(response.data[0]["line1"], "Saved street")
+
+    def test_deleting_unused_address_hides_it_from_list(self):
+        address = Address.objects.create(
+            user=self.user,
+            name="Home",
+            details="Home street",
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+        )
+
+        response = self.client.delete(f"/api/v1/addresses/{address.id}/")
+        list_response = self.client.get("/api/v1/addresses/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        address.refresh_from_db()
+        self.assertFalse(address.is_active)
+        self.assertFalse(address.is_default)
+        self.assertEqual(response.data, [])
+        self.assertEqual(list_response.data, [])
+
+    def test_deleting_order_address_soft_deletes_without_protected_error(self):
+        address = Address.objects.create(
+            user=self.user,
+            name="Home",
+            details="Home street",
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+            is_default=True,
+        )
+        order = self.create_order_for_address(address)
+
+        response = self.client.delete(f"/api/v1/addresses/{address.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        address.refresh_from_db()
+        order.refresh_from_db()
+        self.assertFalse(address.is_active)
+        self.assertEqual(order.delivery_address_id, address.id)
+        self.assertTrue(Address.objects.filter(pk=address.id).exists())
+        self.assertEqual(response.data, [])
+
+    def test_deleted_address_is_hidden_from_default_endpoint(self):
+        address = Address.objects.create(
+            user=self.user,
+            name="Home",
+            details="Home street",
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+            is_default=True,
+        )
+        address.is_active = False
+        address.is_default = False
+        address.save(update_fields=["is_active", "is_default"])
+
+        response = self.client.get("/api/v1/addresses/default/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data)
+
+    def test_deleting_default_sets_newest_active_address_as_default(self):
+        old_default = Address.objects.create(
+            user=self.user,
+            name="Old",
+            details="Old street",
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+            is_default=True,
+        )
+        next_default = Address.objects.create(
+            user=self.user,
+            name="Newest",
+            details="Newest street",
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+        )
+
+        response = self.client.delete(f"/api/v1/addresses/{old_default.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        old_default.refresh_from_db()
+        next_default.refresh_from_db()
+        self.assertFalse(old_default.is_active)
+        self.assertFalse(old_default.is_default)
+        self.assertTrue(next_default.is_default)
+        self.assertEqual([item["id"] for item in response.data], [next_default.id])
+
+    def test_deleting_last_default_leaves_user_without_default(self):
+        address = Address.objects.create(
+            user=self.user,
+            name="Only",
+            details="Only street",
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+            is_default=True,
+        )
+
+        response = self.client.delete(f"/api/v1/addresses/{address.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(Address.objects.filter(user=self.user, is_default=True).exists())
+
+    def test_cannot_patch_deleted_address(self):
+        address = Address.objects.create(
+            user=self.user,
+            name="Home",
+            details="Home street",
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+            is_active=False,
+        )
+
+        response = self.client.patch(
+            f"/api/v1/addresses/{address.id}/",
+            {"name": "Updated"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        address.refresh_from_db()
+        self.assertEqual(address.name, "Home")
+
+    def test_cannot_set_deleted_address_as_default(self):
+        address = Address.objects.create(
+            user=self.user,
+            name="Home",
+            details="Home street",
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+            is_active=False,
+        )
+
+        response = self.client.patch(f"/api/v1/addresses/{address.id}/default/")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        address.refresh_from_db()
+        self.assertFalse(address.is_default)
+
+    def test_cannot_delete_another_users_address(self):
+        other_user = User.objects.create_user(
+            username="other-client",
+            email="other-client@example.com",
+            phone="+201000000099",
+            password="Passw0rd!",
+            role=User.Role.CLIENT,
+        )
+        address = Address.objects.create(
+            user=other_user,
+            name="Other",
+            details="Other street",
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+        )
+
+        response = self.client.delete(f"/api/v1/addresses/{address.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        address.refresh_from_db()
+        self.assertTrue(address.is_active)
 
 
 class LocationManagementAPITests(TestCase):

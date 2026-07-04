@@ -159,6 +159,57 @@ class OrderAPITests(APITestCase):
         token = RefreshToken.for_user(self.admin).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
+    def authenticate_customer(self):
+        token = RefreshToken.for_user(self.customer).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    def set_customer_region(self, mode, service_city=None):
+        self.customer.market_region_mode = mode
+        self.customer.market_region_service_city = service_city
+        self.customer.market_region_updated_at = timezone.now() if mode else None
+        self.customer.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+
+    def make_general_market_region(self):
+        self.set_customer_region(User.MarketRegionMode.GENERAL)
+        self.market.scope = Market.Scope.GENERAL
+        self.market.save(update_fields=["scope"])
+        self.market.service_cities.clear()
+        self.market.delivery_areas.clear()
+        self.offer.scope = Offer.Scope.GENERAL
+        self.offer.service_city = None
+        self.offer.save(update_fields=["scope", "service_city"])
+
+    def create_general_address(self, **kwargs):
+        data = {
+            "user": self.customer,
+            "name": "General Home",
+            "manual_city": "Mansoura",
+            "manual_area": "University district",
+            "delivery_type": Address.DeliveryType.DELIVERY,
+        }
+        data.update(kwargs)
+        return Address.objects.create(**data)
+
+    def assert_address_region_mismatch(self, response):
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        address_error = response.data["address_id"]
+        if isinstance(address_error, list):
+            address_error = address_error[0]
+        code = response.data["code"]
+        if isinstance(code, list):
+            code = code[0]
+        self.assertEqual(
+            str(address_error),
+            "This address does not belong to the currently selected market region.",
+        )
+        self.assertEqual(str(code), "address_region_mismatch")
+
     def payload(self):
         return {
             "user_id": self.customer.id,
@@ -265,6 +316,29 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], Order.Status.CANCELLED)
         self.assertTrue(Order.objects.filter(pk=order_id).exists())
+
+    def test_order_detail_serializes_inactive_delivery_address(self):
+        self.address.is_active = False
+        self.address.is_default = False
+        self.address.save(update_fields=["is_active", "is_default"])
+        order = Order.objects.create(
+            user=self.customer,
+            delivery_address=self.address,
+            market=self.market,
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Order.DeliveryType.FIXED_AREA,
+            payment_method="cash_on_delivery",
+            delivery_price=self.delivery_area.delivery_price,
+            subtotal_price=Decimal("500.00"),
+            total_price=Decimal("620.00"),
+        )
+
+        response = self.client.get(f"{ORDERS_BASE}/{order.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["delivery_address"]["id"], self.address.id)
+        self.assertEqual(order.delivery_address_id, self.address.id)
 
     def test_client_can_list_only_their_orders(self):
         own_order_id = self.create_order().data["id"]
@@ -374,7 +448,7 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("outside the saved market region", response.data["items"][0])
 
-    def test_client_create_order_allows_general_region_with_delivery_city(self):
+    def test_client_create_order_requires_general_address_in_general_region(self):
         self.market.scope = Market.Scope.GENERAL
         self.market.save(update_fields=["scope"])
         self.offer.scope = Offer.Scope.GENERAL
@@ -403,13 +477,9 @@ class OrderAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
-        order = Order.objects.get(id=response.data[0]["id"])
-        self.assertEqual(order.market_id, self.market.id)
-        self.assertEqual(order.service_city_id, self.service_city.id)
-        self.assertEqual(order.delivery_area_id, self.delivery_area.id)
-        self.assertEqual(order.delivery_type, Order.DeliveryType.FIXED_AREA)
-        self.assertEqual(order.delivery_price, self.delivery_area.delivery_price)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(response.data["requires_address_selection"])
+        self.assertFalse(Order.objects.filter(user=self.customer).exists())
 
     def test_client_can_preview_order_grouped_by_market(self):
         token = RefreshToken.for_user(self.customer).access_token
@@ -665,7 +735,7 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.data[0]["delivery_type"], Order.DeliveryType.DELIVERY)
         self.assertIsNone(response.data[0]["delivery_price"])
 
-    def test_client_create_order_requires_market_delivery_coverage(self):
+    def test_client_create_order_requires_address_for_current_region(self):
         self.customer.market_region_mode = User.MarketRegionMode.GENERAL
         self.customer.market_region_service_city = None
         self.customer.market_region_updated_at = timezone.now()
@@ -698,7 +768,7 @@ class OrderAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("service_city_id", response.data)
+        self.assertTrue(response.data["requires_address_selection"])
         self.assertFalse(
             Order.objects.filter(
                 user=self.customer,
@@ -768,6 +838,126 @@ class OrderAPITests(APITestCase):
             response.data["selected_address"]["manual_area"],
             "University district",
         )
+
+    def test_service_city_region_rejects_address_from_another_city(self):
+        other_city = ServiceCity.objects.create(name="Giza")
+        other_area = DeliveryArea.objects.create(
+            service_city=other_city,
+            name="Dokki",
+            delivery_price=Decimal("80.00"),
+        )
+        other_address = Address.objects.create(
+            user=self.customer,
+            name="Giza Home",
+            service_city=other_city,
+            delivery_area=other_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+        )
+        self.authenticate_customer()
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "address_id": other_address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assert_address_region_mismatch(response)
+
+    def test_service_city_region_rejects_general_address(self):
+        general_address = self.create_general_address()
+        self.authenticate_customer()
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "address_id": general_address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assert_address_region_mismatch(response)
+
+    def test_general_region_rejects_service_city_address(self):
+        self.make_general_market_region()
+        self.authenticate_customer()
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "address_id": self.address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assert_address_region_mismatch(response)
+
+    def test_service_city_region_accepts_same_city_address(self):
+        self.authenticate_customer()
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "address_id": self.address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["selected_address"]["id"], self.address.id)
+
+    def test_create_rejects_region_mismatched_address(self):
+        self.make_general_market_region()
+        self.authenticate_customer()
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/create/",
+            {
+                "address_id": self.address.id,
+                "payment_method": "cash_on_delivery",
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assert_address_region_mismatch(response)
+        self.assertFalse(Order.objects.filter(user=self.customer).exists())
+
+    def test_inactive_address_is_rejected_for_preview(self):
+        self.address.is_active = False
+        self.address.save(update_fields=["is_active"])
+        self.authenticate_customer()
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "address_id": self.address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assert_address_region_mismatch(response)
+
+    def test_default_from_different_region_is_not_used_automatically(self):
+        self.make_general_market_region()
+        self.authenticate_customer()
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {"items": [{"variant_id": self.variant.id, "quantity": 1}]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(response.data["requires_address_selection"])
+        self.address.refresh_from_db()
+        self.assertTrue(self.address.is_default)
 
     def test_general_manual_address_allows_create_with_null_service_city(self):
         self.customer.market_region_mode = User.MarketRegionMode.GENERAL

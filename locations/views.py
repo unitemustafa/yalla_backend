@@ -119,6 +119,7 @@ def address_queryset_for_request(request):
         "-created_at",
         "-id",
     )
+    queryset = queryset.filter(is_active=True)
     if request.user.role == request.user.Role.ADMIN:
         user_id = request.query_params.get("user_id")
         if user_id:
@@ -129,9 +130,14 @@ def address_queryset_for_request(request):
 
 def set_default_address(address):
     if address.is_default:
-        Address.objects.filter(user=address.user).exclude(pk=address.pk).update(
-            is_default=False
-        )
+        if not address.is_active:
+            address.is_default = False
+            address.save(update_fields=["is_default"])
+            return
+        Address.objects.filter(
+            user=address.user,
+            is_active=True,
+        ).exclude(pk=address.pk).update(is_default=False)
 
 
 class AddressListCreateView(APIView):
@@ -169,6 +175,7 @@ class AddressDefaultView(APIView):
                 "delivery_area__service_city",
             )
             .filter(user=request.user, is_default=True)
+            .filter(is_active=True)
             .order_by("-created_at", "-id")
             .first()
             or Address.objects.select_related(
@@ -178,6 +185,7 @@ class AddressDefaultView(APIView):
                 "delivery_area__service_city",
             )
             .filter(user=request.user)
+            .filter(is_active=True)
             .order_by("-created_at", "-id")
             .first()
         )
@@ -194,6 +202,7 @@ class AddressDetailView(APIView):
             "delivery_area",
             "delivery_area__service_city",
         )
+        queryset = queryset.filter(is_active=True)
         if request.user.role != request.user.Role.ADMIN:
             queryset = queryset.filter(user=request.user)
         try:
@@ -225,10 +234,12 @@ class AddressDetailView(APIView):
             return Response({"detail": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
         user = address.user
         was_default = address.is_default
-        address.delete()
+        address.is_active = False
+        address.is_default = False
+        address.save(update_fields=["is_active", "is_default"])
         if was_default:
             next_address = (
-                Address.objects.filter(user=user)
+                Address.objects.filter(user=user, is_active=True)
                 .order_by("-created_at", "-id")
                 .first()
             )
@@ -249,14 +260,16 @@ class AddressSetDefaultView(APIView):
             "service_city",
             "delivery_area",
             "delivery_area__service_city",
-        )
+        ).filter(is_active=True)
         if request.user.role != request.user.Role.ADMIN:
             queryset = queryset.filter(user=request.user)
         try:
             address = queryset.get(pk=address_id)
         except Address.DoesNotExist:
             return Response({"detail": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
-        Address.objects.filter(user=address.user).update(is_default=False)
+        Address.objects.filter(user=address.user, is_active=True).update(
+            is_default=False
+        )
         address.is_default = True
         address.save(update_fields=["is_default"])
         addresses = address_queryset_for_request(request).filter(user=address.user)

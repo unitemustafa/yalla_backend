@@ -209,6 +209,19 @@ def market_matches_region(market, selection):
     )
 
 
+def address_matches_market_region(address, current_selection):
+    if address is None or current_selection is None or not address.is_active:
+        return False
+    if current_selection["mode"] == User.MarketRegionMode.GENERAL:
+        return (
+            address.service_city_id is None
+            and address.delivery_area_id is None
+            and bool((address.manual_city or "").strip())
+            and bool((address.manual_area or "").strip())
+        )
+    return address.service_city_id == current_selection["service_city"]["id"]
+
+
 def product_matches_region(product, selection):
     return market_matches_region(product.market, selection)
 

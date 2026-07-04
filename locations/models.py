@@ -78,6 +78,7 @@ class Address(models.Model):
     )
 
     is_default = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

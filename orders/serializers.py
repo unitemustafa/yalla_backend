@@ -7,7 +7,11 @@ from rest_framework import serializers
 from catalog.models import ProductVariant
 from locations.models import Address, DeliveryArea, ServiceCity
 from markets.models import Market
-from markets.region import order_region_validation_error
+from markets.region import (
+    address_matches_market_region,
+    current_market_region_selection,
+    order_region_validation_error,
+)
 from offers.models import Offer
 
 from .models import Order, OrderItem, OrderOffer
@@ -98,6 +102,10 @@ class OrderPreviewSerializer(serializers.Serializer):
     DELIVERY_MESSAGE = (
         "Delivery price will be determined later."
     )
+    ADDRESS_REGION_MISMATCH_MESSAGE = (
+        "This address does not belong to the currently selected market region."
+    )
+    ADDRESS_REGION_MISMATCH_CODE = "address_region_mismatch"
 
     address_id = serializers.PrimaryKeyRelatedField(
         queryset=Address.objects.select_related(
@@ -120,14 +128,9 @@ class OrderPreviewSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         user = self.context["request"].user
-        address = attrs.get("delivery_address") or self._default_address(user)
+        has_explicit_address = "delivery_address" in attrs
         items = attrs.get("items", [])
         offers = attrs.get("offers", [])
-
-        if address is not None and address.user_id != user.id:
-            raise serializers.ValidationError(
-                {"address_id": "Address does not belong to the authenticated user."}
-            )
 
         if not items and not offers:
             raise serializers.ValidationError(
@@ -141,6 +144,29 @@ class OrderPreviewSerializer(serializers.Serializer):
         )
         if region_error:
             raise serializers.ValidationError(region_error)
+
+        current_selection = current_market_region_selection(user)
+        address = attrs.get("delivery_address")
+        if address is not None and address.user_id != user.id:
+            raise serializers.ValidationError(
+                {"address_id": "Address does not belong to the authenticated user."}
+            )
+        if address is not None and not address_matches_market_region(
+            address,
+            current_selection,
+        ):
+            raise serializers.ValidationError(self._address_region_mismatch_error())
+        if address is None and not has_explicit_address:
+            address = self._default_address(user, current_selection)
+        if address is None:
+            raise serializers.ValidationError(
+                {
+                    "requires_address_selection": True,
+                    "address_id": (
+                        "Choose an address for the currently selected market region."
+                    ),
+                }
+            )
 
         service_city = self._service_city_for_order(
             address,
@@ -164,11 +190,13 @@ class OrderPreviewSerializer(serializers.Serializer):
         attrs["user"] = user
         attrs["delivery_address"] = address
         attrs["service_city"] = service_city
+        attrs["current_selection"] = current_selection
         attrs.update(delivery_context)
         return attrs
 
     def preview_data(self):
         user = self.validated_data["user"]
+        current_selection = self.validated_data["current_selection"]
         address = self.validated_data.get("delivery_address")
         service_city = self.validated_data["service_city"]
         delivery_area = self.validated_data["delivery_area"]
@@ -299,7 +327,15 @@ class OrderPreviewSerializer(serializers.Serializer):
             "service_city",
             "delivery_area",
             "delivery_area__service_city",
-        ).order_by("-is_default", "-created_at")
+        ).filter(is_active=True).order_by("-is_default", "-created_at")
+        addresses = [
+            item
+            for item in addresses
+            if address_matches_market_region(
+                item,
+                current_selection,
+            )
+        ]
         return {
             "addresses": OrderPreviewAddressSerializer(
                 addresses,
@@ -322,24 +358,27 @@ class OrderPreviewSerializer(serializers.Serializer):
         }
 
     @staticmethod
-    def _default_address(user):
-        return (
+    def _default_address(user, current_selection):
+        address = (
             user.addresses.select_related(
                 "service_city",
                 "delivery_area",
                 "delivery_area__service_city",
             )
-            .filter(is_default=True)
-            .order_by("-created_at")
-            .first()
-            or user.addresses.select_related(
-                "service_city",
-                "delivery_area",
-                "delivery_area__service_city",
-            )
+            .filter(is_default=True, is_active=True)
             .order_by("-created_at")
             .first()
         )
+        if address_matches_market_region(address, current_selection):
+            return address
+        return None
+
+    @classmethod
+    def _address_region_mismatch_error(cls):
+        return {
+            "address_id": cls.ADDRESS_REGION_MISMATCH_MESSAGE,
+            "code": cls.ADDRESS_REGION_MISMATCH_CODE,
+        }
 
     @staticmethod
     def _service_city_for_order(address, request_service_city):
