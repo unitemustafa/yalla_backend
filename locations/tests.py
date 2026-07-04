@@ -2,10 +2,12 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from .models import Address, DeliveryArea, ServiceCity
+from .serializers import AddressSerializer
 
 
 User = get_user_model()
@@ -34,6 +36,7 @@ class AddressAPITests(TestCase):
             "/api/v1/addresses/",
             {
                 "name": "Home",
+                "line1": "Home street",
                 "service_city_id": self.service_city.id,
                 "delivery_area_id": self.delivery_area.id,
                 "latitude": "30.0444000",
@@ -56,6 +59,10 @@ class AddressAPITests(TestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["id"], address.id)
         self.assertEqual(response.data[0]["name"], "Home")
+        self.assertEqual(response.data[0]["fullName"], "Home")
+        self.assertEqual(response.data[0]["details"], "Home street")
+        self.assertEqual(response.data[0]["line1"], "Home street")
+        self.assertEqual(response.data[0]["street"], "Home street")
         self.assertEqual(response.data[0]["delivery_area"]["id"], self.delivery_area.id)
         self.assertEqual(response.data[0]["delivery_type"], Address.DeliveryType.FIXED_AREA)
         self.assertEqual(response.data[0]["delivery_price_preview"], "50.00")
@@ -66,8 +73,10 @@ class AddressAPITests(TestCase):
             "/api/v1/addresses/",
             {
                 "name": "Other Area",
+                "line1": "Other area street",
                 "service_city_id": self.service_city.id,
                 "delivery_area_id": None,
+                "manual_area": "New district",
                 "is_default": True,
             },
             format="json",
@@ -77,10 +86,143 @@ class AddressAPITests(TestCase):
         address = Address.objects.get(user=self.user)
         self.assertEqual(address.service_city_id, self.service_city.id)
         self.assertIsNone(address.delivery_area_id)
+        self.assertEqual(address.manual_area, "New district")
         self.assertEqual(address.delivery_type, Address.DeliveryType.DELIVERY)
         self.assertIsNone(response.data[0]["delivery_area"])
+        self.assertEqual(response.data[0]["manual_area"], "New district")
         self.assertEqual(response.data[0]["delivery_type"], Address.DeliveryType.DELIVERY)
         self.assertIsNone(response.data[0]["delivery_price_preview"])
+
+    def test_general_user_can_create_manual_address_without_service_city(self):
+        self.user.market_region_mode = User.MarketRegionMode.GENERAL
+        self.user.market_region_service_city = None
+        self.user.market_region_updated_at = timezone.now()
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+
+        response = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Home",
+                "line1": "Army street near hospital",
+                "manual_city": "Mansoura",
+                "manual_area": "University district",
+                "is_default": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        address = Address.objects.get(user=self.user)
+        self.assertIsNone(address.service_city_id)
+        self.assertIsNone(address.delivery_area_id)
+        self.assertIsNone(address.latitude)
+        self.assertIsNone(address.longitude)
+        self.assertEqual(address.manual_city, "Mansoura")
+        self.assertEqual(address.manual_area, "University district")
+        self.assertEqual(address.delivery_type, Address.DeliveryType.DELIVERY)
+        self.assertIsNone(response.data[0]["service_city_id"])
+        self.assertIsNone(response.data[0]["service_city_name"])
+        self.assertIsNone(response.data[0]["delivery_area_id"])
+        self.assertIsNone(response.data[0]["delivery_area_name"])
+        self.assertIsNone(response.data[0]["delivery_area_price"])
+        self.assertEqual(response.data[0]["manual_city"], "Mansoura")
+        self.assertEqual(response.data[0]["manual_area"], "University district")
+
+    def test_general_manual_address_requires_manual_city_and_area(self):
+        self.user.market_region_mode = User.MarketRegionMode.GENERAL
+        self.user.market_region_service_city = None
+        self.user.market_region_updated_at = timezone.now()
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+
+        missing_city = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Home",
+                "line1": "Street",
+                "manual_area": "Area",
+            },
+            format="json",
+        )
+        missing_area = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Home",
+                "line1": "Street",
+                "manual_city": "City",
+            },
+            format="json",
+        )
+
+        self.assertEqual(missing_city.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("manual_city", missing_city.data)
+        self.assertEqual(missing_area.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("manual_area", missing_area.data)
+
+    def test_general_address_rejects_delivery_area(self):
+        self.user.market_region_mode = User.MarketRegionMode.GENERAL
+        self.user.market_region_service_city = None
+        self.user.market_region_updated_at = timezone.now()
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+
+        response = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Home",
+                "line1": "Street",
+                "manual_city": "City",
+                "manual_area": "Area",
+                "delivery_area_id": self.delivery_area.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("delivery_area_id", response.data)
+
+    def test_service_city_user_cannot_create_general_workaround_address(self):
+        self.user.market_region_mode = User.MarketRegionMode.SERVICE_CITY
+        self.user.market_region_service_city = self.service_city
+        self.user.market_region_updated_at = timezone.now()
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+
+        response = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Home",
+                "line1": "Street",
+                "manual_city": "City",
+                "manual_area": "Area",
+                "service_city_id": None,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("service_city_id", response.data)
 
     def test_client_cannot_use_delivery_area_from_another_city(self):
         other_city = ServiceCity.objects.create(name="Giza")
@@ -94,6 +236,7 @@ class AddressAPITests(TestCase):
             "/api/v1/addresses/",
             {
                 "name": "Wrong Area",
+                "line1": "Wrong area street",
                 "service_city_id": self.service_city.id,
                 "delivery_area_id": other_area.id,
             },
@@ -116,6 +259,7 @@ class AddressAPITests(TestCase):
             "/api/v1/addresses/",
             {
                 "name": "Work",
+                "line1": "Work street",
                 "service_city_id": self.service_city.id,
                 "latitude": "30.1000000",
                 "longitude": "31.1000000",
@@ -128,6 +272,127 @@ class AddressAPITests(TestCase):
         old_address.refresh_from_db()
         self.assertFalse(old_address.is_default)
         self.assertTrue(Address.objects.get(name="Work").is_default)
+
+    def test_name_and_line1_are_saved_separately(self):
+        response = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Home",
+                "line1": "Army street near hospital",
+                "service_city_id": self.service_city.id,
+                "delivery_area_id": self.delivery_area.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        address = Address.objects.get(user=self.user)
+        self.assertEqual(address.name, "Home")
+        self.assertEqual(address.details, "Army street near hospital")
+        self.assertEqual(response.data[0]["name"], "Home")
+        self.assertEqual(response.data[0]["fullName"], "Home")
+        self.assertEqual(response.data[0]["details"], "Army street near hospital")
+        self.assertEqual(response.data[0]["line1"], "Army street near hospital")
+        self.assertEqual(response.data[0]["street"], "Army street near hospital")
+
+    def test_details_field_is_used_as_address_details(self):
+        response = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Home",
+                "details": "Direct details street",
+                "line1": "Ignored alias street",
+                "service_city_id": self.service_city.id,
+                "delivery_area_id": self.delivery_area.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        address = Address.objects.get(user=self.user)
+        self.assertEqual(address.name, "Home")
+        self.assertEqual(address.details, "Direct details street")
+        self.assertEqual(response.data[0]["line1"], "Direct details street")
+        self.assertEqual(response.data[0]["street"], "Direct details street")
+
+    def test_legacy_line1_only_payload_is_still_accepted(self):
+        response = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "line1": "Legacy client street",
+                "service_city_id": self.service_city.id,
+                "delivery_area_id": self.delivery_area.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        address = Address.objects.get(user=self.user)
+        self.assertEqual(address.name, "Legacy client street")
+        self.assertEqual(address.details, "Legacy client street")
+        self.assertEqual(response.data[0]["line1"], "Legacy client street")
+
+    def test_legacy_address_with_empty_details_serializes_line1_from_name(self):
+        address = Address.objects.create(
+            user=self.user,
+            name="Tahrir street",
+            details="",
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+        )
+
+        data = AddressSerializer(address).data
+
+        self.assertEqual(data["name"], "Tahrir street")
+        self.assertEqual(data["line1"], "Tahrir street")
+        self.assertEqual(data["street"], "Tahrir street")
+
+    def test_updating_line1_does_not_change_name(self):
+        address = Address.objects.create(
+            user=self.user,
+            name="Home",
+            details="Old street",
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+        )
+
+        response = self.client.patch(
+            f"/api/v1/addresses/{address.id}/",
+            {"line1": "New street"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        address.refresh_from_db()
+        self.assertEqual(address.name, "Home")
+        self.assertEqual(address.details, "New street")
+        self.assertEqual(response.data[0]["name"], "Home")
+        self.assertEqual(response.data[0]["line1"], "New street")
+
+    def test_updating_name_does_not_clear_details(self):
+        address = Address.objects.create(
+            user=self.user,
+            name="Home",
+            details="Saved street",
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+        )
+
+        response = self.client.patch(
+            f"/api/v1/addresses/{address.id}/",
+            {"name": "Work"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        address.refresh_from_db()
+        self.assertEqual(address.name, "Work")
+        self.assertEqual(address.details, "Saved street")
+        self.assertEqual(response.data[0]["name"], "Work")
+        self.assertEqual(response.data[0]["line1"], "Saved street")
 
 
 class LocationManagementAPITests(TestCase):

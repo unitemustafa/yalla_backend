@@ -510,7 +510,10 @@ class OrderAPITests(APITestCase):
         self.assertEqual(group["delivery_type"], Order.DeliveryType.DELIVERY)
         self.assertIsNone(group["delivery_price"])
         self.assertIsNone(group["pricing"]["delivery_price"])
-        self.assertIn("not fixed", group["delivery_message"])
+        self.assertEqual(
+            group["delivery_message"],
+            "Delivery price will be determined later.",
+        )
         self.assertEqual(group["pricing"]["market_total"], "500.00")
         self.assertEqual(response.data["summary"]["delivery_total"], "0.00")
         self.assertEqual(response.data["summary"]["grand_total"], "500.00")
@@ -702,6 +705,185 @@ class OrderAPITests(APITestCase):
                 market=self.second_market,
             ).exists()
         )
+
+    def test_general_manual_address_allows_preview_with_null_delivery_price(self):
+        self.customer.market_region_mode = User.MarketRegionMode.GENERAL
+        self.customer.market_region_service_city = None
+        self.customer.market_region_updated_at = timezone.now()
+        self.customer.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+        self.market.scope = Market.Scope.GENERAL
+        self.market.save(update_fields=["scope"])
+        self.market.service_cities.clear()
+        self.market.delivery_areas.clear()
+        self.offer.scope = Offer.Scope.GENERAL
+        self.offer.service_city = None
+        self.offer.save(update_fields=["scope", "service_city"])
+        general_address = Address.objects.create(
+            user=self.customer,
+            name="General Home",
+            manual_city="Mansoura",
+            manual_area="University district",
+            delivery_type=Address.DeliveryType.DELIVERY,
+            is_default=True,
+        )
+        token = RefreshToken.for_user(self.customer).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "address_id": general_address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        group = response.data["market_groups"][0]
+        self.assertTrue(group["delivery_available"])
+        self.assertIsNone(group["service_city"])
+        self.assertIsNone(group["delivery_area"])
+        self.assertIsNone(group["delivery_price"])
+        self.assertEqual(group["delivery_type"], Order.DeliveryType.DELIVERY)
+        self.assertEqual(
+            group["delivery_message"],
+            "Delivery price will be determined later.",
+        )
+        self.assertIsNone(group["pricing"]["delivery_price"])
+        self.assertEqual(group["pricing"]["market_total"], "500.00")
+        self.assertEqual(response.data["service_city"], None)
+        self.assertEqual(response.data["summary"]["delivery_total"], "0.00")
+        self.assertEqual(response.data["summary"]["grand_total"], "500.00")
+        self.assertEqual(
+            response.data["selected_address"]["manual_city"],
+            "Mansoura",
+        )
+        self.assertEqual(
+            response.data["selected_address"]["manual_area"],
+            "University district",
+        )
+
+    def test_general_manual_address_allows_create_with_null_service_city(self):
+        self.customer.market_region_mode = User.MarketRegionMode.GENERAL
+        self.customer.market_region_service_city = None
+        self.customer.market_region_updated_at = timezone.now()
+        self.customer.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+        self.market.scope = Market.Scope.GENERAL
+        self.market.save(update_fields=["scope"])
+        self.market.service_cities.clear()
+        self.market.delivery_areas.clear()
+        general_address = Address.objects.create(
+            user=self.customer,
+            name="General Home",
+            manual_city="Mansoura",
+            manual_area="University district",
+            delivery_type=Address.DeliveryType.DELIVERY,
+            is_default=True,
+        )
+        token = RefreshToken.for_user(self.customer).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/create/",
+            {
+                "address_id": general_address.id,
+                "payment_method": "cash_on_delivery",
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        order = Order.objects.get(id=response.data[0]["id"])
+        self.assertEqual(order.delivery_address_id, general_address.id)
+        self.assertIsNone(order.service_city_id)
+        self.assertIsNone(order.delivery_area_id)
+        self.assertIsNone(order.delivery_price)
+        self.assertEqual(order.delivery_type, Order.DeliveryType.DELIVERY)
+        self.assertEqual(order.total_price, Decimal("500.00"))
+        self.assertIsNone(response.data[0]["service_city"])
+        self.assertIsNone(response.data[0]["delivery_area"])
+        self.assertIsNone(response.data[0]["delivery_price"])
+        self.assertEqual(
+            response.data[0]["delivery_address"]["manual_city"],
+            "Mansoura",
+        )
+
+        admin_token = RefreshToken.for_user(self.admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {admin_token}")
+        detail_response = self.client.get(f"{ORDERS_BASE}/{order.id}/")
+        approve_response = self.client.post(
+            f"/api/v1/admin/orders/{order.id}/approve/",
+            format="json",
+        )
+        representatives_response = self.client.get(
+            f"/api/v1/admin/orders/{order.id}/service-city-representatives/"
+        )
+        assignment_response = self.client.patch(
+            f"{ORDERS_BASE}/{order.id}/assignment/",
+            {"representative_id": self.representative.id},
+            format="json",
+        )
+
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(detail_response.data["service_city"])
+        self.assertEqual(approve_response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(approve_response.data["service_city"])
+        self.assertEqual(approve_response.data["available_representatives"], [])
+        self.assertEqual(representatives_response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(representatives_response.data["service_city"])
+        self.assertEqual(representatives_response.data["representatives"], [])
+        self.assertEqual(
+            assignment_response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_general_manual_preview_rejects_other_users_address(self):
+        self.customer.market_region_mode = User.MarketRegionMode.GENERAL
+        self.customer.market_region_service_city = None
+        self.customer.market_region_updated_at = timezone.now()
+        self.customer.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+        self.market.scope = Market.Scope.GENERAL
+        self.market.save(update_fields=["scope"])
+        other_address = Address.objects.create(
+            user=self.other_customer,
+            name="Other General Home",
+            manual_city="Mansoura",
+            manual_area="University district",
+            delivery_type=Address.DeliveryType.DELIVERY,
+        )
+        token = RefreshToken.for_user(self.customer).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "address_id": other_address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("address_id", response.data)
 
     def test_service_city_review_assignment_and_courier_flow(self):
         remote_city = ServiceCity.objects.create(

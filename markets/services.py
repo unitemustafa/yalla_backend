@@ -17,6 +17,13 @@ def markets_covering_address(address):
             .distinct()
             .values_list("id", flat=True)
         )
+    if address.latitude is None or address.longitude is None:
+        return list(
+            Market.objects.filter(
+                status=Market.Status.ACTIVE,
+                scope=Market.Scope.GENERAL,
+            ).values_list("id", flat=True)
+        )
 
     # Deprecated fallback for legacy addresses that were saved before
     # Address.service_city existed. New order logic must not use DeliveryArea.

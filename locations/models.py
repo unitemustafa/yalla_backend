@@ -42,6 +42,8 @@ class Address(models.Model):
 
     name = models.CharField(max_length=100)  # البيت، الشغل...
     details = models.TextField(blank=True, default="")
+    manual_city = models.CharField(max_length=100, blank=True, null=True)
+    manual_area = models.CharField(max_length=100, blank=True, null=True)
 
     latitude = models.DecimalField(
         max_digits=10,

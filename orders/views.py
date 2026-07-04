@@ -79,6 +79,8 @@ def order_queryset():
 
 
 def same_city_representatives(service_city):
+    if service_city is None:
+        return User.objects.none()
     return (
         User.objects.filter(
             role=User.Role.REPRESENTATIVE,
@@ -232,6 +234,15 @@ class OrderAssignmentView(APIView):
                 {"representative_id": "Representative must have a courier profile."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if order.service_city_id is None:
+            return Response(
+                {
+                    "representative_id": (
+                        "General manual orders cannot be assigned by service city."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if profile.service_city_id != order.service_city_id:
             return Response(
                 {
@@ -291,7 +302,9 @@ class AdminOrderApproveView(APIView):
     @transaction.atomic
     def post(self, request, order_id):
         order = generics.get_object_or_404(
-            Order.objects.select_for_update().select_related("service_city"),
+            Order.objects.select_for_update(of=("self",)).select_related(
+                "service_city"
+            ),
             pk=order_id,
         )
         if order.review_status != Order.ReviewStatus.PENDING_REVIEW:
@@ -323,10 +336,14 @@ class AdminOrderApproveView(APIView):
         response_data = {
             "message": "Order approved successfully.",
             "order": OrderSerializer(order, context={"request": request}).data,
-            "service_city": {
-                "id": order.service_city_id,
-                "name": order.service_city.name,
-            },
+            "service_city": (
+                {
+                    "id": order.service_city_id,
+                    "name": order.service_city.name,
+                }
+                if order.service_city_id
+                else None
+            ),
             "available_representatives": RepresentativeSummarySerializer(
                 representatives,
                 many=True,
@@ -335,6 +352,8 @@ class AdminOrderApproveView(APIView):
         if not representatives.exists():
             response_data["warning"] = (
                 "No representatives are available in this city."
+                if order.service_city_id
+                else "General manual orders are not auto-assigned by service city."
             )
         return Response(response_data)
 
@@ -403,10 +422,14 @@ class AdminOrderServiceCityRepresentativesView(APIView):
         return Response(
             {
                 "order_id": order.id,
-                "service_city": {
-                    "id": order.service_city_id,
-                    "name": order.service_city.name,
-                },
+                "service_city": (
+                    {
+                        "id": order.service_city_id,
+                        "name": order.service_city.name,
+                    }
+                    if order.service_city_id
+                    else None
+                ),
                 "representatives": RepresentativeSummarySerializer(
                     representatives,
                     many=True,

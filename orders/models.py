@@ -50,6 +50,8 @@ class Order(models.Model):
         "locations.ServiceCity",
         on_delete=models.PROTECT,
         related_name="orders",
+        blank=True,
+        null=True,
     )
     delivery_area = models.ForeignKey(
         "locations.DeliveryArea",

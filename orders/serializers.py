@@ -73,6 +73,8 @@ class OrderPreviewAddressSerializer(serializers.ModelSerializer):
             "name",
             "latitude",
             "longitude",
+            "manual_city",
+            "manual_area",
             "service_city",
             "service_city_id",
             "delivery_area",
@@ -94,7 +96,7 @@ class OrderPreviewAddressSerializer(serializers.ModelSerializer):
 
 class OrderPreviewSerializer(serializers.Serializer):
     DELIVERY_MESSAGE = (
-        "Delivery price is not fixed by the system and will be determined later."
+        "Delivery price will be determined later."
     )
 
     address_id = serializers.PrimaryKeyRelatedField(
@@ -144,11 +146,16 @@ class OrderPreviewSerializer(serializers.Serializer):
             address,
             attrs.get("service_city"),
         )
-        if service_city is None:
+        is_general_manual = self._is_general_manual_address(user, address)
+        if is_general_manual and attrs.get("service_city") is not None:
+            raise serializers.ValidationError(
+                {"service_city_id": "Service city must be empty for General manual delivery."}
+            )
+        if service_city is None and not is_general_manual:
             raise serializers.ValidationError(
                 {"service_city_id": "Service city is required."}
             )
-        if not service_city.is_active:
+        if service_city is not None and not service_city.is_active:
             raise serializers.ValidationError(
                 {"service_city_id": "Service city must be active."}
             )
@@ -263,7 +270,7 @@ class OrderPreviewSerializer(serializers.Serializer):
                         "name": group["market"].name,
                         "branch": group["market"].branch,
                     },
-                    "service_city": ServiceCitySummarySerializer(service_city).data,
+                    "service_city": self._service_city_data(service_city),
                     "delivery_area": (
                         DeliveryAreaSummarySerializer(delivery_area).data
                         if delivery_area is not None
@@ -304,7 +311,7 @@ class OrderPreviewSerializer(serializers.Serializer):
                 if address is not None
                 else None
             ),
-            "service_city": ServiceCitySummarySerializer(service_city).data,
+            "service_city": self._service_city_data(service_city),
             "market_groups": market_groups_data,
             "summary": {
                 "subtotal": self._money(subtotal),
@@ -339,6 +346,23 @@ class OrderPreviewSerializer(serializers.Serializer):
         if address is not None and address.service_city_id:
             return address.service_city
         return request_service_city
+
+    @staticmethod
+    def _is_general_manual_address(user, address):
+        return (
+            getattr(user, "market_region_mode", None) == User.MarketRegionMode.GENERAL
+            and address is not None
+            and address.service_city_id is None
+            and address.delivery_area_id is None
+            and bool(address.manual_city)
+            and bool(address.manual_area)
+        )
+
+    @staticmethod
+    def _service_city_data(service_city):
+        if service_city is None:
+            return None
+        return ServiceCitySummarySerializer(service_city).data
 
     def _delivery_context(self, address):
         if (
@@ -478,6 +502,8 @@ class OrderPreviewSerializer(serializers.Serializer):
 
     @staticmethod
     def _market_serves_city(market, service_city):
+        if service_city is None:
+            return market.scope == Market.Scope.GENERAL
         return market.service_cities.filter(
             pk=service_city.pk,
             is_active=True,
@@ -747,6 +773,7 @@ class OrderSerializer(serializers.ModelSerializer):
         queryset=ServiceCity.objects.filter(is_active=True),
         source="service_city",
         required=False,
+        allow_null=True,
     )
     delivery_area_id = serializers.PrimaryKeyRelatedField(
         queryset=DeliveryArea.objects.select_related("service_city").all(),
@@ -830,6 +857,8 @@ class OrderSerializer(serializers.ModelSerializer):
             "details": address.details,
             "latitude": address.latitude,
             "longitude": address.longitude,
+            "manual_city": address.manual_city,
+            "manual_area": address.manual_area,
             "service_city": (
                 ServiceCitySummarySerializer(address.service_city).data
                 if address.service_city_id
@@ -874,15 +903,26 @@ class OrderSerializer(serializers.ModelSerializer):
         if service_city is None and address is not None and address.service_city_id:
             service_city = address.service_city
             attrs["service_city"] = service_city
-        if service_city is None and market is not None:
+        if (
+            service_city is None
+            and market is not None
+            and not (
+                address is not None
+                and address.service_city_id is None
+                and address.manual_city
+                and address.manual_area
+            )
+        ):
             service_city = market.service_cities.filter(is_active=True).first()
             if service_city is not None:
                 attrs["service_city"] = service_city
-        if service_city is None:
+        if service_city is None and (
+            market is None or market.scope != Market.Scope.GENERAL
+        ):
             raise serializers.ValidationError(
                 {"service_city_id": "Service city is required."}
             )
-        if not service_city.is_active:
+        if service_city is not None and not service_city.is_active:
             raise serializers.ValidationError(
                 {"service_city_id": "Service city must be active."}
             )
@@ -909,9 +949,17 @@ class OrderSerializer(serializers.ModelSerializer):
             )
         ):
             self._normalize_delivery_fields(attrs, address, service_city)
-        if market and not market.service_cities.filter(pk=service_city.pk).exists():
+        if (
+            market
+            and service_city is not None
+            and not market.service_cities.filter(pk=service_city.pk).exists()
+        ):
             raise serializers.ValidationError(
                 {"service_city_id": "Market does not serve this service city."}
+            )
+        if market and service_city is None and market.scope != Market.Scope.GENERAL:
+            raise serializers.ValidationError(
+                {"service_city_id": "Market does not support General manual delivery."}
             )
         if items is not None and market:
             if any(item["variant"].product.market_id != market.id for item in items):
@@ -941,6 +989,10 @@ class OrderSerializer(serializers.ModelSerializer):
                 if profile is None:
                     raise serializers.ValidationError(
                         {"assigned_representative_id": "Representative must have a courier profile."}
+                    )
+                if service_city is None:
+                    raise serializers.ValidationError(
+                        {"assigned_representative_id": "General manual orders cannot be assigned by service city."}
                     )
                 if profile.service_city_id != service_city.id:
                     raise serializers.ValidationError(
@@ -997,6 +1049,10 @@ class OrderSerializer(serializers.ModelSerializer):
             getattr(self.instance, "delivery_type", Order.DeliveryType.DELIVERY),
         )
         if delivery_area is not None:
+            if service_city is None:
+                raise serializers.ValidationError(
+                    {"service_city_id": "Service city is required for fixed-area delivery."}
+                )
             if not delivery_area.is_active:
                 raise serializers.ValidationError(
                     {"delivery_area_id": "Delivery area must be active."}
