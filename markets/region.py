@@ -45,6 +45,7 @@ def compact_market_region_selection(user):
     if selection["mode"] == User.MarketRegionMode.GENERAL:
         return {
             "mode": User.MarketRegionMode.GENERAL,
+            "label": User.MarketRegionMode.GENERAL.label,
             "service_city": None,
         }
     return {
@@ -59,6 +60,14 @@ def service_city_region_selection(service_city):
     return {
         "mode": User.MarketRegionMode.SERVICE_CITY,
         "service_city": compact_service_city_payload(service_city),
+    }
+
+
+def general_region_selection():
+    return {
+        "mode": User.MarketRegionMode.GENERAL,
+        "label": User.MarketRegionMode.GENERAL.label,
+        "service_city": None,
     }
 
 

@@ -9,6 +9,7 @@ from .region import (
     compact_market_region_selection,
     current_market_region_selection,
     detect_service_city,
+    general_region_selection,
     service_city_payload,
     service_city_region_selection,
 )
@@ -86,6 +87,21 @@ class MarketRegionDetectView(APIView):
         current_selection = compact_market_region_selection(request.user)
 
         if detected_city is None:
+            if (
+                current_selection is not None
+                and current_selection["mode"] == User.MarketRegionMode.GENERAL
+            ):
+                return Response(
+                    {
+                        "action": "same_region",
+                        "current_selection": current_selection,
+                        "detected_region": general_region_selection(),
+                        "message": (
+                            "You are already in your selected market region."
+                        ),
+                    }
+                )
+
             return Response(
                 {
                     "action": "unsupported_location",

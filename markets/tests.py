@@ -170,6 +170,18 @@ class HomeAPITests(APITestCase):
             HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
         )
 
+    def select_general_region(self):
+        self.user.market_region_mode = User.MarketRegionMode.GENERAL
+        self.user.market_region_service_city = None
+        self.user.market_region_updated_at = timezone.now()
+        self.user.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+
     def test_home_requires_authentication(self):
         response = self.client.get(f"{HOME_BASE}/")
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
@@ -299,11 +311,7 @@ class HomeAPITests(APITestCase):
         self.assertEqual(self.user.market_region_service_city_id, self.remote_city.id)
 
     def test_market_region_detect_general_region_suggests_switch(self):
-        self.user.market_region_mode = User.MarketRegionMode.GENERAL
-        self.user.market_region_service_city = None
-        self.user.save(
-            update_fields=["market_region_mode", "market_region_service_city"]
-        )
+        self.select_general_region()
         self.authenticate()
 
         response = self.client.post(
@@ -326,6 +334,91 @@ class HomeAPITests(APITestCase):
             response.data["detected_region"]["service_city"]["id"],
             self.service_city.id,
         )
+
+    def test_market_region_detect_general_unsupported_location_x_same_region(self):
+        self.select_general_region()
+        selected_at = self.user.market_region_updated_at
+        city_count = ServiceCity.objects.count()
+        self.authenticate()
+
+        response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {
+                "latitude": "0.0000000",
+                "longitude": "0.0000000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "same_region")
+        self.assertEqual(
+            response.data["current_selection"]["mode"],
+            User.MarketRegionMode.GENERAL,
+        )
+        self.assertEqual(
+            response.data["detected_region"]["mode"],
+            User.MarketRegionMode.GENERAL,
+        )
+        self.assertIsNone(response.data["detected_region"]["service_city"])
+        self.assertEqual(ServiceCity.objects.count(), city_count)
+        self.user.refresh_from_db()
+        self.assertEqual(
+            self.user.market_region_mode,
+            User.MarketRegionMode.GENERAL,
+        )
+        self.assertIsNone(self.user.market_region_service_city_id)
+        self.assertEqual(self.user.market_region_updated_at, selected_at)
+
+    def test_market_region_detect_general_unsupported_location_y_same_region(self):
+        self.select_general_region()
+        self.authenticate()
+
+        response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {
+                "latitude": "-20.0000000",
+                "longitude": "120.0000000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "same_region")
+        self.assertEqual(
+            response.data["detected_region"]["mode"],
+            User.MarketRegionMode.GENERAL,
+        )
+        self.assertIsNone(response.data["detected_region"]["service_city"])
+
+    def test_market_region_detect_general_unsupported_locations_share_region(self):
+        self.select_general_region()
+        city_count = ServiceCity.objects.count()
+        self.authenticate()
+
+        responses = [
+            self.client.post(
+                "/api/v1/market-region/detect/",
+                {"latitude": latitude, "longitude": longitude},
+                format="json",
+            )
+            for latitude, longitude in (
+                ("0.0000000", "0.0000000"),
+                ("-20.0000000", "120.0000000"),
+            )
+        ]
+
+        self.assertTrue(
+            all(response.status_code == status.HTTP_200_OK for response in responses)
+        )
+        self.assertTrue(
+            all(response.data["action"] == "same_region" for response in responses)
+        )
+        self.assertEqual(
+            responses[0].data["detected_region"],
+            responses[1].data["detected_region"],
+        )
+        self.assertEqual(ServiceCity.objects.count(), city_count)
 
     def test_market_region_detect_no_selection_selects_detected_region(self):
         self.user.market_region_mode = None
@@ -573,20 +666,29 @@ class HomeAPITests(APITestCase):
             status=Offer.Status.ACTIVE,
         )
         general_offer.products.set([general_product])
-        self.user.market_region_mode = User.MarketRegionMode.GENERAL
-        self.user.market_region_service_city = None
-        self.user.market_region_updated_at = timezone.now()
-        self.user.save(
-            update_fields=[
-                "market_region_mode",
-                "market_region_service_city",
-                "market_region_updated_at",
-            ]
-        )
+        self.select_general_region()
         self.authenticate()
 
+        first_detect_response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {"latitude": "0.0000000", "longitude": "0.0000000"},
+            format="json",
+        )
+        second_detect_response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {"latitude": "-20.0000000", "longitude": "120.0000000"},
+            format="json",
+        )
         response = self.client.get(f"{HOME_BASE}/")
 
+        self.assertEqual(
+            first_detect_response.data["action"],
+            "same_region",
+        )
+        self.assertEqual(
+            second_detect_response.data["action"],
+            "same_region",
+        )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(
             response.data["current_selection"]["mode"],
