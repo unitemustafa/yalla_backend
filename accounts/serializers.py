@@ -382,15 +382,26 @@ class ResetPasswordSerializer(PasswordValidationMixin, EmailOTPSerializer):
         if user is None:
             raise serializers.ValidationError({"otp": "Invalid verification code."})
 
-        _, error = verify_otp(
+        otp_instance, error = verify_otp(
             user,
             OneTimePassword.Purpose.PASSWORD_RESET,
             attrs["otp"],
+            consume=False,
         )
         if error:
             raise serializers.ValidationError({"otp": error})
 
+        if user.check_password(attrs["password"]):
+            raise serializers.ValidationError(
+                {
+                    "password": (
+                        "New password must be different from your current password."
+                    )
+                }
+            )
+
         attrs["user"] = user
+        attrs["otp_instance"] = otp_instance
         return attrs
 
 

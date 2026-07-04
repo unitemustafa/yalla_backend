@@ -433,6 +433,9 @@ class ResetPasswordView(APIView):
         user = serializer.validated_data["user"]
         user.set_password(serializer.validated_data["password"])
         user.save(update_fields=["password"])
+        otp = serializer.validated_data["otp_instance"]
+        otp.used_at = timezone.now()
+        otp.save(update_fields=["used_at"])
         BlacklistedToken.objects.bulk_create(
             [
                 BlacklistedToken(token=token)

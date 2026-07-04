@@ -45,7 +45,7 @@ def issue_otp(user, purpose):
     return otp, code
 
 
-def verify_otp(user, purpose, code):
+def verify_otp(user, purpose, code, *, consume=True):
     otp = (
         OneTimePassword.objects.filter(
             user=user,
@@ -75,8 +75,9 @@ def verify_otp(user, purpose, code):
         otp.save(update_fields=update_fields)
         return None, "Invalid verification code."
 
-    otp.used_at = timezone.now()
-    otp.save(update_fields=["used_at"])
+    if consume:
+        otp.used_at = timezone.now()
+        otp.save(update_fields=["used_at"])
     return otp, None
 
 
