@@ -116,3 +116,31 @@ class OneTimePassword(models.Model):
         indexes = [
             models.Index(fields=["user", "purpose", "created_at"]),
         ]
+
+
+class OTPCooldown(models.Model):
+    purpose = models.CharField(max_length=30, choices=OneTimePassword.Purpose.choices)
+    identifier = models.EmailField()
+    resend_level = models.PositiveSmallIntegerField(default=0)
+    next_allowed_at = models.DateTimeField(null=True, blank=True)
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["purpose", "identifier"],
+                name="accounts_otp_cooldown_purpose_identifier_unique",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["purpose", "identifier"],
+                name="accounts_ot_purpose_757e7f_idx",
+            ),
+            models.Index(
+                fields=["next_allowed_at"],
+                name="accounts_ot_next_al_55e4ff_idx",
+            ),
+        ]

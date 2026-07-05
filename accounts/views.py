@@ -31,7 +31,14 @@ from .serializers import (
     UserSerializer,
     phone_candidates,
 )
-from .services import issue_otp, otp_response_data, verify_otp
+from .services import (
+    OTPCooldownError,
+    clear_otp_cooldown,
+    issue_otp,
+    otp_cooldown_response_data,
+    otp_response_data,
+    verify_otp,
+)
 
 User = get_user_model()
 
@@ -68,6 +75,16 @@ def token_payload(user, request=None):
         "expiresIn": int(settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"].total_seconds()),
         "user": UserSerializer(user, context={"request": request}).data,
     }
+
+
+def otp_cooldown_error_response(exc):
+    return Response(
+        {
+            "detail": "Please wait before requesting another code.",
+            "retry_after_seconds": exc.retry_after_seconds,
+        },
+        status=status.HTTP_429_TOO_MANY_REQUESTS,
+    )
 
 
 def soft_delete_user(user):
@@ -120,11 +137,18 @@ class RegisterView(APIView):
         user.set_password(data["password"])
         user.save()
 
-        _, code = issue_otp(user, OneTimePassword.Purpose.REGISTRATION)
+        try:
+            _, code, cooldown_data = issue_otp(
+                user,
+                OneTimePassword.Purpose.REGISTRATION,
+            )
+        except OTPCooldownError as exc:
+            return otp_cooldown_error_response(exc)
         return Response(
             {
                 "detail": "Registration OTP sent.",
                 "email": user.email,
+                **otp_cooldown_response_data(cooldown_data),
                 **otp_response_data(code),
             },
             status=status.HTTP_201_CREATED,
@@ -163,6 +187,7 @@ class VerifyRegistrationOTPView(APIView):
 
         user.is_active = True
         user.save(update_fields=["is_active"])
+        clear_otp_cooldown(user.email, OneTimePassword.Purpose.REGISTRATION)
         return Response(token_payload(user, request=request), status=status.HTTP_200_OK)
 
 
@@ -182,10 +207,17 @@ class ResendRegistrationOTPView(APIView):
                 {"detail": "If registration is pending, a new OTP has been sent."}
             )
 
-        _, code = issue_otp(user, OneTimePassword.Purpose.REGISTRATION)
+        try:
+            _, code, cooldown_data = issue_otp(
+                user,
+                OneTimePassword.Purpose.REGISTRATION,
+            )
+        except OTPCooldownError as exc:
+            return otp_cooldown_error_response(exc)
         return Response(
             {
                 "detail": "A new registration OTP has been sent.",
+                **otp_cooldown_response_data(cooldown_data),
                 **otp_response_data(code),
             }
         )
@@ -421,7 +453,14 @@ class ForgotPasswordView(APIView):
             "detail": "If an active account exists, a password reset OTP has been sent."
         }
         if user is not None:
-            _, code = issue_otp(user, OneTimePassword.Purpose.PASSWORD_RESET)
+            try:
+                _, code, cooldown_data = issue_otp(
+                    user,
+                    OneTimePassword.Purpose.PASSWORD_RESET,
+                )
+            except OTPCooldownError as exc:
+                return otp_cooldown_error_response(exc)
+            response_data.update(otp_cooldown_response_data(cooldown_data))
             response_data.update(otp_response_data(code))
         return Response(response_data)
 
@@ -439,6 +478,7 @@ class ResetPasswordView(APIView):
         otp = serializer.validated_data["otp_instance"]
         otp.used_at = timezone.now()
         otp.save(update_fields=["used_at"])
+        clear_otp_cooldown(user.email, OneTimePassword.Purpose.PASSWORD_RESET)
         BlacklistedToken.objects.bulk_create(
             [
                 BlacklistedToken(token=token)

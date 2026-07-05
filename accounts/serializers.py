@@ -446,7 +446,11 @@ class LogoutSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
 
 class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
     first_name = serializers.CharField(max_length=150, required=False)
-    last_name = serializers.CharField(max_length=150, required=False)
+    last_name = serializers.CharField(
+        max_length=150,
+        required=False,
+        allow_blank=True,
+    )
     username = serializers.CharField(
         max_length=150,
         validators=[UnicodeUsernameValidator()],
@@ -504,6 +508,8 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
     def validate_phone(self, value):
         phone = normalize_egyptian_phone(value)
         user = self.context["request"].user
+        if phone == user.phone:
+            return phone
         if (
             User.objects.filter(
                 phone__in=phone_candidates(phone),
@@ -544,7 +550,7 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
     def update(self, instance, validated_data):
         avatar = validated_data.pop("avatar", None)
         old_avatar = instance.avatar_image if avatar is not None else None
-        update_fields = list(validated_data.keys())
+        update_fields = []
         if (
             "username" in validated_data
             and validated_data["username"] != instance.username
@@ -553,11 +559,15 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             update_fields.append("username_changed_at")
 
         for field, value in validated_data.items():
+            if getattr(instance, field) == value:
+                continue
             setattr(instance, field, value)
+            update_fields.append(field)
         if avatar is not None:
             instance.avatar_image = avatar
             update_fields.append("avatar_image")
-        instance.save(update_fields=[*update_fields, "updated_at"])
+        if update_fields:
+            instance.save(update_fields=[*update_fields, "updated_at"])
         if (
             old_avatar
             and old_avatar.name

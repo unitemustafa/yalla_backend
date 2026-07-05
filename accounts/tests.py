@@ -3,6 +3,7 @@ import os
 import shutil
 import tempfile
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core import mail
@@ -17,7 +18,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from locations.models import DeliveryArea, ServiceCity
 
-from .models import CourierProfile, OneTimePassword
+from .models import CourierProfile, OTPCooldown, OneTimePassword
+from .services import issue_otp
 
 User = get_user_model()
 AUTH_BASE = "/api/v1/auth"
@@ -612,6 +614,92 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(user.email, "client-updated@example.com")
         self.assertEqual(user.phone, "+213555000088")
 
+    def test_client_profile_same_phone_same_format_is_noop(self):
+        user = self.create_active_user(phone="+201012345678")
+        original_updated_at = timezone.now() - timedelta(days=1)
+        User.objects.filter(pk=user.pk).update(updated_at=original_updated_at)
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"phone": "+201012345678"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertEqual(user.phone, "+201012345678")
+        self.assertEqual(user.updated_at, original_updated_at)
+
+    def test_client_profile_equivalent_egyptian_phone_is_noop(self):
+        user = self.create_active_user(phone="+201012345678")
+        original_updated_at = timezone.now() - timedelta(days=1)
+        User.objects.filter(pk=user.pk).update(updated_at=original_updated_at)
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"phone": "01012345678"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertEqual(user.phone, "+201012345678")
+        self.assertEqual(user.updated_at, original_updated_at)
+
+    def test_client_profile_valid_different_phone_updates(self):
+        user = self.create_active_user(phone="+201012345678")
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"phone": "201112345678"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertEqual(user.phone, "+201112345678")
+
+    def test_client_profile_phone_used_by_another_account_is_rejected(self):
+        user = self.create_active_user(phone="+201012345678")
+        self.create_active_user(
+            username="other_customer",
+            email="other@example.com",
+            phone="+201112345678",
+        )
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"phone": "01112345678"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("phone", response.data)
+
+    def test_client_profile_accepts_blank_last_name(self):
+        user = self.create_active_user()
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"first_name": "Solo", "last_name": ""},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertEqual(user.first_name, "Solo")
+        self.assertEqual(user.last_name, "")
+
     def test_client_can_upload_profile_avatar_multipart(self):
         user = self.create_active_user()
         refresh = RefreshToken.for_user(user)
@@ -830,6 +918,24 @@ class AuthenticationAPITests(APITestCase):
             self.registration_payload(),
         )
         self.assertEqual(signup_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(signup_response.data["resend_after_seconds"], 30)
+
+        resend_response = self.client.post(
+            f"{AUTH_BASE}/resend-verification",
+            {"email": self.email},
+        )
+        self.assertEqual(
+            resend_response.status_code,
+            status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+        self.assertIn("retry_after_seconds", resend_response.data)
+
+        cooldown = OTPCooldown.objects.get(
+            identifier=self.email,
+            purpose=OneTimePassword.Purpose.REGISTRATION,
+        )
+        cooldown.next_allowed_at = timezone.now() - timedelta(seconds=1)
+        cooldown.save(update_fields=["next_allowed_at"])
 
         resend_response = self.client.post(
             f"{AUTH_BASE}/resend-verification",
@@ -837,6 +943,84 @@ class AuthenticationAPITests(APITestCase):
         )
         self.assertEqual(resend_response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(resend_response.data["dev_otp"]), 6)
+        self.assertEqual(resend_response.data["resend_after_seconds"], 60)
+
+    def test_otp_cooldown_progresses_to_maximum(self):
+        user = self.create_active_user()
+
+        durations = []
+        for _ in range(5):
+            response = self.client.post(
+                f"{AUTH_BASE}/forgot-password",
+                {"email": user.email},
+            )
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            durations.append(response.data["resend_after_seconds"])
+            cooldown = OTPCooldown.objects.get(
+                identifier=user.email,
+                purpose=OneTimePassword.Purpose.PASSWORD_RESET,
+            )
+            cooldown.next_allowed_at = timezone.now() - timedelta(seconds=1)
+            cooldown.save(update_fields=["next_allowed_at"])
+
+        self.assertEqual(durations, [30, 60, 120, 300, 300])
+
+    def test_otp_cooldowns_are_independent_by_purpose(self):
+        user = self.create_active_user()
+        OTPCooldown.objects.create(
+            identifier=user.email,
+            purpose=OneTimePassword.Purpose.REGISTRATION,
+            resend_level=3,
+            next_allowed_at=timezone.now() + timedelta(minutes=5),
+        )
+
+        response = self.client.post(
+            f"{AUTH_BASE}/forgot-password",
+            {"email": user.email},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["resend_after_seconds"], 30)
+
+    def test_email_send_failure_does_not_raise_cooldown_level(self):
+        user = self.create_active_user()
+
+        with patch("accounts.services.send_mail", side_effect=RuntimeError("down")):
+            with self.assertRaises(RuntimeError):
+                issue_otp(user, OneTimePassword.Purpose.PASSWORD_RESET)
+
+        self.assertFalse(
+            OTPCooldown.objects.filter(
+                identifier=user.email,
+                purpose=OneTimePassword.Purpose.PASSWORD_RESET,
+            ).exists()
+        )
+
+    def test_successful_registration_verification_clears_cooldown(self):
+        register_response = self.client.post(
+            f"{AUTH_BASE}/signup",
+            self.registration_payload(),
+        )
+        self.assertEqual(register_response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(
+            OTPCooldown.objects.filter(
+                identifier=self.email,
+                purpose=OneTimePassword.Purpose.REGISTRATION,
+            ).exists()
+        )
+
+        verify_response = self.client.post(
+            f"{AUTH_BASE}/verify-email",
+            {"email": self.email, "otp": register_response.data["dev_otp"]},
+        )
+
+        self.assertEqual(verify_response.status_code, status.HTTP_200_OK)
+        self.assertFalse(
+            OTPCooldown.objects.filter(
+                identifier=self.email,
+                purpose=OneTimePassword.Purpose.REGISTRATION,
+            ).exists()
+        )
 
     def test_forgot_and_reset_password_with_otp(self):
         user = self.create_active_user()
@@ -848,7 +1032,14 @@ class AuthenticationAPITests(APITestCase):
         )
         self.assertEqual(forgot_response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(forgot_response.data["dev_otp"]), 6)
+        self.assertEqual(forgot_response.data["resend_after_seconds"], 30)
         self.assertEqual(len(mail.outbox), 1)
+        self.assertTrue(
+            OTPCooldown.objects.filter(
+                identifier=self.email,
+                purpose=OneTimePassword.Purpose.PASSWORD_RESET,
+            ).exists()
+        )
 
         reset_response = self.client.post(
             f"{AUTH_BASE}/reset-password",
@@ -860,6 +1051,12 @@ class AuthenticationAPITests(APITestCase):
             },
         )
         self.assertEqual(reset_response.status_code, status.HTTP_200_OK)
+        self.assertFalse(
+            OTPCooldown.objects.filter(
+                identifier=self.email,
+                purpose=OneTimePassword.Purpose.PASSWORD_RESET,
+            ).exists()
+        )
         user.refresh_from_db()
         self.assertTrue(user.check_password(self.new_password))
         self.assertTrue(
