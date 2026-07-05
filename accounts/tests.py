@@ -1,7 +1,15 @@
+import io
+import os
+import shutil
+import tempfile
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.utils import timezone
+from PIL import Image
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.exceptions import TokenError
@@ -15,6 +23,30 @@ User = get_user_model()
 AUTH_BASE = "/api/v1/auth"
 
 
+def profile_image_file(name="avatar.png", size=(4, 4), image_format="PNG"):
+    buffer = io.BytesIO()
+    Image.new("RGB", size, color=(32, 120, 180)).save(buffer, format=image_format)
+    return SimpleUploadedFile(
+        name,
+        buffer.getvalue(),
+        content_type=f"image/{image_format.lower()}",
+    )
+
+
+def oversized_profile_image_file():
+    buffer = io.BytesIO()
+    image = Image.effect_noise((1800, 1800), 100).convert("RGB")
+    image.save(buffer, format="PNG")
+    content = buffer.getvalue()
+    if len(content) <= 5 * 1024 * 1024:
+        content += b"0" * ((5 * 1024 * 1024) - len(content) + 1)
+    return SimpleUploadedFile(
+        "huge.png",
+        content,
+        content_type="image/png",
+    )
+
+
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     AUTH_OTP_INCLUDE_IN_RESPONSE=True,
@@ -23,6 +55,17 @@ class AuthenticationAPITests(APITestCase):
     password = "StrongPassword123!"
     new_password = "NewStrongPassword456!"
     email = "customer@example.com"
+
+    def setUp(self):
+        super().setUp()
+        self._media_root = tempfile.mkdtemp()
+        self._media_override = override_settings(MEDIA_ROOT=self._media_root)
+        self._media_override.enable()
+
+    def tearDown(self):
+        self._media_override.disable()
+        shutil.rmtree(self._media_root, ignore_errors=True)
+        super().tearDown()
 
     def registration_payload(self):
         return {
@@ -568,6 +611,138 @@ class AuthenticationAPITests(APITestCase):
         user.refresh_from_db()
         self.assertEqual(user.email, "client-updated@example.com")
         self.assertEqual(user.phone, "+213555000088")
+
+    def test_client_can_upload_profile_avatar_multipart(self):
+        user = self.create_active_user()
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"avatar": profile_image_file()},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("/media/avatars/", response.data["avatar_url"])
+        self.assertTrue(response.data["avatar_url"].startswith("http://testserver"))
+        user.refresh_from_db()
+        self.assertTrue(user.avatar_image.name.startswith("avatars/"))
+
+    def test_client_avatar_upload_replaces_old_file(self):
+        user = self.create_active_user()
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        first_response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"avatar": profile_image_file("first.png")},
+            format="multipart",
+        )
+        user.refresh_from_db()
+        old_path = user.avatar_image.path
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(os.path.exists(old_path))
+
+        second_response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"avatar": profile_image_file("second.png")},
+            format="multipart",
+        )
+
+        self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertFalse(os.path.exists(old_path))
+        self.assertTrue(os.path.exists(user.avatar_image.path))
+        self.assertNotEqual(first_response.data["avatar_url"], second_response.data["avatar_url"])
+
+    def test_client_avatar_upload_rejects_oversized_file(self):
+        user = self.create_active_user()
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"avatar": oversized_profile_image_file()},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("avatar", response.data)
+
+    def test_client_avatar_upload_rejects_invalid_file(self):
+        user = self.create_active_user()
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {
+                "avatar": SimpleUploadedFile(
+                    "avatar.txt",
+                    b"not an image",
+                    content_type="text/plain",
+                )
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("avatar", response.data)
+
+    def test_client_profile_json_update_still_works(self):
+        user = self.create_active_user(username="json_profile_user")
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"first_name": "Json", "last_name": "Updated"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["first_name"], "Json")
+        self.assertEqual(response.data["last_name"], "Updated")
+
+    def test_username_first_change_succeeds_and_second_before_seven_days_fails(self):
+        user = self.create_active_user(username="cooldown_user")
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        first_response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"username": "cooldown_user_next"},
+            format="json",
+        )
+        second_response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"username": "cooldown_user_later"},
+            format="json",
+        )
+
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+        self.assertIsNotNone(first_response.data["username_changed_at"])
+        self.assertEqual(second_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("username", second_response.data)
+
+    def test_sending_current_username_does_not_update_username_changed_at(self):
+        changed_at = timezone.now() - timedelta(days=2)
+        user = self.create_active_user(username="same_username_user")
+        user.username_changed_at = changed_at
+        user.save(update_fields=["username_changed_at"])
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {"username": "same_username_user"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertEqual(user.username_changed_at, changed_at)
 
     def test_client_profile_update_rejects_non_client_users(self):
         admin = self.create_active_user(

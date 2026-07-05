@@ -18,7 +18,8 @@ class User(AbstractUser):
     role = models.CharField(max_length=30, choices=Role.choices, default=Role.CLIENT)
     gender = models.CharField(max_length=20, blank=True)
     birth_date = models.DateField(null=True, blank=True)
-    avatar_url = models.URLField(null= True,blank=True, db_column="avatar")
+    avatar_url = models.URLField(null=True, blank=True, db_column="avatar")
+    avatar_image = models.ImageField(upload_to="avatars/", blank=True, null=True)
     username_changed_at = models.DateTimeField(null=True, blank=True)
 
     terms_accepted = models.BooleanField(default=False)

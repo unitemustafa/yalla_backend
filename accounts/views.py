@@ -4,6 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.generics import get_object_or_404
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -57,7 +58,7 @@ class IsClientRole(BasePermission):
         )
 
 
-def token_payload(user):
+def token_payload(user, request=None):
     refresh = RefreshToken.for_user(user)
     access = str(refresh.access_token)
     refresh_value = str(refresh)
@@ -65,7 +66,7 @@ def token_payload(user):
         "accessToken": access,
         "refreshToken": refresh_value,
         "expiresIn": int(settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"].total_seconds()),
-        "user": UserSerializer(user).data,
+        "user": UserSerializer(user, context={"request": request}).data,
     }
 
 
@@ -162,7 +163,7 @@ class VerifyRegistrationOTPView(APIView):
 
         user.is_active = True
         user.save(update_fields=["is_active"])
-        return Response(token_payload(user), status=status.HTTP_200_OK)
+        return Response(token_payload(user, request=request), status=status.HTTP_200_OK)
 
 
 class ResendRegistrationOTPView(APIView):
@@ -200,7 +201,7 @@ class LoginView(APIView):
             context={"expected_role": self.role},
         )
         serializer.is_valid(raise_exception=True)
-        return Response(token_payload(serializer.validated_data["user"]))
+        return Response(token_payload(serializer.validated_data["user"], request=request))
 
 
 class ClientLoginView(LoginView):
@@ -230,9 +231,10 @@ class LogoutView(APIView):
 
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
 
     def get(self, request):
-        return Response(UserSerializer(request.user).data)
+        return Response(UserSerializer(request.user, context={"request": request}).data)
 
     def patch(self, request):
         serializer = UserUpdateSerializer(
@@ -243,7 +245,7 @@ class MeView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        return Response(UserSerializer(user).data)
+        return Response(UserSerializer(user, context={"request": request}).data)
 
     @transaction.atomic
     def delete(self, request):
@@ -266,6 +268,7 @@ class MeView(APIView):
 
 class ClientProfileView(APIView):
     permission_classes = [IsAuthenticated, IsClientRole]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
 
     def update(self, request):
         serializer = UserUpdateSerializer(
@@ -276,7 +279,7 @@ class ClientProfileView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        return Response(UserSerializer(user).data)
+        return Response(UserSerializer(user, context={"request": request}).data)
 
     @transaction.atomic
     def patch(self, request):

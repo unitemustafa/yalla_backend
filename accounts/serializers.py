@@ -1,4 +1,6 @@
 import re
+from datetime import timedelta
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.validators import UnicodeUsernameValidator
@@ -18,6 +20,9 @@ from .models import CourierProfile, OneTimePassword
 from .services import normalize_email, verify_otp
 
 User = get_user_model()
+
+AVATAR_MAX_SIZE = 5 * 1024 * 1024
+AVATAR_ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 
 
 def contains_whitespace(value):
@@ -164,6 +169,7 @@ class CourierProfileSerializer(RequiredFieldMessagesMixin, serializers.ModelSeri
 
 class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
     id = serializers.CharField(read_only=True)
+    avatar_url = serializers.SerializerMethodField()
     has_password = serializers.SerializerMethodField()
     courier_profile = CourierProfileSerializer(read_only=True)
 
@@ -187,6 +193,17 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
 
     def get_has_password(self, obj):
         return obj.has_usable_password()
+
+    def get_avatar_url(self, obj):
+        if obj.avatar_image:
+            try:
+                url = obj.avatar_image.url
+            except ValueError:
+                url = None
+            if url:
+                request = self.context.get("request")
+                return request.build_absolute_uri(url) if request else url
+        return obj.avatar_url or None
 
 
 class AdminUserSerializer(UserSerializer):
@@ -440,6 +457,11 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
     gender = serializers.CharField(max_length=20, required=False, allow_blank=True)
     birth_date = serializers.DateField(required=False, allow_null=True)
     avatar_url = serializers.URLField(required=False, allow_blank=True)
+    avatar = serializers.ImageField(
+        write_only=True,
+        required=False,
+        allow_null=False,
+    )
 
     def validate_email(self, value):
         email = normalize_email(value)
@@ -467,6 +489,18 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             raise serializers.ValidationError("This username is already taken.")
         return username
 
+    def validate_avatar(self, value):
+        extension = Path(value.name or "").suffix.lower().lstrip(".")
+        if extension not in AVATAR_ALLOWED_EXTENSIONS:
+            raise serializers.ValidationError(
+                "Upload a valid profile photo: JPG, JPEG, PNG, or WEBP."
+            )
+        if value.size > AVATAR_MAX_SIZE:
+            raise serializers.ValidationError(
+                "Profile photo must be 5 MB or smaller."
+            )
+        return value
+
     def validate_phone(self, value):
         phone = normalize_egyptian_phone(value)
         user = self.context["request"].user
@@ -483,7 +517,33 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             )
         return phone
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        username = attrs.get("username")
+        if username is None:
+            return attrs
+
+        user = self.context["request"].user
+        if username == user.username:
+            return attrs
+
+        if user.username_changed_at is not None:
+            next_allowed_at = user.username_changed_at + timedelta(days=7)
+            if timezone.now() < next_allowed_at:
+                available_on = timezone.localtime(next_allowed_at).strftime("%Y-%m-%d")
+                raise serializers.ValidationError(
+                    {
+                        "username": (
+                            "Username can only be changed once every 7 days. "
+                            f"You can change it again on {available_on}."
+                        )
+                    }
+                )
+        return attrs
+
     def update(self, instance, validated_data):
+        avatar = validated_data.pop("avatar", None)
+        old_avatar = instance.avatar_image if avatar is not None else None
         update_fields = list(validated_data.keys())
         if (
             "username" in validated_data
@@ -494,7 +554,16 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
 
         for field, value in validated_data.items():
             setattr(instance, field, value)
+        if avatar is not None:
+            instance.avatar_image = avatar
+            update_fields.append("avatar_image")
         instance.save(update_fields=[*update_fields, "updated_at"])
+        if (
+            old_avatar
+            and old_avatar.name
+            and old_avatar.name != instance.avatar_image.name
+        ):
+            old_avatar.delete(save=False)
         return instance
 
 
