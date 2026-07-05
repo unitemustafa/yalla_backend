@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from accounts.models import CourierProfile
 from .models import Order
 from .serializers import (
+    AdminOrderCreateSerializer,
     ClientOrderCreateSerializer,
     CourierOrderDetailSerializer,
     CourierOrderListSerializer,
@@ -97,6 +98,11 @@ def same_city_representatives(service_city):
 class OrderListCreateView(generics.ListCreateAPIView):
     permission_classes = (IsAuthenticated, IsAdminRole)
     serializer_class = OrderSerializer
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return AdminOrderCreateSerializer
+        return OrderSerializer
 
     def get_queryset(self):
         queryset = order_queryset()

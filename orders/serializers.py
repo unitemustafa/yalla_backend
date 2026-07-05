@@ -770,6 +770,43 @@ class OrderOfferSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "created_at")
 
 
+class AdminOrderItemCreateSerializer(serializers.ModelSerializer):
+    variant_id = serializers.PrimaryKeyRelatedField(
+        queryset=ProductVariant.objects.select_related("product"),
+        source="variant",
+    )
+    quantity = serializers.IntegerField(min_value=1)
+    unit_price = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+    )
+
+    class Meta:
+        model = OrderItem
+        fields = ("id", "variant_id", "quantity", "unit_price")
+        read_only_fields = ("id",)
+
+
+class AdminOrderOfferCreateSerializer(serializers.ModelSerializer):
+    offer_id = serializers.PrimaryKeyRelatedField(
+        queryset=Offer.objects.all(),
+        source="offer",
+    )
+    discount_amount = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        required=False,
+        default=Decimal("0.00"),
+    )
+
+    class Meta:
+        model = OrderOffer
+        fields = ("id", "offer_id", "discount_amount", "created_at")
+        read_only_fields = ("id", "created_at")
+
+
 def user_summary(user):
     full_name = user.get_full_name().strip()
     return {
@@ -1148,6 +1185,101 @@ class OrderSerializer(serializers.ModelSerializer):
         OrderOffer.objects.bulk_create(
             OrderOffer(order=order, **item) for item in offers
         )
+
+
+class AdminOrderCreateSerializer(OrderSerializer):
+    SYSTEM_CONTROLLED_CREATE_FIELDS = {
+        "assigned_representative_id",
+        "assigned_at",
+        "delivered_at",
+        "delivery_area_id",
+        "delivery_type",
+        "delivery_price",
+        "discount",
+        "subtotal_price",
+        "total_price",
+        "image",
+        "delivery_proof",
+        "status",
+        "review_status",
+        "approved_by",
+        "approved_at",
+        "rejected_by",
+        "rejected_at",
+        "rejection_reason",
+    }
+
+    items = AdminOrderItemCreateSerializer(many=True, required=True)
+    offers = AdminOrderOfferCreateSerializer(
+        source="order_offers",
+        many=True,
+        required=False,
+    )
+
+    def get_fields(self):
+        fields = super().get_fields()
+        for field_name in self.SYSTEM_CONTROLLED_CREATE_FIELDS:
+            if field_name in fields:
+                fields[field_name].read_only = True
+                fields[field_name].required = False
+        return fields
+
+    def validate_payment_method(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Payment method is required.")
+        return value
+
+    def validate(self, attrs):
+        errors = {
+            field: "This field is controlled by the system on create."
+            for field in sorted(self.SYSTEM_CONTROLLED_CREATE_FIELDS)
+            if field in self.initial_data
+        }
+        if "delivery_address" not in attrs or attrs["delivery_address"] is None:
+            errors["delivery_address_id"] = "Delivery address is required."
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        attrs = super().validate(attrs)
+        if not attrs.get("items"):
+            raise serializers.ValidationError(
+                {"items": "Choose at least one product variant."}
+            )
+        return attrs
+
+    def create(self, validated_data):
+        items = validated_data.pop("items", [])
+        offers = validated_data.pop("order_offers", [])
+        subtotal = sum(
+            item["unit_price"] * item["quantity"]
+            for item in items
+        )
+        discount = sum(
+            item.get("discount_amount", Decimal("0.00"))
+            for item in offers
+        )
+        delivery_price = validated_data.get("delivery_price")
+        delivery_total = delivery_price or Decimal("0.00")
+        total = subtotal + delivery_total - discount
+
+        validated_data.update(
+            {
+                "assigned_representative": None,
+                "assigned_at": None,
+                "delivered_at": None,
+                "status": Order.Status.PENDING,
+                "review_status": Order.ReviewStatus.PENDING_REVIEW,
+                "discount": discount,
+                "subtotal_price": subtotal,
+                "total_price": max(total, Decimal("0.00")),
+            }
+        )
+
+        order = Order.objects.create(**validated_data)
+        self._replace_items(order, items)
+        self._replace_offers(order, offers)
+        return order
 
 
 class OrderStatusSerializer(serializers.Serializer):

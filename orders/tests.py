@@ -214,19 +214,11 @@ class OrderAPITests(APITestCase):
         return {
             "user_id": self.customer.id,
             "delivery_address_id": self.address.id,
-            "assigned_representative_id": None,
             "market_id": self.market.id,
             "service_city_id": self.service_city.id,
             "payment_method": "cash_on_delivery",
-            "discount": "50.00",
             "description": "Call on arrival",
-            "status": Order.Status.CONFIRMED,
-            "delivery_price": "100.00",
-            "subtotal_price": "1000.00",
-            "total_price": "1050.00",
-            "assigned_at": None,
-            "delivered_at": None,
-            "delivery_note": "",
+            "delivery_note": "Leave at reception",
             "items": [
                 {
                     "variant_id": self.variant.id,
@@ -265,7 +257,132 @@ class OrderAPITests(APITestCase):
         self.assertEqual(len(detail_response.data["offers"]), 1)
         self.assertEqual(detail_response.data["service_city"]["id"], self.service_city.id)
         self.assertEqual(detail_response.data["review_status"], Order.ReviewStatus.PENDING_REVIEW)
+        self.assertEqual(detail_response.data["status"], Order.Status.PENDING)
+        self.assertEqual(detail_response.data["subtotal_price"], "1000.00")
+        self.assertEqual(detail_response.data["discount"], "50.00")
+        self.assertEqual(detail_response.data["delivery_price"], "120.00")
+        self.assertEqual(detail_response.data["total_price"], "1070.00")
+        self.assertEqual(detail_response.data["description"], "Call on arrival")
+        self.assertEqual(detail_response.data["delivery_note"], "Leave at reception")
         self.assertEqual(update_response.data["description"], "Updated description")
+
+    def test_admin_order_create_rejects_unsafe_system_fields(self):
+        unsafe_payload = self.payload()
+        unsafe_payload.update(
+            {
+                "status": Order.Status.CONFIRMED,
+                "review_status": Order.ReviewStatus.APPROVED,
+                "assigned_representative_id": self.representative.id,
+                "delivery_price": "999.00",
+                "delivery_area_id": self.delivery_area.id,
+                "delivery_type": Order.DeliveryType.DELIVERY,
+                "subtotal_price": "1.00",
+                "total_price": "1.00",
+                "discount": "1.00",
+                "assigned_at": timezone.now().isoformat(),
+                "delivered_at": timezone.now().isoformat(),
+                "image": None,
+                "delivery_proof": None,
+            }
+        )
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/",
+            unsafe_payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        for field in (
+            "status",
+            "review_status",
+            "assigned_representative_id",
+            "delivery_price",
+            "delivery_area_id",
+            "delivery_type",
+            "subtotal_price",
+            "total_price",
+            "discount",
+            "assigned_at",
+            "delivered_at",
+            "image",
+            "delivery_proof",
+        ):
+            self.assertIn(field, response.data)
+        self.assertFalse(Order.objects.exists())
+
+    def test_admin_create_other_delivery_stores_null_delivery_price(self):
+        other_address = Address.objects.create(
+            user=self.customer,
+            name="Other Area",
+            service_city=self.service_city,
+            delivery_type=Address.DeliveryType.DELIVERY,
+        )
+        payload = self.payload()
+        payload["delivery_address_id"] = other_address.id
+        payload.pop("service_city_id")
+        payload["offers"] = [
+            {
+                "offer_id": self.offer.id,
+                "discount_amount": "25.00",
+            }
+        ]
+
+        response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        order = Order.objects.get(id=response.data["id"])
+        self.assertIsNone(order.delivery_area_id)
+        self.assertEqual(order.delivery_type, Order.DeliveryType.DELIVERY)
+        self.assertIsNone(order.delivery_price)
+        self.assertEqual(order.subtotal_price, Decimal("1000.00"))
+        self.assertEqual(order.discount, Decimal("25.00"))
+        self.assertEqual(order.total_price, Decimal("975.00"))
+        self.assertIsNone(response.data["delivery_price"])
+
+    def test_admin_create_rejects_variant_from_another_market(self):
+        payload = self.payload()
+        payload["items"] = [
+            {
+                "variant_id": self.second_variant.id,
+                "quantity": 1,
+                "unit_price": "700.00",
+            }
+        ]
+
+        response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("items", response.data)
+
+    def test_admin_create_rejects_address_for_another_user(self):
+        other_address = Address.objects.create(
+            user=self.other_customer,
+            name="Other User Home",
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+        )
+        payload = self.payload()
+        payload["delivery_address_id"] = other_address.id
+
+        response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("delivery_address_id", response.data)
+
+    def test_admin_create_rejects_service_city_mismatch(self):
+        other_city = ServiceCity.objects.create(
+            name="Wrong City",
+            delivery_price=Decimal("80.00"),
+        )
+        payload = self.payload()
+        payload["service_city_id"] = other_city.id
+
+        response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("service_city_id", response.data)
 
     def test_assignment_sets_order_status_to_ready(self):
         order_id = self.create_order().data["id"]
@@ -365,6 +482,7 @@ class OrderAPITests(APITestCase):
 
     def test_client_order_list_supports_status_filter(self):
         confirmed_order_id = self.create_order().data["id"]
+        Order.objects.filter(id=confirmed_order_id).update(status=Order.Status.CONFIRMED)
         Order.objects.create(
             user=self.customer,
             market=self.market,

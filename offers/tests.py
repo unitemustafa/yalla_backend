@@ -1,6 +1,7 @@
 from datetime import timedelta
 from decimal import Decimal
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import status
@@ -133,6 +134,17 @@ class OfferAPITests(APITestCase):
         payload.update(overrides)
         return payload
 
+    def image_file(self, name="offer.gif"):
+        return SimpleUploadedFile(
+            name,
+            (
+                b"GIF87a\x01\x00\x01\x00\x80\x01\x00\x00\x00\x00"
+                b"\xff\xff\xff,\x00\x00\x00\x00\x01\x00\x01\x00"
+                b"\x00\x02\x02D\x01\x00;"
+            ),
+            content_type="image/gif",
+        )
+
     def create_offer(self):
         offer = Offer.objects.create(
             market=self.market,
@@ -178,7 +190,13 @@ class OfferAPITests(APITestCase):
 
         self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(create_response.data["title"], "عرض الغداء")
+        self.assertEqual(create_response.data["market_id"], self.market.id)
         self.assertEqual(create_response.data["market"]["id"], self.market.id)
+        self.assertEqual(create_response.data["service_city_id"], self.service_city.id)
+        self.assertEqual(
+            set(create_response.data["product_ids"]),
+            {self.product.id, self.second_product.id},
+        )
         self.assertEqual(len(create_response.data["products"]), 2)
         offer_id = create_response.data["id"]
 
@@ -202,6 +220,7 @@ class OfferAPITests(APITestCase):
         self.assertEqual(detail_response.data["products"][0]["id"], self.product.id)
         self.assertEqual(update_response.status_code, status.HTTP_200_OK)
         self.assertEqual(update_response.data["title"], "عرض العشاء")
+        self.assertEqual(update_response.data["product_ids"], [self.second_product.id])
         self.assertEqual(update_response.data["products"][0]["id"], self.second_product.id)
         self.assertEqual(delete_response.status_code, status.HTTP_200_OK)
         self.assertEqual(
@@ -223,6 +242,65 @@ class OfferAPITests(APITestCase):
             {product["id"] for product in response.data["products"]},
             {self.product.id, self.other_market_product.id},
         )
+
+    def test_admin_can_create_offer_for_each_model_type_choice(self):
+        self.authenticate(self.admin)
+
+        for offer_type, _label in Offer.OfferType.choices:
+            response = self.client.post(
+                f"{OFFERS_BASE}/",
+                self.offer_payload(
+                    title=f"عرض {offer_type}",
+                    type=offer_type,
+                ),
+                format="json",
+            )
+
+            self.assertEqual(
+                response.status_code,
+                status.HTTP_201_CREATED,
+                response.data,
+            )
+            self.assertEqual(response.data["type"], offer_type)
+
+    def test_offer_create_rejects_invalid_type(self):
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(type="invalid"),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("type", response.data)
+
+    def test_admin_can_create_and_update_offer_image(self):
+        self.authenticate(self.admin)
+
+        create_response = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(
+                active_days='["saturday", "sunday"]',
+                image=self.image_file("create.gif"),
+            ),
+            format="multipart",
+        )
+        self.assertEqual(
+            create_response.status_code,
+            status.HTTP_201_CREATED,
+            create_response.data,
+        )
+        offer_id = create_response.data["id"]
+        update_response = self.client.patch(
+            f"{OFFERS_BASE}/{offer_id}/",
+            {"image": self.image_file("update.gif")},
+            format="multipart",
+        )
+
+        self.assertIsNotNone(create_response.data["image"])
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertIsNotNone(update_response.data["image"])
 
     def test_admin_can_create_general_offer(self):
         general_market = Market.objects.create(

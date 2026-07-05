@@ -32,14 +32,12 @@ class AdminOfferSerializer(serializers.ModelSerializer):
     market_id = serializers.PrimaryKeyRelatedField(
         queryset=Market.objects.all(),
         source="market",
-        write_only=True,
         required=False,
     )
     market = AdminMarketSerializer(read_only=True)
     service_city_id = serializers.PrimaryKeyRelatedField(
         queryset=ServiceCity.objects.all(),
         source="service_city",
-        write_only=True,
         required=False,
         allow_null=True,
     )
@@ -48,7 +46,6 @@ class AdminOfferSerializer(serializers.ModelSerializer):
         queryset=Product.objects.all(),
         source="products",
         many=True,
-        write_only=True,
     )
     products = OfferProductSerializer(many=True, read_only=True)
 
