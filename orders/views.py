@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import CourierProfile
-from .models import Order
+from .models import Order, OrderMarketSection
 from .serializers import (
     AdminOrderCreateSerializer,
     ClientOrderCreateSerializer,
@@ -72,27 +72,50 @@ def order_queryset():
         )
         .prefetch_related(
             "items__variant__product",
+            "items__section",
             "order_offers__offer",
+            "order_offers__section",
             "market__service_cities",
+            "market_sections__market",
+            "market_sections__items__variant__product",
+            "market_sections__offers__offer",
         )
         .order_by("-created_at", "-id")
+    )
+
+
+def active_available_representatives():
+    return (
+        User.objects.filter(
+            role=User.Role.REPRESENTATIVE,
+            is_active=True,
+            deleted_at__isnull=True,
+            courier_profile__is_available=True,
+        )
+        .select_related("courier_profile__service_city")
+        .order_by("first_name", "last_name", "username", "id")
     )
 
 
 def same_city_representatives(service_city):
     if service_city is None:
         return User.objects.none()
-    return (
-        User.objects.filter(
-            role=User.Role.REPRESENTATIVE,
-            is_active=True,
-            deleted_at__isnull=True,
-            courier_profile__service_city=service_city,
-            courier_profile__is_available=True,
-        )
-        .select_related("courier_profile__service_city")
-        .order_by("first_name", "last_name", "username", "id")
+    return active_available_representatives().filter(
+        courier_profile__service_city=service_city,
     )
+
+
+def courier_service_city_for_order(order):
+    if order.order_scope == Order.Scope.SERVICE_CITY:
+        return order.service_city
+    return None
+
+
+def eligible_representatives_for_order(order):
+    service_city = courier_service_city_for_order(order)
+    if service_city is None:
+        return active_available_representatives()
+    return same_city_representatives(service_city)
 
 
 class OrderListCreateView(generics.ListCreateAPIView):
@@ -240,16 +263,11 @@ class OrderAssignmentView(APIView):
                 {"representative_id": "Representative must have a courier profile."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if order.service_city_id is None:
-            return Response(
-                {
-                    "representative_id": (
-                        "General manual orders cannot be assigned by service city."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if profile.service_city_id != order.service_city_id:
+        courier_service_city = courier_service_city_for_order(order)
+        if (
+            courier_service_city is not None
+            and profile.service_city_id != courier_service_city.id
+        ):
             return Response(
                 {
                     "representative_id": (
@@ -309,7 +327,9 @@ class AdminOrderApproveView(APIView):
     def post(self, request, order_id):
         order = generics.get_object_or_404(
             Order.objects.select_for_update(of=("self",)).select_related(
-                "service_city"
+                "service_city",
+                "delivery_area",
+                "delivery_area__service_city",
             ),
             pk=order_id,
         )
@@ -338,16 +358,17 @@ class AdminOrderApproveView(APIView):
             ]
         )
         resolve_order_review_notifications(order)
-        representatives = same_city_representatives(order.service_city)
+        representatives = eligible_representatives_for_order(order)
+        courier_service_city = courier_service_city_for_order(order)
         response_data = {
             "message": "Order approved successfully.",
             "order": OrderSerializer(order, context={"request": request}).data,
             "service_city": (
                 {
-                    "id": order.service_city_id,
-                    "name": order.service_city.name,
+                    "id": courier_service_city.id,
+                    "name": courier_service_city.name,
                 }
-                if order.service_city_id
+                if courier_service_city is not None
                 else None
             ),
             "available_representatives": RepresentativeSummarySerializer(
@@ -358,8 +379,8 @@ class AdminOrderApproveView(APIView):
         if not representatives.exists():
             response_data["warning"] = (
                 "No representatives are available in this city."
-                if order.service_city_id
-                else "General manual orders are not auto-assigned by service city."
+                if courier_service_city is not None
+                else "No active representatives are available."
             )
         return Response(response_data)
 
@@ -421,19 +442,24 @@ class AdminOrderServiceCityRepresentativesView(APIView):
 
     def get(self, request, order_id):
         order = generics.get_object_or_404(
-            Order.objects.select_related("service_city"),
+            Order.objects.select_related(
+                "service_city",
+                "delivery_area",
+                "delivery_area__service_city",
+            ),
             pk=order_id,
         )
-        representatives = same_city_representatives(order.service_city)
+        representatives = eligible_representatives_for_order(order)
+        courier_service_city = courier_service_city_for_order(order)
         return Response(
             {
                 "order_id": order.id,
                 "service_city": (
                     {
-                        "id": order.service_city_id,
-                        "name": order.service_city.name,
+                        "id": courier_service_city.id,
+                        "name": courier_service_city.name,
                     }
-                    if order.service_city_id
+                    if courier_service_city is not None
                     else None
                 ),
                 "representatives": RepresentativeSummarySerializer(
@@ -526,6 +552,11 @@ class CourierOrderStatusView(APIView):
             )
         order.status = new_status
         update_fields = ["status", "updated_at"]
+        if new_status == Order.Status.PICKED_UP:
+            order.market_sections.update(
+                pickup_status=OrderMarketSection.PickupStatus.PICKED_UP,
+                picked_up_at=timezone.now(),
+            )
         if new_status == Order.Status.DELIVERED:
             order.delivered_at = timezone.now()
             update_fields.append("delivered_at")

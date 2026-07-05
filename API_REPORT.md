@@ -1,38 +1,183 @@
-# Complete API Report
+# Yalla Backend API Report
 
-Generated from actual Django/DRF responses verified with `curl` against an isolated temporary SQLite database/server. Token values are redacted.
+آخر تحقق: 2026-07-05  
+مصدر التحقق: الكود الحالي في هذا المستودع مع `config.test_settings` وبيانات `seed_demo_data --reset --yes-delete-all --no-media`.  
+الهدف من هذا الملف: مرجع ربط واضح للعميل، لوحة الإدارة، والمندوب. الأمثلة مأخوذة من استجابات فعلية، لكن قيم `id` والتواريخ أمثلة seed وقد تختلف بعد إعادة إنشاء البيانات.
 
-## Global Notes
+## قواعد عامة
 
-- Base URL used for verification: `http://127.0.0.1:8765`.
-- Use `Authorization: Bearer <accessToken>` for authenticated endpoints.
-- Offer `type` choices: `package`, `flash`, `discount`, `announcement`, `delivery`.
-- Offer `status` choices: `active`, `inactive`, `expired`.
-- Order `status` choices: `pending`, `confirmed`, `under_preparation`, `ready`, `picked_up`, `on_the_way`, `delivered`, `failed_delivery`, `cancelled`.
-- Order `review_status` choices: `pending_review`, `approved`, `rejected`.
-- `payment_method` is a free nonblank string in the current model.
+- كل المسارات تحت `/api/v1/`.
+- استخدم `Content-Type: application/json` إلا في رفع الصور والملفات.
+- المصادقة: `Authorization: Bearer <accessToken>`.
+- مبالغ المال ترجع غالباً كنص عشري مثل `"180.00"`، وبعض حقول المدن القديمة ترجع رقم مثل `45.0` في اختيار المنطقة.
+- قيم `null` مهمة في الربط، خصوصاً `service_city`, `delivery_area`, `delivery_price` في الطلب العام.
+- بعض endpoints ترجع Array مباشرة، وبعضها يرجع object، وبعض البحث يرجع pagination `{count,next,previous,results}`.
+- `/api/v1/orders/create/` للعميل يرجع **قائمة تحتوي طلب أب واحد** حتى لو فيه أكثر من محل: `[{ ...order }]`.
+- النظام الحالي مصري في seed demo: أرقام `+20`، مدن مثل القاهرة والجيزة والإسكندرية. لا تعتمد على أي أمثلة قديمة تخص دول أخرى.
 
-## Auth
+## بيانات دخول Demo
+
+| الدور | Endpoint | Email | Password |
+|---|---|---|---|
+| Admin | `/api/v1/auth/login/admin/` | `seed.admin@yalla.seed` | `SeedPass1!` |
+| Client service-city | `/api/v1/auth/login/client/` | `seed.amina@yalla.seed` | `SeedPass1!` |
+| Client general | `/api/v1/auth/login/client/` | `seed.karim@yalla.seed` | `SeedPass1!` |
+| Courier | `/api/v1/auth/login/representative/` | `seed.courier1@yalla.seed` | `SeedPass1!` |
+
+## أهم القواعد للربط
+
+- يجب اختيار `market_region` قبل عرض home/offers/search/checkout للعميل.
+- `mode=general` يعني السوق العام فقط، حتى لو `manual_city` مكتوبة `القاهرة`.
+- طلب `general` دائماً يطبّع التوصيل هكذا: `service_city=null`, `delivery_area=null`, `delivery_type=delivery`, `delivery_price=null`.
+- عنوان طلب `general` يجب أن يكون عنواناً يدوياً عاماً: `service_city_id=null`, `delivery_area_id=null`, مع `manual_city` و`manual_area` كنص.
+- طلب `service_city` يحتاج `service_city`. يستخدم `fixed_area` فقط إذا كان العنوان مربوطاً بـ `delivery_area` نشطة وتابعة لنفس المدينة، وإلا يكون `delivery_type=delivery` و`delivery_area=null`.
+- سعر توصيل المنطقة الثابتة يضاف مرة واحدة على الطلب الأب، وليس مرة لكل محل داخل multi-market.
+- المندوبون للطلب العام: أي مندوب نشط لديه courier profile. طلب المدينة: المطابقة حسب `Order.service_city` فقط.
+
+## قيم ثابتة مهمة
+
+| الحقل | القيم |
+|---|---|
+| `role` | `client`, `admin`, `representative` |
+| `market_region.mode` | `general`, `service_city`, أو `null` لمسح الاختيار |
+| `market.scope` / `offer.scope` / `order_scope` | `general`, `service_city` |
+| `delivery_type` | `delivery`, `fixed_area` |
+| `order.status` | `pending`, `confirmed`, `under_preparation`, `ready`, `picked_up`, `on_the_way`, `delivered`, `failed_delivery`, `cancelled` |
+| `review_status` | `pending_review`, `approved`, `rejected` |
+| `offer.type` | `package`, `flash`, `discount`, `announcement`, `delivery` |
+| `offer.status` | `active`, `inactive`, `expired` |
+
+## رسائل رفض Scope كما هي
+
+استخدم هذه الرسائل كما هي في عرض الأخطاء:
+
+```text
+لا يمكن دمج محلات عامة مع محلات مدينة في نفس الطلب
+لا يمكن استخدام عرض مدينة داخل طلب عام
+لا يمكن استخدام عرض عام داخل طلب مدينة
+لا يمكن دمج منتجات من مدن مختلفة في نفس الطلب
+```
+
+## فهرس Endpoints
+
+### Auth
+
+| Method | Path | Auth | ملاحظات |
+|---|---|---|---|
+| POST | `/api/v1/auth/signup/` | عام | تسجيل وإرسال OTP |
+| POST | `/api/v1/auth/verify-email/` | عام | تفعيل التسجيل بالـ OTP |
+| POST | `/api/v1/auth/resend-verification/` | عام | إعادة إرسال OTP |
+| POST | `/api/v1/auth/login/` | عام | تسجيل دخول عام |
+| POST | `/api/v1/auth/login/client/` | عام | دخول عميل فقط |
+| POST | `/api/v1/auth/login/representative/` | عام | دخول مندوب فقط |
+| POST | `/api/v1/auth/login/admin/` | عام | دخول إدارة فقط |
+| POST | `/api/v1/auth/refresh/` | عام | تحديث access token |
+| POST | `/api/v1/auth/logout/` | مستخدم | خروج |
+| GET/PATCH | `/api/v1/auth/me/` | مستخدم | بيانات المستخدم الحالي |
+| GET/PATCH | `/api/v1/auth/client/profile/` | Client | ملف العميل |
+| GET/POST | `/api/v1/auth/users/` | Admin | إدارة المستخدمين |
+| GET/PATCH/DELETE | `/api/v1/auth/users/{user_id}/` | Admin | مستخدم محدد |
+| GET | `/api/v1/auth/representatives/` | Admin | المندوبون |
+| GET | `/api/v1/auth/check-username/` | عام | فحص username |
+| GET | `/api/v1/auth/check-email/` | عام | فحص email |
+| GET | `/api/v1/auth/check-phone/` | عام | فحص phone |
+| POST | `/api/v1/auth/forgot-password/` | عام | طلب إعادة كلمة المرور |
+| POST | `/api/v1/auth/reset-password/` | عام | إعادة كلمة المرور |
+
+مسارات auth تعمل مع slash وبدون slash.
+
+### Market Region
+
+| Method | Path | Auth | ملاحظات |
+|---|---|---|---|
+| GET | `/api/v1/market-region/options/` | مستخدم | الخيارات المتاحة مع الاختيار الحالي |
+| GET/PATCH | `/api/v1/market-region/me/` | مستخدم | قراءة/تعديل اختيار السوق |
+| POST | `/api/v1/market-region/detect/` | مستخدم | اقتراح مدينة حسب latitude/longitude |
+
+### Locations / Addresses
+
+| Method | Path | Auth | ملاحظات |
+|---|---|---|---|
+| GET/POST | `/api/v1/locations/service-cities/` | Admin | مدن الخدمة |
+| GET/PATCH/DELETE | `/api/v1/locations/service-cities/{city_id}/` | Admin | مدينة خدمة |
+| GET/POST | `/api/v1/locations/delivery-areas/` | مستخدم حسب الصلاحية | مناطق التوصيل |
+| GET/PATCH/DELETE | `/api/v1/locations/delivery-areas/{area_id}/` | مستخدم حسب الصلاحية | منطقة توصيل |
+| GET/POST | `/api/v1/locations/addresses/` | مستخدم | عناوين المستخدم، Admin يرسل `user_id` |
+| GET | `/api/v1/locations/addresses/default/` | مستخدم | العنوان الافتراضي |
+| GET/PATCH/DELETE | `/api/v1/locations/addresses/{address_id}/` | مستخدم | عنوان محدد |
+| POST | `/api/v1/locations/addresses/{address_id}/default/` | مستخدم | جعل العنوان افتراضياً |
+| GET/POST | `/api/v1/addresses/` | مستخدم | alias لنفس عناوين locations |
+
+### Home / Markets / Catalog / Offers
+
+| Method | Path | Auth | ملاحظات |
+|---|---|---|---|
+| GET | `/api/v1/home/` | مستخدم | Home حسب `market_region` |
+| GET | `/api/v1/home/search/` | مستخدم | بحث منتجات |
+| GET | `/api/v1/home/products/` | Client | منتجات حسب عنوان/منطقة العميل، paginated |
+| GET | `/api/v1/home/products/{product_id}/` | مستخدم | تفاصيل منتج للعرض |
+| GET | `/api/v1/home/classifications/` | مستخدم | تصنيفات وأسواق حسب المنطقة |
+| GET | `/api/v1/home/classifications/featured/` | مستخدم | featured فقط |
+| GET | `/api/v1/home/classifications/popular/` | مستخدم | popular فقط |
+| GET | `/api/v1/home/classifications/normal/` | مستخدم | normal فقط |
+| GET | `/api/v1/home/classifications/{classification_id}/markets/` | مستخدم | أسواق تصنيف |
+| GET/POST | `/api/v1/home/market-classifications/` | Admin | إدارة تصنيفات المحلات |
+| GET/PATCH/DELETE | `/api/v1/home/market-classifications/{classification_id}/` | Admin | تصنيف محل |
+| GET/POST | `/api/v1/home/markets/` | Admin | إدارة المحلات |
+| GET/PATCH/DELETE | `/api/v1/home/markets/{market_id}/` | Admin | محل محدد |
+| GET/POST | `/api/v1/offers/` | مستخدم | Admin يرى الكل وينشئ، Client يرى المتاح حسب المنطقة |
+| GET/PATCH/DELETE | `/api/v1/offers/{offer_id}/` | مستخدم | Admin يدير، Client يقرأ المتاح فقط |
+| GET/POST | `/api/v1/catalog/products/` | Admin | إدارة المنتجات |
+| GET/PATCH/DELETE | `/api/v1/catalog/products/{product_id}/` | Admin | منتج محدد |
+| GET | `/api/v1/catalog/products/likes/` | Client | المنتجات المعجب بها |
+| POST | `/api/v1/catalog/products/{product_id}/like/` | Client | إعجاب |
+| DELETE | `/api/v1/catalog/products/{product_id}/unlike/` | Client | إلغاء إعجاب |
+
+باقي مسارات `/api/v1/catalog/` الإدارية: `addition-classifications`, `category-classifications`, `product-categories`, `category-attributes`, `category-options`, `product-additions` بنفس نمط `GET/POST` للقائمة و`GET/PATCH/DELETE` للتفاصيل.
+
+### Orders
+
+| Method | Path | Auth | ملاحظات |
+|---|---|---|---|
+| GET | `/api/v1/orders/my/` | Client | طلبات العميل، يدعم `?status=` |
+| POST | `/api/v1/orders/preview/` | Client | معاينة السعر والتجميع قبل الإنشاء |
+| POST | `/api/v1/orders/create/` | Client | إنشاء طلب، يرجع `[order]` |
+| GET/POST | `/api/v1/orders/` | Admin | قائمة/إنشاء إداري |
+| GET/PATCH/DELETE | `/api/v1/orders/{order_id}/` | Admin | تفاصيل/تعديل/إلغاء |
+| PATCH | `/api/v1/orders/{order_id}/status/` | Admin | تحديث الحالة |
+| PATCH | `/api/v1/orders/{order_id}/assignment/` | Admin | إسناد مندوب |
+| GET | `/api/v1/admin/order-review/blocker/` | Admin | هل يوجد طلبات مراجعة عالقة |
+| POST | `/api/v1/admin/orders/{order_id}/approve/` | Admin | اعتماد الطلب وإرجاع المندوبين المتاحين |
+| POST | `/api/v1/admin/orders/{order_id}/reject/` | Admin | رفض الطلب |
+| GET | `/api/v1/admin/orders/{order_id}/service-city-representatives/` | Admin | مندوبون مؤهلون للطلب |
+
+### Courier / Notifications / Dashboard
+
+| Method | Path | Auth | ملاحظات |
+|---|---|---|---|
+| GET | `/api/v1/courier/orders/` | Courier | طلبات المندوب، يدعم `?status=` |
+| GET | `/api/v1/courier/orders/{order_id}/` | Courier | تفاصيل طلب مسند للمندوب |
+| PATCH | `/api/v1/courier/orders/{order_id}/status/` | Courier | انتقال الحالة |
+| GET | `/api/v1/notifications/` | مستخدم | إشعارات المستخدم، فلاتر: `unread`, `type`, `audience`, `is_blocking`, `is_resolved` |
+| PATCH | `/api/v1/notifications/{notification_id}/read/` | مستخدم | تعليم إشعار كمقروء |
+| POST | `/api/v1/notifications/mark-all-read/` | مستخدم | تعليم الكل كمقروء |
+| GET | `/api/v1/notifications/unread-count/` | مستخدم | عدد غير المقروء |
+| GET | `/api/v1/dashboard/overview/?from=YYYY-MM-DD&to=YYYY-MM-DD` | Admin | ملخص لوحة التحكم |
+
+## Auth Examples
 
 ### Admin login
 
-Method: `POST`  
-URL: `/api/v1/auth/login/admin/`  
-Auth: None  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
+Request:
 
 ```json
 {
-  "email": "seed.admin@yalla.test",
+  "email": "seed.admin@yalla.seed",
   "password": "SeedPass1!"
 }
 ```
 
-Response body:
+Response `200`:
 
 ```json
 {
@@ -41,11 +186,11 @@ Response body:
   "expiresIn": 900,
   "user": {
     "id": "1",
-    "first_name": "يلا",
-    "last_name": "مشرف",
+    "first_name": "مدير",
+    "last_name": "يلا",
     "username": "seed_admin",
-    "email": "seed.admin@yalla.test",
-    "phone": "+213555100001",
+    "email": "seed.admin@yalla.seed",
+    "phone": "+201001000001",
     "gender": "",
     "birth_date": null,
     "avatar_url": null,
@@ -57,27 +202,18 @@ Response body:
 }
 ```
 
-
-
 ### Client login
 
-Method: `POST`  
-URL: `/api/v1/auth/login/client/`  
-Auth: None  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
+Request:
 
 ```json
 {
-  "email": "seed.amina@yalla.test",
+  "email": "seed.amina@yalla.seed",
   "password": "SeedPass1!"
 }
 ```
 
-Response body:
+Response `200`:
 
 ```json
 {
@@ -87,10 +223,10 @@ Response body:
   "user": {
     "id": "2",
     "first_name": "أمينة",
-    "last_name": "بن سالم",
+    "last_name": "حسن",
     "username": "seed_amina",
-    "email": "seed.amina@yalla.test",
-    "phone": "+213555100002",
+    "email": "seed.amina@yalla.seed",
+    "phone": "+201001000002",
     "gender": "",
     "birth_date": null,
     "avatar_url": null,
@@ -102,27 +238,9 @@ Response body:
 }
 ```
 
+### Courier login
 
-
-### Representative login
-
-Method: `POST`  
-URL: `/api/v1/auth/login/representative/`  
-Auth: None  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "email": "seed.courier@yalla.test",
-  "password": "SeedPass1!"
-}
-```
-
-Response body:
+Response يحتوي `courier_profile` لأن الدور `representative`:
 
 ```json
 {
@@ -130,12 +248,12 @@ Response body:
   "refreshToken": "<refreshToken>",
   "expiresIn": 900,
   "user": {
-    "id": "4",
-    "first_name": "سفيان",
+    "id": "5",
+    "first_name": "أحمد",
     "last_name": "مندوب",
-    "username": "seed_courier",
-    "email": "seed.courier@yalla.test",
-    "phone": "+213555100004",
+    "username": "seed_courier1",
+    "email": "seed.courier1@yalla.seed",
+    "phone": "+201001000004",
     "gender": "",
     "birth_date": null,
     "avatar_url": null,
@@ -143,31 +261,22 @@ Response body:
     "role": "representative",
     "has_password": true,
     "courier_profile": {
-      "vehicle_type": "Motorcycle",
-      "plate_number": "YH-1004",
+      "vehicle_type": "دراجة نارية",
+      "plate_number": "س ي د 1234",
       "delivery_area": 1,
-      "delivery_area_name": "وسط الجزائر",
+      "delivery_area_name": "مدينة نصر",
       "service_city": 1,
-      "service_city_name": "الجزائر",
-      "max_active_orders": 3,
+      "service_city_name": "القاهرة",
+      "max_active_orders": 4,
       "is_available": true
     }
   }
 }
 ```
 
-
-
 ### Signup
 
-Method: `POST`  
-URL: `/api/v1/auth/signup/`  
-Auth: None  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
+Request:
 
 ```json
 {
@@ -175,844 +284,51 @@ Request body:
   "last_name": "User",
   "username": "report_user",
   "email": "report.user@yalla.test",
-  "phone": "+213555900001",
-  "password": "ReportPass1!",
-  "password_confirm": "ReportPass1!",
-  "terms_accepted": true
+  "phone": "+201009999999",
+  "password": "StrongPass1!",
+  "password_confirm": "StrongPass1!"
 }
 ```
 
-Response body:
+Response `201`:
 
 ```json
 {
   "detail": "Registration OTP sent.",
   "email": "report.user@yalla.test",
-  "dev_otp": "382901"
+  "dev_otp": "<dev_otp>"
 }
 ```
 
-
-
-### Verify email
-
-Method: `POST`  
-URL: `/api/v1/auth/verify-email/`  
-Auth: None  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "email": "report.user@yalla.test",
-  "otp": "382901"
-}
-```
-
-Response body:
-
-```json
-{
-  "accessToken": "<accessToken>",
-  "refreshToken": "<refreshToken>",
-  "expiresIn": 900,
-  "user": {
-    "id": "10",
-    "first_name": "Report",
-    "last_name": "User",
-    "username": "report_user",
-    "email": "report.user@yalla.test",
-    "phone": "+213555900001",
-    "gender": "",
-    "birth_date": null,
-    "avatar_url": null,
-    "username_changed_at": null,
-    "role": "client",
-    "has_password": true,
-    "courier_profile": null
-  }
-}
-```
-
-
-
-### Resend verification
-
-Method: `POST`  
-URL: `/api/v1/auth/resend-verification/`  
-Auth: None  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "email": "seed.pending@yalla.test"
-}
-```
-
-Response body:
-
-```json
-{
-  "detail": "A new registration OTP has been sent.",
-  "dev_otp": "748912"
-}
-```
-
-
-
-### Generic login
-
-Method: `POST`  
-URL: `/api/v1/auth/login/`  
-Auth: None  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "email": "seed.amina@yalla.test",
-  "password": "SeedPass1!"
-}
-```
-
-Response body:
-
-```json
-{
-  "accessToken": "<accessToken>",
-  "refreshToken": "<refreshToken>",
-  "expiresIn": 900,
-  "user": {
-    "id": "2",
-    "first_name": "أمينة",
-    "last_name": "بن سالم",
-    "username": "seed_amina",
-    "email": "seed.amina@yalla.test",
-    "phone": "+213555100002",
-    "gender": "",
-    "birth_date": null,
-    "avatar_url": null,
-    "username_changed_at": null,
-    "role": "client",
-    "has_password": true,
-    "courier_profile": null
-  }
-}
-```
-
-
-
-### Refresh token
-
-Method: `POST`  
-URL: `/api/v1/auth/refresh/`  
-Auth: None  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "refresh": "<refresh>"
-}
-```
-
-Response body:
-
-```json
-{
-  "accessToken": "<accessToken>",
-  "refreshToken": "<refreshToken>"
-}
-```
-
-
-
-### Current user
-
-Method: `GET`  
-URL: `/api/v1/auth/me/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": "2",
-  "first_name": "أمينة",
-  "last_name": "بن سالم",
-  "username": "seed_amina",
-  "email": "seed.amina@yalla.test",
-  "phone": "+213555100002",
-  "gender": "",
-  "birth_date": null,
-  "avatar_url": null,
-  "username_changed_at": null,
-  "role": "client",
-  "has_password": true,
-  "courier_profile": null
-}
-```
-
-
-
-### Update current user
-
-Method: `PATCH`  
-URL: `/api/v1/auth/me/`  
-Auth: Client token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "gender": "female"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": "2",
-  "first_name": "أمينة",
-  "last_name": "بن سالم",
-  "username": "seed_amina",
-  "email": "seed.amina@yalla.test",
-  "phone": "+213555100002",
-  "gender": "female",
-  "birth_date": null,
-  "avatar_url": null,
-  "username_changed_at": null,
-  "role": "client",
-  "has_password": true,
-  "courier_profile": null
-}
-```
-
-
-
-### Client profile update
-
-Method: `PATCH`  
-URL: `/api/v1/auth/client/profile/`  
-Auth: Client token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "first_name": "أمينة"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": "2",
-  "first_name": "أمينة",
-  "last_name": "بن سالم",
-  "username": "seed_amina",
-  "email": "seed.amina@yalla.test",
-  "phone": "+213555100002",
-  "gender": "female",
-  "birth_date": null,
-  "avatar_url": null,
-  "username_changed_at": null,
-  "role": "client",
-  "has_password": true,
-  "courier_profile": null
-}
-```
-
-
-
-### Client profile replace
-
-Method: `PUT`  
-URL: `/api/v1/auth/client/profile/`  
-Auth: Client token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "first_name": "أمينة",
-  "last_name": "بن سالم",
-  "gender": "female"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": "2",
-  "first_name": "أمينة",
-  "last_name": "بن سالم",
-  "username": "seed_amina",
-  "email": "seed.amina@yalla.test",
-  "phone": "+213555100002",
-  "gender": "female",
-  "birth_date": null,
-  "avatar_url": null,
-  "username_changed_at": null,
-  "role": "client",
-  "has_password": true,
-  "courier_profile": null
-}
-```
-
-
-
-### Forgot password
-
-Method: `POST`  
-URL: `/api/v1/auth/forgot-password/`  
-Auth: None  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "email": "seed.karim@yalla.test"
-}
-```
-
-Response body:
-
-```json
-{
-  "detail": "If an active account exists, a password reset OTP has been sent.",
-  "dev_otp": "949910"
-}
-```
-
-
-
-### Reset password
-
-Method: `POST`  
-URL: `/api/v1/auth/reset-password/`  
-Auth: None  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "email": "seed.karim@yalla.test",
-  "otp": "949910",
-  "password": "ResetPass1!",
-  "password_confirm": "ResetPass1!"
-}
-```
-
-Response body:
-
-```json
-{
-  "detail": "Password reset successfully."
-}
-```
-
-
-
-### Check username
-
-Method: `GET`  
-URL: `/api/v1/auth/check-username/?username=seed_admin`  
-Auth: None  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "available": false,
-  "registered": true
-}
-```
-
-
-
-### Check email
-
-Method: `GET`  
-URL: `/api/v1/auth/check-email/?email=seed.admin%40yalla.test`  
-Auth: None  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "available": false,
-  "registered": true
-}
-```
-
-
-
-### Check phone
-
-Method: `GET`  
-URL: `/api/v1/auth/check-phone/?phone=%2B213555100001`  
-Auth: None  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "available": false,
-  "registered": true
-}
-```
-
-
-
-### Login for logout
-
-Method: `POST`  
-URL: `/api/v1/auth/login/client/`  
-Auth: None  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "email": "seed.amina@yalla.test",
-  "password": "SeedPass1!"
-}
-```
-
-Response body:
-
-```json
-{
-  "accessToken": "<accessToken>",
-  "refreshToken": "<refreshToken>",
-  "expiresIn": 900,
-  "user": {
-    "id": "2",
-    "first_name": "أمينة",
-    "last_name": "بن سالم",
-    "username": "seed_amina",
-    "email": "seed.amina@yalla.test",
-    "phone": "+213555100002",
-    "gender": "female",
-    "birth_date": null,
-    "avatar_url": null,
-    "username_changed_at": null,
-    "role": "client",
-    "has_password": true,
-    "courier_profile": null
-  }
-}
-```
-
-
-
-### Delete current user
-
-Method: `DELETE`  
-URL: `/api/v1/auth/me/`  
-Auth: Verified client token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "password": "ReportPass1!"
-}
-```
-
-Response body:
-
-```json
-{
-  "detail": "Account deleted."
-}
-```
-
-
-
-### Logout
-
-Method: `POST`  
-URL: `/api/v1/auth/logout/`  
-Auth: Client token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "refresh": "<refresh>"
-}
-```
-
-Response body:
-
-```json
-{
-  "detail": "Logout successful."
-}
-```
-
-
-
-## Accounts
-
-### Admin users list
-
-Method: `GET`  
-URL: `/api/v1/auth/users/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": "9",
-    "first_name": "ليلى",
-    "last_name": "سائقة",
-    "username": "seed_courier3",
-    "email": "seed.courier3@yalla.test",
-    "phone": "+213555100009",
-    "gender": "",
-    "birth_date": null,
-    "avatar_url": null,
-    "username_changed_at": null,
-    "role": "representative",
-    "has_password": true,
-    "courier_profile": {
-      "vehicle_type": "Car",
-      "plate_number": "YH-1009",
-      "delivery_area": 5,
-      "delivery_area_name": "وسط قسنطينة",
-      "service_city": 3,
-      "service_city_name": "قسنطينة",
-      "max_active_orders": 5,
-      "is_available": false
-    },
-    "is_active": true,
-    "is_staff": false,
-    "is_superuser": false,
-    "created_at": "2026-07-05T07:25:39.487290Z",
-    "updated_at": "2026-07-05T07:25:39.487308Z"
-  },
-  "... 8 more item(s)"
-]
-```
-
-
-
-### Admin representatives list
-
-Method: `GET`  
-URL: `/api/v1/auth/representatives/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": "9",
-    "first_name": "ليلى",
-    "last_name": "سائقة",
-    "username": "seed_courier3",
-    "email": "seed.courier3@yalla.test",
-    "phone": "+213555100009",
-    "gender": "",
-    "birth_date": null,
-    "avatar_url": null,
-    "username_changed_at": null,
-    "role": "representative",
-    "has_password": true,
-    "courier_profile": {
-      "vehicle_type": "Car",
-      "plate_number": "YH-1009",
-      "delivery_area": 5,
-      "delivery_area_name": "وسط قسنطينة",
-      "service_city": 3,
-      "service_city_name": "قسنطينة",
-      "max_active_orders": 5,
-      "is_available": false
-    },
-    "is_active": true,
-    "is_staff": false,
-    "is_superuser": false,
-    "created_at": "2026-07-05T07:25:39.487290Z",
-    "updated_at": "2026-07-05T07:25:39.487308Z"
-  },
-  "... 2 more item(s)"
-]
-```
-
-
-
-### Admin user create
-
-Method: `POST`  
-URL: `/api/v1/auth/users/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "first_name": "Doc",
-  "last_name": "Client",
-  "username": "doc_client",
-  "email": "doc.client@yalla.test",
-  "phone": "+213555900002",
-  "password": "DocPass1!",
-  "role": "client",
-  "is_active": true
-}
-```
-
-Response body:
-
-```json
-{
-  "id": "11",
-  "first_name": "Doc",
-  "last_name": "Client",
-  "username": "doc_client",
-  "email": "doc.client@yalla.test",
-  "phone": "+213555900002",
-  "gender": "",
-  "birth_date": null,
-  "avatar_url": null,
-  "username_changed_at": null,
-  "role": "client",
-  "has_password": true,
-  "courier_profile": null,
-  "is_active": true,
-  "is_staff": false,
-  "is_superuser": false,
-  "created_at": "2026-07-05T07:25:54.714904Z",
-  "updated_at": "2026-07-05T07:25:54.714920Z"
-}
-```
-
-
-
-### Admin user detail
-
-Method: `GET`  
-URL: `/api/v1/auth/users/11/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": "11",
-  "first_name": "Doc",
-  "last_name": "Client",
-  "username": "doc_client",
-  "email": "doc.client@yalla.test",
-  "phone": "+213555900002",
-  "gender": "",
-  "birth_date": null,
-  "avatar_url": null,
-  "username_changed_at": null,
-  "role": "client",
-  "has_password": true,
-  "courier_profile": null,
-  "is_active": true,
-  "is_staff": false,
-  "is_superuser": false,
-  "created_at": "2026-07-05T07:25:54.714904Z",
-  "updated_at": "2026-07-05T07:25:54.714920Z"
-}
-```
-
-
-
-### Admin user update
-
-Method: `PATCH`  
-URL: `/api/v1/auth/users/11/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "first_name": "DocUpdated"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": "11",
-  "first_name": "DocUpdated",
-  "last_name": "Client",
-  "username": "doc_client",
-  "email": "doc.client@yalla.test",
-  "phone": "+213555900002",
-  "gender": "",
-  "birth_date": null,
-  "avatar_url": null,
-  "username_changed_at": null,
-  "role": "client",
-  "has_password": true,
-  "courier_profile": null,
-  "is_active": true,
-  "is_staff": false,
-  "is_superuser": false,
-  "created_at": "2026-07-05T07:25:54.714904Z",
-  "updated_at": "2026-07-05T07:25:54.778368Z"
-}
-```
-
-
-
-### Admin user delete
-
-Method: `DELETE`  
-URL: `/api/v1/auth/users/11/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `204`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```text
-empty
-```
-
-
+في بيئة التطوير قد يظهر `dev_otp`. في الإنتاج لا تعتمد عليه كقيمة ثابتة.
 
 ## Market Region
 
-### Set market region
+اختيار المنطقة هو فلتر السوق والطلبات. بدون اختيار قد ترجع endpoints العميل خطأ مثل:
 
-Method: `PATCH`  
-URL: `/api/v1/market-region/me/`  
-Auth: Client token  
-Content-Type: `application/json`  
-HTTP status: `200`
+```json
+{
+  "detail": "Select a market browsing region before loading market content.",
+  "requires_market_region_selection": true
+}
+```
 
+تغيير الاختيار:
 
-Request body:
+```http
+PATCH /api/v1/market-region/me/
+```
+
+General:
+
+```json
+{
+  "mode": "general",
+  "service_city_id": null
+}
+```
+
+Service city:
 
 ```json
 {
@@ -1021,6522 +337,1086 @@ Request body:
 }
 ```
 
-Response body:
+مسح الاختيار:
+
+```json
+{
+  "mode": null,
+  "service_city_id": null
+}
+```
+
+Response example:
 
 ```json
 {
   "current_selection": {
     "mode": "service_city",
-    "label": "الجزائر",
+    "label": "القاهرة",
     "service_city": {
       "id": 1,
-      "name": "الجزائر",
-      "delivery_price": 250.0,
+      "name": "القاهرة",
+      "delivery_price": 45.0,
       "is_active": true
     },
-    "updated_at": "2026-07-05T07:25:54.171625Z"
+    "updated_at": "2026-07-05T15:42:34.729502Z"
   }
 }
 ```
 
+## Locations And Addresses
 
-
-### Market region options
-
-Method: `GET`  
-URL: `/api/v1/market-region/options/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
+### Service city example
 
 ```json
 {
-  "options": [
-    {
-      "mode": "general",
-      "label": "General",
-      "service_city": null
-    },
-    "... 4 more item(s)"
-  ],
-  "current_selection": {
-    "mode": "service_city",
-    "label": "الجزائر",
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": 250.0,
-      "is_active": true
-    },
-    "updated_at": "2026-07-05T07:25:54.171625Z"
-  }
-}
-```
-
-
-
-### Current market region
-
-Method: `GET`  
-URL: `/api/v1/market-region/me/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "current_selection": {
-    "mode": "service_city",
-    "label": "الجزائر",
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": 250.0,
-      "is_active": true
-    },
-    "updated_at": "2026-07-05T07:25:54.171625Z"
-  }
-}
-```
-
-
-
-### Detect market region
-
-Method: `POST`  
-URL: `/api/v1/market-region/detect/`  
-Auth: Client token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "latitude": "36.7538000",
-  "longitude": "3.0588000"
-}
-```
-
-Response body:
-
-```json
-{
-  "action": "same_region",
-  "current_selection": {
-    "mode": "service_city",
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر"
-    }
-  },
-  "detected_region": {
-    "mode": "service_city",
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر"
-    }
-  },
-  "message": "You are already in your selected market region."
-}
-```
-
-
-
-## Home
-
-### Home
-
-Method: `GET`  
-URL: `/api/v1/home/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "current_selection": {
-    "mode": "service_city",
-    "label": "الجزائر",
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": 250.0,
-      "is_active": true
-    },
-    "updated_at": "2026-07-05T07:25:54.171625Z"
-  },
-  "location": {
-    "address_id": 1,
-    "name": "المنزل",
-    "latitude": 36.7525,
-    "longitude": 3.0419
-  },
-  "offers": [
-    {
-      "id": 4,
-      "title": "غداء الجزائر السريع",
-      "description": "عرض تجريبي: غداء الجزائر السريع.",
-      "image": null,
-      "type": "flash",
-      "discount": "12.00",
-      "start_time": "2026-07-04T07:25:39.440065Z",
-      "end_time": "2026-08-04T07:25:39.440065Z",
-      "active_days": [
-        0,
-        "... 6 more item(s)"
-      ],
-      "use_limits": 500,
-      "user_limit": 3,
-      "status": "active",
-      "market": {
-        "id": 2,
-        "name": "مطبخ أطلس العائلي",
-        "branch": "باب الزوار",
-        "scope": "service_city",
-        "status": "active",
-        "classification_id": 2,
-        "service_cities": [
-          {
-            "id": 1,
-            "name": "الجزائر",
-            "delivery_price": "250.00",
-            "is_active": true
-          }
-        ],
-        "delivery_areas": [
-          {
-            "id": 1,
-            "service_city_id": 1,
-            "name": "وسط الجزائر",
-            "delivery_price": "250.00",
-            "center_latitude": "36.7538000",
-            "center_longitude": "3.0588000",
-            "radius_km": "8.00",
-            "is_active": true
-          },
-          "... 1 more item(s)"
-        ]
-      },
-      "products": [
-        {
-          "id": 7,
-          "name": "شوربة خضار",
-          "description": "منتج تجريبي: شوربة خضار.",
-          "image": null,
-          "discount": "0.00",
-          "category": {
-            "id": 4,
-            "name": "وجبات",
-            "type": "meal",
-            "description": "وجبات جاهزة للأكل",
-            "image": null,
-            "classification_id": 2
-          },
-          "market": {
-            "id": 2,
-            "name": "مطبخ أطلس العائلي",
-            "branch": "باب الزوار",
-            "scope": "service_city",
-            "status": "active",
-            "classification_id": 2,
-            "service_cities": [
-              {
-                "id": 1,
-                "name": "الجزائر",
-                "delivery_price": "250.00",
-                "is_active": true
-              }
-            ],
-            "delivery_areas": [
-              {
-                "id": 1,
-                "service_city_id": 1,
-                "name": "وسط الجزائر",
-                "delivery_price": "250.00",
-                "center_latitude": "36.7538000",
-                "center_longitude": "3.0588000",
-                "radius_km": "8.00",
-                "is_active": true
-              },
-              "... 1 more item(s)"
-            ]
-          },
-          "variants": [
-            {
-              "id": 13,
-              "price": "420.00",
-              "sku": "SEED-07-1"
-            },
-            "... 1 more item(s)"
-          ]
-        },
-        "... 1 more item(s)"
-      ]
-    },
-    "... 1 more item(s)"
-  ],
-  "market_classifications": [
-    {
-      "id": 2,
-      "name": "مطعم",
-      "classification_type": "featured",
-      "markets": [
-        {
-          "id": 2,
-          "name": "مطبخ أطلس العائلي",
-          "branch": "باب الزوار",
-          "scope": "service_city",
-          "status": "active",
-          "classification_id": 2,
-          "service_cities": [
-            {
-              "id": 1,
-              "name": "الجزائر",
-              "delivery_price": "250.00",
-              "is_active": true
-            }
-          ],
-          "delivery_areas": [
-            {
-              "id": 1,
-              "service_city_id": 1,
-              "name": "وسط الجزائر",
-              "delivery_price": "250.00",
-              "center_latitude": "36.7538000",
-              "center_longitude": "3.0588000",
-              "radius_km": "8.00",
-              "is_active": true
-            },
-            "... 1 more item(s)"
-          ]
-        }
-      ]
-    }
-  ],
-  "products": [
-    {
-      "id": 8,
-      "name": "دجاج مشوي",
-      "description": "منتج تجريبي: دجاج مشوي.",
-      "image": null,
-      "discount": "0.00",
-      "category": {
-        "id": 4,
-        "name": "وجبات",
-        "type": "meal",
-        "description": "وجبات جاهزة للأكل",
-        "image": null,
-        "classification_id": 2
-      },
-      "market": {
-        "id": 2,
-        "name": "مطبخ أطلس العائلي",
-        "branch": "باب الزوار",
-        "scope": "service_city",
-        "status": "active",
-        "classification_id": 2,
-        "service_cities": [
-          {
-            "id": 1,
-            "name": "الجزائر",
-            "delivery_price": "250.00",
-            "is_active": true
-          }
-        ],
-        "delivery_areas": [
-          {
-            "id": 1,
-            "service_city_id": 1,
-            "name": "وسط الجزائر",
-            "delivery_price": "250.00",
-            "center_latitude": "36.7538000",
-            "center_longitude": "3.0588000",
-            "radius_km": "8.00",
-            "is_active": true
-          },
-          "... 1 more item(s)"
-        ]
-      },
-      "variants": [
-        {
-          "id": 15,
-          "price": "980.00",
-          "sku": "SEED-08-1"
-        },
-        "... 1 more item(s)"
-      ]
-    },
-    "... 2 more item(s)"
-  ]
-}
-```
-
-
-
-### Home search
-
-Method: `GET`  
-URL: `/api/v1/home/search/?q=seed`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "count": 0,
-  "next": null,
-  "previous": null,
-  "results": []
-}
-```
-
-
-
-### Home products
-
-Method: `GET`  
-URL: `/api/v1/home/products/?order_by_latest=true`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "count": 3,
-  "next": null,
-  "previous": null,
-  "results": [
-    {
-      "id": 8,
-      "name": "دجاج مشوي",
-      "description": "منتج تجريبي: دجاج مشوي.",
-      "image": null,
-      "discount": "0.00",
-      "category": {
-        "id": 4,
-        "name": "وجبات",
-        "type": "meal",
-        "description": "وجبات جاهزة للأكل",
-        "image": null,
-        "classification_id": 2
-      },
-      "market": {
-        "id": 2,
-        "name": "مطبخ أطلس العائلي",
-        "branch": "باب الزوار",
-        "scope": "service_city",
-        "status": "active",
-        "classification_id": 2,
-        "service_cities": [
-          {
-            "id": 1,
-            "name": "الجزائر",
-            "delivery_price": "250.00",
-            "is_active": true
-          }
-        ],
-        "delivery_areas": [
-          {
-            "id": 1,
-            "service_city_id": 1,
-            "name": "وسط الجزائر",
-            "delivery_price": "250.00",
-            "center_latitude": "36.7538000",
-            "center_longitude": "3.0588000",
-            "radius_km": "8.00",
-            "is_active": true
-          },
-          "... 1 more item(s)"
-        ]
-      },
-      "variants": [
-        {
-          "id": 15,
-          "price": "980.00",
-          "sku": "SEED-08-1"
-        },
-        "... 1 more item(s)"
-      ]
-    },
-    "... 2 more item(s)"
-  ]
-}
-```
-
-
-
-### Home classifications
-
-Method: `GET`  
-URL: `/api/v1/home/classifications/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "common_market_classifications": [
-    {
-      "id": 2,
-      "name": "مطعم",
-      "classification_type": "featured",
-      "product_count": 3
-    }
-  ],
-  "market_classifications": [
-    {
-      "id": 2,
-      "name": "مطعم",
-      "classification_type": "featured",
-      "product_count": 3,
-      "markets": [
-        {
-          "id": 2,
-          "name": "مطبخ أطلس العائلي",
-          "branch": "باب الزوار",
-          "status": "active",
-          "classification_id": 2,
-          "product_count": 3,
-          "products": [
-            {
-              "id": 8,
-              "name": "دجاج مشوي",
-              "description": "منتج تجريبي: دجاج مشوي.",
-              "image": null,
-              "discount": "0.00",
-              "category": {
-                "id": 4,
-                "name": "وجبات",
-                "type": "meal",
-                "description": "وجبات جاهزة للأكل",
-                "image": null,
-                "classification_id": 2
-              }
-            },
-            "... 2 more item(s)"
-          ]
-        }
-      ]
-    }
-  ]
-}
-```
-
-
-
-### Featured classifications
-
-Method: `GET`  
-URL: `/api/v1/home/classifications/featured/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "current_selection": {
-    "mode": "service_city",
-    "label": "الجزائر",
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": 250.0,
-      "is_active": true
-    },
-    "updated_at": "2026-07-05T07:25:54.171625Z"
-  },
-  "classifications": [
-    {
-      "id": 2,
-      "name": "مطعم",
-      "classification_type": "featured",
-      "product_count": 3,
-      "markets": [
-        {
-          "id": 2,
-          "name": "مطبخ أطلس العائلي",
-          "branch": "باب الزوار",
-          "status": "active",
-          "classification_id": 2,
-          "product_count": 3,
-          "products": [
-            {
-              "id": 8,
-              "name": "دجاج مشوي",
-              "description": "منتج تجريبي: دجاج مشوي.",
-              "image": null,
-              "discount": "0.00",
-              "category": {
-                "id": 4,
-                "name": "وجبات",
-                "type": "meal",
-                "description": "وجبات جاهزة للأكل",
-                "image": null,
-                "classification_id": 2
-              }
-            },
-            "... 2 more item(s)"
-          ]
-        }
-      ]
-    }
-  ]
-}
-```
-
-
-
-### Popular classifications
-
-Method: `GET`  
-URL: `/api/v1/home/classifications/popular/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "current_selection": {
-    "mode": "service_city",
-    "label": "الجزائر",
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": 250.0,
-      "is_active": true
-    },
-    "updated_at": "2026-07-05T07:25:54.171625Z"
-  },
-  "classifications": []
-}
-```
-
-
-
-### Normal classifications
-
-Method: `GET`  
-URL: `/api/v1/home/classifications/normal/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "current_selection": {
-    "mode": "service_city",
-    "label": "الجزائر",
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": 250.0,
-      "is_active": true
-    },
-    "updated_at": "2026-07-05T07:25:54.171625Z"
-  },
-  "classifications": []
-}
-```
-
-
-
-### Home product detail
-
-Method: `GET`  
-URL: `/api/v1/home/products/8/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 8,
-  "name": "دجاج مشوي",
-  "description": "منتج تجريبي: دجاج مشوي.",
-  "image": null,
-  "discount": "0.00",
-  "category": {
-    "id": 4,
-    "name": "وجبات",
-    "type": "meal",
-    "description": "وجبات جاهزة للأكل",
-    "image": null,
-    "classification_id": 2
-  },
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "scope": "service_city",
-    "status": "active",
-    "classification_id": 2,
-    "service_cities": [
-      {
-        "id": 1,
-        "name": "الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      }
-    ],
-    "delivery_areas": [
-      {
-        "id": 1,
-        "service_city_id": 1,
-        "name": "وسط الجزائر",
-        "delivery_price": "250.00",
-        "center_latitude": "36.7538000",
-        "center_longitude": "3.0588000",
-        "radius_km": "8.00",
-        "is_active": true
-      },
-      "... 1 more item(s)"
-    ]
-  },
-  "variants": [
-    {
-      "id": 15,
-      "price": "980.00",
-      "sku": "SEED-08-1",
-      "attribute_values": [
-        {
-          "id": 15,
-          "attribute_id": 4,
-          "attribute_name": "الحصة",
-          "option_id": 7,
-          "option_value": "عادية"
-        }
-      ]
-    },
-    "... 1 more item(s)"
-  ],
-  "attribute_values": [
-    {
-      "id": 8,
-      "attribute_id": 4,
-      "attribute_name": "الحصة",
-      "option_id": 7,
-      "option_value": "عادية"
-    }
-  ],
-  "additions": [],
-  "created_at": "2026-07-05T07:25:39.680871Z",
-  "updated_at": "2026-07-05T07:25:39.680923Z"
-}
-```
-
-
-
-### Classification markets
-
-Method: `GET`  
-URL: `/api/v1/home/classifications/4/markets/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "classification": {
-    "id": 4,
-    "name": "حلويات",
-    "classification_type": "normal"
-  },
-  "markets": []
-}
-```
-
-
-
-## Markets
-
-### Admin market classification list
-
-Method: `GET`  
-URL: `/api/v1/home/market-classifications/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 4,
-    "name": "حلويات",
-    "classification_type": "normal"
-  },
-  "... 4 more item(s)"
-]
-```
-
-
-
-### Admin market list
-
-Method: `GET`  
-URL: `/api/v1/home/markets/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 6,
-    "classification": {
-      "id": 4,
-      "name": "حلويات",
-      "classification_type": "normal"
-    },
-    "name": "حلويات الجسور",
-    "branch": "الخروب",
-    "scope": "service_city",
-    "status": "active",
-    "service_cities": [
-      {
-        "id": 3,
-        "name": "قسنطينة",
-        "delivery_price": "270.00",
-        "is_active": true
-      }
-    ],
-    "delivery_areas": [
-      {
-        "id": 5,
-        "service_city_id": 3,
-        "name": "وسط قسنطينة",
-        "delivery_price": "270.00",
-        "center_latitude": "36.3650000",
-        "center_longitude": "6.6147000",
-        "radius_km": "7.00",
-        "is_active": true
-      },
-      "... 1 more item(s)"
-    ],
-    "created_at": "2026-07-05T07:25:39.567683Z",
-    "updated_at": "2026-07-05T07:25:39.567723Z"
-  },
-  "... 7 more item(s)"
-]
-```
-
-
-
-### Market classification create
-
-Method: `POST`  
-URL: `/api/v1/home/market-classifications/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "name": "Doc Market Class",
-  "classification_type": "normal"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 6,
-  "name": "Doc Market Class",
-  "classification_type": "normal"
-}
-```
-
-
-
-### Market classification detail
-
-Method: `GET`  
-URL: `/api/v1/home/market-classifications/6/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 6,
-  "name": "Doc Market Class",
-  "classification_type": "normal"
-}
-```
-
-
-
-### Market classification update
-
-Method: `PATCH`  
-URL: `/api/v1/home/market-classifications/6/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "classification_type": "featured"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 6,
-  "name": "Doc Market Class",
-  "classification_type": "featured"
-}
-```
-
-
-
-### Market create
-
-Method: `POST`  
-URL: `/api/v1/home/markets/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "classification_id": 6,
-  "name": "Doc Market",
-  "branch": "Main",
-  "scope": "service_city",
-  "status": "active",
-  "service_city_ids": [
-    1
-  ],
-  "delivery_area_ids": [
-    1
-  ]
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 9,
-  "classification": {
-    "id": 6,
-    "name": "Doc Market Class",
-    "classification_type": "featured"
-  },
-  "name": "Doc Market",
-  "branch": "Main",
-  "scope": "service_city",
-  "status": "active",
-  "service_cities": [
-    {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    }
-  ],
-  "delivery_areas": [
-    {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "center_latitude": "36.7538000",
-      "center_longitude": "3.0588000",
-      "radius_km": "8.00",
-      "is_active": true
-    }
-  ],
-  "created_at": "2026-07-05T07:25:55.354620Z",
-  "updated_at": "2026-07-05T07:25:55.354670Z"
-}
-```
-
-
-
-### Market detail
-
-Method: `GET`  
-URL: `/api/v1/home/markets/9/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 9,
-  "classification": {
-    "id": 6,
-    "name": "Doc Market Class",
-    "classification_type": "featured"
-  },
-  "name": "Doc Market",
-  "branch": "Main",
-  "scope": "service_city",
-  "status": "active",
-  "service_cities": [
-    {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    }
-  ],
-  "delivery_areas": [
-    {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "center_latitude": "36.7538000",
-      "center_longitude": "3.0588000",
-      "radius_km": "8.00",
-      "is_active": true
-    }
-  ],
-  "created_at": "2026-07-05T07:25:55.354620Z",
-  "updated_at": "2026-07-05T07:25:55.354670Z"
-}
-```
-
-
-
-### Market update
-
-Method: `PATCH`  
-URL: `/api/v1/home/markets/9/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "branch": "Updated"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 9,
-  "classification": {
-    "id": 6,
-    "name": "Doc Market Class",
-    "classification_type": "featured"
-  },
-  "name": "Doc Market",
-  "branch": "Updated",
-  "scope": "service_city",
-  "status": "active",
-  "service_cities": [
-    {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    }
-  ],
-  "delivery_areas": [
-    {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "center_latitude": "36.7538000",
-      "center_longitude": "3.0588000",
-      "radius_km": "8.00",
-      "is_active": true
-    }
-  ],
-  "created_at": "2026-07-05T07:25:55.354620Z",
-  "updated_at": "2026-07-05T07:25:55.439157Z"
-}
-```
-
-
-
-### Market delete
-
-Method: `DELETE`  
-URL: `/api/v1/home/markets/9/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `204`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```text
-empty
-```
-
-
-
-### Market classification delete
-
-Method: `DELETE`  
-URL: `/api/v1/home/market-classifications/6/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `204`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```text
-empty
-```
-
-
-
-## Catalog
-
-### Category classification list
-
-Method: `GET`  
-URL: `/api/v1/catalog/category-classifications/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 2,
-    "name": "أكل جاهز"
-  },
-  "... 2 more item(s)"
-]
-```
-
-
-
-### Product category list
-
-Method: `GET`  
-URL: `/api/v1/catalog/product-categories/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 5,
-    "classification": {
-      "id": 3,
-      "name": "حلويات"
-    },
-    "name": "حلويات",
-    "type": "dessert",
-    "description": "حلويات تقليدية وعصرية",
-    "image": null
-  },
-  "... 5 more item(s)"
-]
-```
-
-
-
-### Addition classification list
-
-Method: `GET`  
-URL: `/api/v1/catalog/addition-classifications/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 3,
-    "name": "إضافات"
-  },
-  "... 2 more item(s)"
-]
-```
-
-
-
-### Category attribute list
-
-Method: `GET`  
-URL: `/api/v1/catalog/category-attributes/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 5,
-    "category": {
-      "id": 5,
-      "classification": {
-        "id": 3,
-        "name": "حلويات"
-      },
-      "name": "حلويات",
-      "type": "dessert",
-      "description": "حلويات تقليدية وعصرية",
-      "image": null
-    },
-    "name": "العبوة",
-    "options": [
-      {
-        "id": 9,
-        "value": "قطعتان"
-      },
-      "... 1 more item(s)"
-    ]
-  },
-  "... 5 more item(s)"
-]
-```
-
-
-
-### Category option list
-
-Method: `GET`  
-URL: `/api/v1/catalog/category-options/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 4,
-    "attribute": {
-      "id": 2,
-      "name": "الحجم",
-      "category_id": 2
-    },
-    "value": "1 لتر"
-  },
-  "... 11 more item(s)"
-]
-```
-
-
-
-### Product addition list
-
-Method: `GET`  
-URL: `/api/v1/catalog/product-additions/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 3,
-    "classification": {
-      "id": 3,
-      "name": "إضافات"
-    },
-    "products": [
-      6,
-      "... 1 more item(s)"
-    ],
-    "image": null,
-    "name_ar": "خبز إضافي",
-    "name_en": "خبز إضافي",
-    "price": "40.00",
-    "is_active": true
-  },
-  "... 5 more item(s)"
-]
-```
-
-
-
-### Admin product list
-
-Method: `GET`  
-URL: `/api/v1/catalog/products/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 20,
-    "market": {
-      "id": 8,
-      "name": "مخبزة المرجان",
-      "branch": "البوني",
-      "status": "active",
-      "classification_id": 3
-    },
-    "category": {
-      "id": 3,
-      "classification": {
-        "id": 2,
-        "name": "أكل جاهز"
-      },
-      "name": "مخبوزات",
-      "type": "bakery",
-      "description": "خبز ومخبوزات يومية",
-      "image": null,
-      "attributes": [
-        {
-          "id": 3,
-          "name": "العبوة",
-          "options": [
-            {
-              "id": 5,
-              "value": "قطعة واحدة"
-            },
-            "... 1 more item(s)"
-          ]
-        }
-      ]
-    },
-    "is_available": true,
-    "name": "بريوش",
-    "description": "منتج تجريبي: بريوش.",
-    "image": null,
-    "discount": "0.00",
-    "attribute_values": [
-      {
-        "id": 20,
-        "attribute": {
-          "id": 3,
-          "name": "العبوة",
-          "options": [
-            {
-              "id": 5,
-              "value": "قطعة واحدة"
-            },
-            "... 1 more item(s)"
-          ]
-        },
-        "option": {
-          "id": 5,
-          "value": "قطعة واحدة"
-        }
-      }
-    ],
-    "variants": [
-      {
-        "id": 39,
-        "price": "160.00",
-        "sku": "SEED-20-1",
-        "attribute_values": [
-          {
-            "id": 39,
-            "attribute": {
-              "id": 3,
-              "name": "العبوة",
-              "options": [
-                {
-                  "id": 5,
-                  "value": "قطعة واحدة"
-                },
-                "... 1 more item(s)"
-              ]
-            },
-            "option": {
-              "id": 5,
-              "value": "قطعة واحدة"
-            }
-          }
-        ]
-      },
-      "... 1 more item(s)"
-    ],
-    "additions": [
-      6
-    ],
-    "created_at": "2026-07-05T07:25:39.784888Z",
-    "updated_at": "2026-07-05T07:25:39.784931Z"
-  },
-  "... 19 more item(s)"
-]
-```
-
-
-
-### Addition classification create
-
-Method: `POST`  
-URL: `/api/v1/catalog/addition-classifications/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "name": "Doc Addition Class"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 4,
-  "name": "Doc Addition Class"
-}
-```
-
-
-
-### Addition classification detail
-
-Method: `GET`  
-URL: `/api/v1/catalog/addition-classifications/4/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 4,
-  "name": "Doc Addition Class"
-}
-```
-
-
-
-### Addition classification update
-
-Method: `PATCH`  
-URL: `/api/v1/catalog/addition-classifications/4/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "name": "Doc Addition Updated"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 4,
-  "name": "Doc Addition Updated"
-}
-```
-
-
-
-### Category classification create
-
-Method: `POST`  
-URL: `/api/v1/catalog/category-classifications/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "name": "Doc Category Class"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 4,
-  "name": "Doc Category Class"
-}
-```
-
-
-
-### Product category create
-
-Method: `POST`  
-URL: `/api/v1/catalog/product-categories/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "classification_id": 4,
-  "name": "Doc Category",
-  "type": "doc",
-  "description": "Doc category"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 7,
-  "classification": {
-    "id": 4,
-    "name": "Doc Category Class"
-  },
-  "name": "Doc Category",
-  "type": "doc",
-  "description": "Doc category",
-  "image": null
-}
-```
-
-
-
-### Category attribute create
-
-Method: `POST`  
-URL: `/api/v1/catalog/category-attributes/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "category_id": 7,
-  "name": "Size"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 7,
-  "category": {
-    "id": 7,
-    "classification": {
-      "id": 4,
-      "name": "Doc Category Class"
-    },
-    "name": "Doc Category",
-    "type": "doc",
-    "description": "Doc category",
-    "image": null
-  },
-  "name": "Size",
-  "options": []
-}
-```
-
-
-
-### Category option create
-
-Method: `POST`  
-URL: `/api/v1/catalog/category-options/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "attribute_id": 7,
-  "value": "Small"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 13,
-  "attribute": {
-    "id": 7,
-    "name": "Size",
-    "category_id": 7
-  },
-  "value": "Small"
-}
-```
-
-
-
-### Product addition create
-
-Method: `POST`  
-URL: `/api/v1/catalog/product-additions/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "classification_id": 4,
-  "name_ar": "إضافة",
-  "name_en": "Doc Extra",
-  "price": "3.50",
+  "id": 3,
+  "name": "الإسكندرية",
+  "center_latitude": "31.2001000",
+  "center_longitude": "29.9187000",
+  "radius_km": "24.00",
+  "delivery_price": "55.00",
   "is_active": true
 }
 ```
 
-Response body:
-
-```json
-{
-  "id": 7,
-  "classification": {
-    "id": 4,
-    "name": "Doc Addition Updated"
-  },
-  "products": [],
-  "image": null,
-  "name_ar": "إضافة",
-  "name_en": "Doc Extra",
-  "price": "3.50",
-  "is_active": true
-}
-```
-
-
-
-### Product create
-
-Method: `POST`  
-URL: `/api/v1/catalog/products/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "market_id": 2,
-  "category_id": 7,
-  "is_available": true,
-  "name": "Doc Product",
-  "description": "Doc product",
-  "discount": "0.00",
-  "attribute_values": [
-    {
-      "attribute_id": 7,
-      "option_id": 13
-    }
-  ],
-  "variants": [
-    {
-      "price": "12.00",
-      "sku": "DOC-1",
-      "attribute_values": [
-        {
-          "attribute_id": 7,
-          "option_id": 13
-        }
-      ]
-    }
-  ],
-  "additions": [
-    7
-  ]
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 21,
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "status": "active",
-    "classification_id": 2
-  },
-  "category": {
-    "id": 7,
-    "classification": {
-      "id": 4,
-      "name": "Doc Category Class"
-    },
-    "name": "Doc Category",
-    "type": "doc",
-    "description": "Doc category",
-    "image": null,
-    "attributes": [
-      {
-        "id": 7,
-        "name": "Size",
-        "options": [
-          {
-            "id": 13,
-            "value": "Small"
-          }
-        ]
-      }
-    ]
-  },
-  "is_available": true,
-  "name": "Doc Product",
-  "description": "Doc product",
-  "image": null,
-  "discount": "0.00",
-  "attribute_values": [
-    {
-      "id": 21,
-      "attribute": {
-        "id": 7,
-        "name": "Size",
-        "options": [
-          {
-            "id": 13,
-            "value": "Small"
-          }
-        ]
-      },
-      "option": {
-        "id": 13,
-        "value": "Small"
-      }
-    }
-  ],
-  "variants": [
-    {
-      "id": 41,
-      "price": "12.00",
-      "sku": "DOC-1",
-      "attribute_values": [
-        {
-          "id": 41,
-          "attribute": {
-            "id": 7,
-            "name": "Size",
-            "options": [
-              {
-                "id": 13,
-                "value": "Small"
-              }
-            ]
-          },
-          "option": {
-            "id": 13,
-            "value": "Small"
-          }
-        }
-      ]
-    }
-  ],
-  "additions": [
-    7
-  ],
-  "created_at": "2026-07-05T07:25:55.778065Z",
-  "updated_at": "2026-07-05T07:25:55.778102Z"
-}
-```
-
-
-
-### Product category detail
-
-Method: `GET`  
-URL: `/api/v1/catalog/product-categories/7/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 7,
-  "classification": {
-    "id": 4,
-    "name": "Doc Category Class"
-  },
-  "name": "Doc Category",
-  "type": "doc",
-  "description": "Doc category",
-  "image": null
-}
-```
-
-
-
-### Category attribute detail
-
-Method: `GET`  
-URL: `/api/v1/catalog/category-attributes/7/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 7,
-  "category": {
-    "id": 7,
-    "classification": {
-      "id": 4,
-      "name": "Doc Category Class"
-    },
-    "name": "Doc Category",
-    "type": "doc",
-    "description": "Doc category",
-    "image": null
-  },
-  "name": "Size",
-  "options": [
-    {
-      "id": 13,
-      "value": "Small"
-    }
-  ]
-}
-```
-
-
-
-### Category option detail
-
-Method: `GET`  
-URL: `/api/v1/catalog/category-options/13/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 13,
-  "attribute": {
-    "id": 7,
-    "name": "Size",
-    "category_id": 7
-  },
-  "value": "Small"
-}
-```
-
-
-
-### Product addition detail
-
-Method: `GET`  
-URL: `/api/v1/catalog/product-additions/7/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 7,
-  "classification": {
-    "id": 4,
-    "name": "Doc Addition Updated"
-  },
-  "products": [
-    21
-  ],
-  "image": null,
-  "name_ar": "إضافة",
-  "name_en": "Doc Extra",
-  "price": "3.50",
-  "is_active": true
-}
-```
-
-
-
-### Product detail
-
-Method: `GET`  
-URL: `/api/v1/catalog/products/21/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 21,
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "status": "active",
-    "classification_id": 2
-  },
-  "category": {
-    "id": 7,
-    "classification": {
-      "id": 4,
-      "name": "Doc Category Class"
-    },
-    "name": "Doc Category",
-    "type": "doc",
-    "description": "Doc category",
-    "image": null,
-    "attributes": [
-      {
-        "id": 7,
-        "name": "Size",
-        "options": [
-          {
-            "id": 13,
-            "value": "Small"
-          }
-        ]
-      }
-    ]
-  },
-  "is_available": true,
-  "name": "Doc Product",
-  "description": "Doc product",
-  "image": null,
-  "discount": "0.00",
-  "attribute_values": [
-    {
-      "id": 21,
-      "attribute": {
-        "id": 7,
-        "name": "Size",
-        "options": [
-          {
-            "id": 13,
-            "value": "Small"
-          }
-        ]
-      },
-      "option": {
-        "id": 13,
-        "value": "Small"
-      }
-    }
-  ],
-  "variants": [
-    {
-      "id": 41,
-      "price": "12.00",
-      "sku": "DOC-1",
-      "attribute_values": [
-        {
-          "id": 41,
-          "attribute": {
-            "id": 7,
-            "name": "Size",
-            "options": [
-              {
-                "id": 13,
-                "value": "Small"
-              }
-            ]
-          },
-          "option": {
-            "id": 13,
-            "value": "Small"
-          }
-        }
-      ]
-    }
-  ],
-  "additions": [
-    7
-  ],
-  "created_at": "2026-07-05T07:25:55.778065Z",
-  "updated_at": "2026-07-05T07:25:55.778102Z"
-}
-```
-
-
-
-### Product update
-
-Method: `PATCH`  
-URL: `/api/v1/catalog/products/21/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "name": "Doc Product Updated"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 21,
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "status": "active",
-    "classification_id": 2
-  },
-  "category": {
-    "id": 7,
-    "classification": {
-      "id": 4,
-      "name": "Doc Category Class"
-    },
-    "name": "Doc Category",
-    "type": "doc",
-    "description": "Doc category",
-    "image": null,
-    "attributes": [
-      {
-        "id": 7,
-        "name": "Size",
-        "options": [
-          {
-            "id": 13,
-            "value": "Small"
-          }
-        ]
-      }
-    ]
-  },
-  "is_available": true,
-  "name": "Doc Product Updated",
-  "description": "Doc product",
-  "image": null,
-  "discount": "0.00",
-  "attribute_values": [
-    {
-      "id": 21,
-      "attribute": {
-        "id": 7,
-        "name": "Size",
-        "options": [
-          {
-            "id": 13,
-            "value": "Small"
-          }
-        ]
-      },
-      "option": {
-        "id": 13,
-        "value": "Small"
-      }
-    }
-  ],
-  "variants": [
-    {
-      "id": 41,
-      "price": "12.00",
-      "sku": "DOC-1",
-      "attribute_values": [
-        {
-          "id": 41,
-          "attribute": {
-            "id": 7,
-            "name": "Size",
-            "options": [
-              {
-                "id": 13,
-                "value": "Small"
-              }
-            ]
-          },
-          "option": {
-            "id": 13,
-            "value": "Small"
-          }
-        }
-      ]
-    }
-  ],
-  "additions": [
-    7
-  ],
-  "created_at": "2026-07-05T07:25:55.778065Z",
-  "updated_at": "2026-07-05T07:25:56.006181Z"
-}
-```
-
-
-
-### Liked products
-
-Method: `GET`  
-URL: `/api/v1/catalog/products/likes/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[]
-```
-
-
-
-### Like product
-
-Method: `POST`  
-URL: `/api/v1/catalog/products/8/like/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "product_id": 8,
-  "liked": true
-}
-```
-
-
-
-### Unlike product
-
-Method: `DELETE`  
-URL: `/api/v1/catalog/products/8/unlike/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "product_id": 8,
-  "liked": false
-}
-```
-
-
-
-### Product delete
-
-Method: `DELETE`  
-URL: `/api/v1/catalog/products/21/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `204`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```text
-empty
-```
-
-
-
-### Product addition delete
-
-Method: `DELETE`  
-URL: `/api/v1/catalog/product-additions/7/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `204`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```text
-empty
-```
-
-
-
-### Category option delete
-
-Method: `DELETE`  
-URL: `/api/v1/catalog/category-options/13/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "details": "Deleted Successfully"
-}
-```
-
-
-
-### Category attribute delete
-
-Method: `DELETE`  
-URL: `/api/v1/catalog/category-attributes/7/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "details": "Deleted Successfully"
-}
-```
-
-
-
-### Product category delete
-
-Method: `DELETE`  
-URL: `/api/v1/catalog/product-categories/7/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "details": "Deleted Successfully"
-}
-```
-
-
-
-### Category classification delete
-
-Method: `DELETE`  
-URL: `/api/v1/catalog/category-classifications/4/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "details": "Deleted Successfully"
-}
-```
-
-
-
-### Addition classification delete
-
-Method: `DELETE`  
-URL: `/api/v1/catalog/addition-classifications/4/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "details": "Deleted Successfully"
-}
-```
-
-
-
-## Offers
-
-### Admin offer list
-
-Method: `GET`  
-URL: `/api/v1/offers/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 9,
-    "market": {
-      "id": 8,
-      "classification": {
-        "id": 3,
-        "name": "مخبزة",
-        "classification_type": "normal"
-      },
-      "name": "مخبزة المرجان",
-      "branch": "البوني",
-      "scope": "service_city",
-      "status": "active",
-      "service_cities": [
-        {
-          "id": 4,
-          "name": "عنابة",
-          "delivery_price": "260.00",
-          "is_active": true
-        }
-      ],
-      "delivery_areas": [
-        {
-          "id": 7,
-          "service_city_id": 4,
-          "name": "وسط عنابة",
-          "delivery_price": "260.00",
-          "center_latitude": "36.9000000",
-          "center_longitude": "7.7667000",
-          "radius_km": "7.00",
-          "is_active": true
-        },
-        "... 1 more item(s)"
-      ],
-      "created_at": "2026-07-05T07:25:39.576025Z",
-      "updated_at": "2026-07-05T07:25:39.576057Z"
-    },
-    "market_id": 8,
-    "scope": "service_city",
-    "service_city": {
-      "id": 4,
-      "name": "عنابة",
-      "delivery_price": "260.00",
-      "is_active": true
-    },
-    "service_city_id": 4,
-    "products": [
-      {
-        "id": 19,
-        "market_id": 8,
-        "category_id": 3,
-        "is_available": true,
-        "name": "خبز كامل",
-        "description": "منتج تجريبي: خبز كامل.",
-        "image": null,
-        "discount": "0.00",
-        "created_at": "2026-07-05T07:25:39.775677Z",
-        "updated_at": "2026-07-05T07:25:39.775710Z"
-      },
-      "... 1 more item(s)"
-    ],
-    "product_ids": [
-      19,
-      "... 1 more item(s)"
-    ],
-    "title": "توصيل مخبزة المرجان",
-    "description": "عرض تجريبي: توصيل مخبزة المرجان.",
-    "image": null,
-    "type": "delivery",
-    "discount": "7.00",
-    "start_time": "2026-07-04T07:25:39.440065Z",
-    "end_time": "2026-08-04T07:25:39.440065Z",
-    "active_days": [
-      0,
-      "... 6 more item(s)"
-    ],
-    "use_limits": 500,
-    "user_limit": 3,
-    "status": "active",
-    "created_at": "2026-07-05T07:25:39.857820Z",
-    "updated_at": "2026-07-05T07:25:39.857841Z"
-  },
-  "... 8 more item(s)"
-]
-```
-
-
-
-### Offer create JSON
-
-Method: `POST`  
-URL: `/api/v1/offers/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "market_id": 2,
-  "scope": "service_city",
-  "service_city_id": 1,
-  "product_ids": [
-    8
-  ],
-  "title": "Doc JSON Offer",
-  "description": "Doc offer",
-  "type": "flash",
-  "discount": "5.00",
-  "start_time": "2026-07-05T06:00:00Z",
-  "end_time": "2026-07-10T06:00:00Z",
-  "active_days": [
-    "sunday"
-  ],
-  "use_limits": 10,
-  "user_limit": 1,
-  "status": "active"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 10,
-  "market": {
-    "id": 2,
-    "classification": {
-      "id": 2,
-      "name": "مطعم",
-      "classification_type": "featured"
-    },
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "scope": "service_city",
-    "status": "active",
-    "service_cities": [
-      {
-        "id": 1,
-        "name": "الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      }
-    ],
-    "delivery_areas": [
-      {
-        "id": 1,
-        "service_city_id": 1,
-        "name": "وسط الجزائر",
-        "delivery_price": "250.00",
-        "center_latitude": "36.7538000",
-        "center_longitude": "3.0588000",
-        "radius_km": "8.00",
-        "is_active": true
-      },
-      "... 1 more item(s)"
-    ],
-    "created_at": "2026-07-05T07:25:39.549810Z",
-    "updated_at": "2026-07-05T07:25:39.549855Z"
-  },
-  "market_id": 2,
-  "scope": "service_city",
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "service_city_id": 1,
-  "products": [
-    {
-      "id": 8,
-      "market_id": 2,
-      "category_id": 4,
-      "is_available": true,
-      "name": "دجاج مشوي",
-      "description": "منتج تجريبي: دجاج مشوي.",
-      "image": null,
-      "discount": "0.00",
-      "created_at": "2026-07-05T07:25:39.680871Z",
-      "updated_at": "2026-07-05T07:25:39.680923Z"
-    }
-  ],
-  "product_ids": [
-    8
-  ],
-  "title": "Doc JSON Offer",
-  "description": "Doc offer",
-  "image": null,
-  "type": "flash",
-  "discount": "5.00",
-  "start_time": "2026-07-05T06:00:00Z",
-  "end_time": "2026-07-10T06:00:00Z",
-  "active_days": [
-    "sunday"
-  ],
-  "use_limits": 10,
-  "user_limit": 1,
-  "status": "active",
-  "created_at": "2026-07-05T07:25:56.400182Z",
-  "updated_at": "2026-07-05T07:25:56.400210Z"
-}
-```
-
-
-
-### Offer create multipart image
-
-Method: `POST`  
-URL: `/api/v1/offers/`  
-Auth: Admin token  
-Content-Type: `multipart/form-data`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "market_id": 2,
-  "scope": "service_city",
-  "service_city_id": 1,
-  "product_ids": [
-    8
-  ],
-  "title": "Doc Multipart Offer",
-  "description": "Doc offer",
-  "type": "flash",
-  "discount": "5.00",
-  "start_time": "2026-07-05T06:00:00Z",
-  "end_time": "2026-07-10T06:00:00Z",
-  "active_days": "[\"sunday\"]",
-  "use_limits": 10,
-  "user_limit": 1,
-  "status": "active",
-  "image": "<file offer.gif>"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 11,
-  "market": {
-    "id": 2,
-    "classification": {
-      "id": 2,
-      "name": "مطعم",
-      "classification_type": "featured"
-    },
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "scope": "service_city",
-    "status": "active",
-    "service_cities": [
-      {
-        "id": 1,
-        "name": "الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      }
-    ],
-    "delivery_areas": [
-      {
-        "id": 1,
-        "service_city_id": 1,
-        "name": "وسط الجزائر",
-        "delivery_price": "250.00",
-        "center_latitude": "36.7538000",
-        "center_longitude": "3.0588000",
-        "radius_km": "8.00",
-        "is_active": true
-      },
-      "... 1 more item(s)"
-    ],
-    "created_at": "2026-07-05T07:25:39.549810Z",
-    "updated_at": "2026-07-05T07:25:39.549855Z"
-  },
-  "market_id": 2,
-  "scope": "service_city",
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "service_city_id": 1,
-  "products": [
-    {
-      "id": 8,
-      "market_id": 2,
-      "category_id": 4,
-      "is_available": true,
-      "name": "دجاج مشوي",
-      "description": "منتج تجريبي: دجاج مشوي.",
-      "image": null,
-      "discount": "0.00",
-      "created_at": "2026-07-05T07:25:39.680871Z",
-      "updated_at": "2026-07-05T07:25:39.680923Z"
-    }
-  ],
-  "product_ids": [
-    8
-  ],
-  "title": "Doc Multipart Offer",
-  "description": "Doc offer",
-  "image": "/media/offers/offer.gif",
-  "type": "flash",
-  "discount": "5.00",
-  "start_time": "2026-07-05T06:00:00Z",
-  "end_time": "2026-07-10T06:00:00Z",
-  "active_days": [
-    "sunday"
-  ],
-  "use_limits": 10,
-  "user_limit": 1,
-  "status": "active",
-  "created_at": "2026-07-05T07:25:56.589832Z",
-  "updated_at": "2026-07-05T07:25:56.589860Z"
-}
-```
-
-
-
-### Offer detail
-
-Method: `GET`  
-URL: `/api/v1/offers/10/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 10,
-  "market": {
-    "id": 2,
-    "classification": {
-      "id": 2,
-      "name": "مطعم",
-      "classification_type": "featured"
-    },
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "scope": "service_city",
-    "status": "active",
-    "service_cities": [
-      {
-        "id": 1,
-        "name": "الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      }
-    ],
-    "delivery_areas": [
-      {
-        "id": 1,
-        "service_city_id": 1,
-        "name": "وسط الجزائر",
-        "delivery_price": "250.00",
-        "center_latitude": "36.7538000",
-        "center_longitude": "3.0588000",
-        "radius_km": "8.00",
-        "is_active": true
-      },
-      "... 1 more item(s)"
-    ],
-    "created_at": "2026-07-05T07:25:39.549810Z",
-    "updated_at": "2026-07-05T07:25:39.549855Z"
-  },
-  "market_id": 2,
-  "scope": "service_city",
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "service_city_id": 1,
-  "products": [
-    {
-      "id": 8,
-      "market_id": 2,
-      "category_id": 4,
-      "is_available": true,
-      "name": "دجاج مشوي",
-      "description": "منتج تجريبي: دجاج مشوي.",
-      "image": null,
-      "discount": "0.00",
-      "created_at": "2026-07-05T07:25:39.680871Z",
-      "updated_at": "2026-07-05T07:25:39.680923Z"
-    }
-  ],
-  "product_ids": [
-    8
-  ],
-  "title": "Doc JSON Offer",
-  "description": "Doc offer",
-  "image": null,
-  "type": "flash",
-  "discount": "5.00",
-  "start_time": "2026-07-05T06:00:00Z",
-  "end_time": "2026-07-10T06:00:00Z",
-  "active_days": [
-    "sunday"
-  ],
-  "use_limits": 10,
-  "user_limit": 1,
-  "status": "active",
-  "created_at": "2026-07-05T07:25:56.400182Z",
-  "updated_at": "2026-07-05T07:25:56.400210Z"
-}
-```
-
-
-
-### Offer update
-
-Method: `PATCH`  
-URL: `/api/v1/offers/10/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "title": "Doc Offer Updated"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 10,
-  "market": {
-    "id": 2,
-    "classification": {
-      "id": 2,
-      "name": "مطعم",
-      "classification_type": "featured"
-    },
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "scope": "service_city",
-    "status": "active",
-    "service_cities": [
-      {
-        "id": 1,
-        "name": "الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      }
-    ],
-    "delivery_areas": [
-      {
-        "id": 1,
-        "service_city_id": 1,
-        "name": "وسط الجزائر",
-        "delivery_price": "250.00",
-        "center_latitude": "36.7538000",
-        "center_longitude": "3.0588000",
-        "radius_km": "8.00",
-        "is_active": true
-      },
-      "... 1 more item(s)"
-    ],
-    "created_at": "2026-07-05T07:25:39.549810Z",
-    "updated_at": "2026-07-05T07:25:39.549855Z"
-  },
-  "market_id": 2,
-  "scope": "service_city",
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "service_city_id": 1,
-  "products": [
-    {
-      "id": 8,
-      "market_id": 2,
-      "category_id": 4,
-      "is_available": true,
-      "name": "دجاج مشوي",
-      "description": "منتج تجريبي: دجاج مشوي.",
-      "image": null,
-      "discount": "0.00",
-      "created_at": "2026-07-05T07:25:39.680871Z",
-      "updated_at": "2026-07-05T07:25:39.680923Z"
-    }
-  ],
-  "product_ids": [
-    8
-  ],
-  "title": "Doc Offer Updated",
-  "description": "Doc offer",
-  "image": null,
-  "type": "flash",
-  "discount": "5.00",
-  "start_time": "2026-07-05T06:00:00Z",
-  "end_time": "2026-07-10T06:00:00Z",
-  "active_days": [
-    "sunday"
-  ],
-  "use_limits": 10,
-  "user_limit": 1,
-  "status": "active",
-  "created_at": "2026-07-05T07:25:56.400182Z",
-  "updated_at": "2026-07-05T07:25:56.703928Z"
-}
-```
-
-
-
-### Client offer list
-
-Method: `GET`  
-URL: `/api/v1/offers/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 11,
-    "title": "Doc Multipart Offer",
-    "description": "Doc offer",
-    "image": "http://127.0.0.1:8765/media/offers/offer.gif",
-    "type": "flash",
-    "discount": "5.00",
-    "start_time": "2026-07-05T06:00:00Z",
-    "end_time": "2026-07-10T06:00:00Z",
-    "active_days": [
-      "sunday"
-    ],
-    "use_limits": 10,
-    "user_limit": 1,
-    "status": "active",
-    "market": {
-      "id": 2,
-      "name": "مطبخ أطلس العائلي",
-      "branch": "باب الزوار",
-      "scope": "service_city",
-      "status": "active",
-      "classification_id": 2,
-      "service_cities": [
-        {
-          "id": 1,
-          "name": "الجزائر",
-          "delivery_price": "250.00",
-          "is_active": true
-        }
-      ],
-      "delivery_areas": [
-        {
-          "id": 1,
-          "service_city_id": 1,
-          "name": "وسط الجزائر",
-          "delivery_price": "250.00",
-          "center_latitude": "36.7538000",
-          "center_longitude": "3.0588000",
-          "radius_km": "8.00",
-          "is_active": true
-        },
-        "... 1 more item(s)"
-      ]
-    },
-    "products": [
-      {
-        "id": 8,
-        "name": "دجاج مشوي",
-        "description": "منتج تجريبي: دجاج مشوي.",
-        "image": null,
-        "discount": "0.00",
-        "category": {
-          "id": 4,
-          "name": "وجبات",
-          "type": "meal",
-          "description": "وجبات جاهزة للأكل",
-          "image": null,
-          "classification_id": 2
-        },
-        "market": {
-          "id": 2,
-          "name": "مطبخ أطلس العائلي",
-          "branch": "باب الزوار",
-          "scope": "service_city",
-          "status": "active",
-          "classification_id": 2,
-          "service_cities": [
-            {
-              "id": 1,
-              "name": "الجزائر",
-              "delivery_price": "250.00",
-              "is_active": true
-            }
-          ],
-          "delivery_areas": [
-            {
-              "id": 1,
-              "service_city_id": 1,
-              "name": "وسط الجزائر",
-              "delivery_price": "250.00",
-              "center_latitude": "36.7538000",
-              "center_longitude": "3.0588000",
-              "radius_km": "8.00",
-              "is_active": true
-            },
-            "... 1 more item(s)"
-          ]
-        },
-        "variants": [
-          {
-            "id": 15,
-            "price": "980.00",
-            "sku": "SEED-08-1"
-          },
-          "... 1 more item(s)"
-        ]
-      }
-    ]
-  },
-  "... 3 more item(s)"
-]
-```
-
-
-
-### Client offer detail
-
-Method: `GET`  
-URL: `/api/v1/offers/10/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 10,
-  "title": "Doc Offer Updated",
-  "description": "Doc offer",
-  "image": null,
-  "type": "flash",
-  "discount": "5.00",
-  "start_time": "2026-07-05T06:00:00Z",
-  "end_time": "2026-07-10T06:00:00Z",
-  "active_days": [
-    "sunday"
-  ],
-  "use_limits": 10,
-  "user_limit": 1,
-  "status": "active",
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "scope": "service_city",
-    "status": "active",
-    "classification_id": 2,
-    "service_cities": [
-      {
-        "id": 1,
-        "name": "الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      }
-    ],
-    "delivery_areas": [
-      {
-        "id": 1,
-        "service_city_id": 1,
-        "name": "وسط الجزائر",
-        "delivery_price": "250.00",
-        "center_latitude": "36.7538000",
-        "center_longitude": "3.0588000",
-        "radius_km": "8.00",
-        "is_active": true
-      },
-      "... 1 more item(s)"
-    ]
-  },
-  "products": [
-    {
-      "id": 8,
-      "name": "دجاج مشوي",
-      "description": "منتج تجريبي: دجاج مشوي.",
-      "image": null,
-      "discount": "0.00",
-      "category": {
-        "id": 4,
-        "name": "وجبات",
-        "type": "meal",
-        "description": "وجبات جاهزة للأكل",
-        "image": null,
-        "classification_id": 2
-      },
-      "market": {
-        "id": 2,
-        "name": "مطبخ أطلس العائلي",
-        "branch": "باب الزوار",
-        "scope": "service_city",
-        "status": "active",
-        "classification_id": 2,
-        "service_cities": [
-          {
-            "id": 1,
-            "name": "الجزائر",
-            "delivery_price": "250.00",
-            "is_active": true
-          }
-        ],
-        "delivery_areas": [
-          {
-            "id": 1,
-            "service_city_id": 1,
-            "name": "وسط الجزائر",
-            "delivery_price": "250.00",
-            "center_latitude": "36.7538000",
-            "center_longitude": "3.0588000",
-            "radius_km": "8.00",
-            "is_active": true
-          },
-          "... 1 more item(s)"
-        ]
-      },
-      "variants": [
-        {
-          "id": 15,
-          "price": "980.00",
-          "sku": "SEED-08-1"
-        },
-        "... 1 more item(s)"
-      ]
-    }
-  ]
-}
-```
-
-
-
-### Offer delete
-
-Method: `DELETE`  
-URL: `/api/v1/offers/11/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "details": "Deleted Successfully"
-}
-```
-
-
-
-## Locations
-
-### Service city list
-
-Method: `GET`  
-URL: `/api/v1/locations/service-cities/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 1,
-    "name": "الجزائر",
-    "center_latitude": "36.7538000",
-    "center_longitude": "3.0588000",
-    "radius_km": "35.00",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "... 3 more item(s)"
-]
-```
-
-
-
-### Delivery area list
-
-Method: `GET`  
-URL: `/api/v1/locations/delivery-areas/?service_city_id=1`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 2,
-    "service_city_id": 1,
-    "name": "باب الزوار",
-    "center_latitude": "36.7167000",
-    "center_longitude": "3.1833000",
-    "radius_km": "6.50",
-    "delivery_price": "300.00",
-    "is_active": true
-  },
-  "... 1 more item(s)"
-]
-```
-
-
-
-### Service city create
-
-Method: `POST`  
-URL: `/api/v1/locations/service-cities/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "name": "Doc City",
-  "center_latitude": "31.1000000",
-  "center_longitude": "3.1000000",
-  "radius_km": "10.00",
-  "delivery_price": "15.00",
-  "is_active": true
-}
-```
-
-Response body:
+### Delivery area example
 
 ```json
 {
   "id": 5,
-  "name": "Doc City",
-  "center_latitude": "31.1000000",
-  "center_longitude": "3.1000000",
-  "radius_km": "10.00",
-  "delivery_price": "15.00",
+  "service_city_id": 2,
+  "name": "الدقي",
+  "center_latitude": "30.0384000",
+  "center_longitude": "31.2123000",
+  "radius_km": "6.50",
+  "delivery_price": "50.00",
   "is_active": true
 }
 ```
 
+### General manual address
 
+يستخدم فقط عندما اختيار المستخدم `market_region.mode=general`:
 
-### Service city detail
-
-Method: `GET`  
-URL: `/api/v1/locations/service-cities/5/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
+```http
+POST /api/v1/locations/addresses/
 ```
 
-Response body:
+Request:
 
 ```json
 {
-  "id": 5,
-  "name": "Doc City",
-  "center_latitude": "31.1000000",
-  "center_longitude": "3.1000000",
-  "radius_km": "10.00",
-  "delivery_price": "15.00",
-  "is_active": true
+  "name": "عنوان عام",
+  "line1": "شارع الثورة بجوار بنزينة التعاون",
+  "manual_city": "القاهرة",
+  "manual_area": "مصر الجديدة",
+  "service_city_id": null,
+  "delivery_area_id": null,
+  "latitude": "30.0860000",
+  "longitude": "31.3300000",
+  "isDefault": true
 }
 ```
 
-
-
-### Service city update
-
-Method: `PATCH`  
-URL: `/api/v1/locations/service-cities/5/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
+Response shape:
 
 ```json
 {
-  "delivery_price": "16.00"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 5,
-  "name": "Doc City",
-  "center_latitude": "31.1000000",
-  "center_longitude": "3.1000000",
-  "radius_km": "10.00",
-  "delivery_price": "16.00",
-  "is_active": true
-}
-```
-
-
-
-### Service city replace
-
-Method: `PUT`  
-URL: `/api/v1/locations/service-cities/5/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "name": "Doc City",
-  "center_latitude": "31.1000000",
-  "center_longitude": "3.1000000",
-  "radius_km": "10.00",
-  "delivery_price": "16.00",
-  "is_active": true
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 5,
-  "name": "Doc City",
-  "center_latitude": "31.1000000",
-  "center_longitude": "3.1000000",
-  "radius_km": "10.00",
-  "delivery_price": "16.00",
-  "is_active": true
-}
-```
-
-
-
-### Delivery area create
-
-Method: `POST`  
-URL: `/api/v1/locations/delivery-areas/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "service_city_id": 5,
-  "name": "Doc Area",
-  "center_latitude": "31.1000000",
-  "center_longitude": "3.1000000",
-  "radius_km": "5.00",
-  "delivery_price": "4.00",
-  "is_active": true
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 9,
-  "service_city_id": 5,
-  "name": "Doc Area",
-  "center_latitude": "31.1000000",
-  "center_longitude": "3.1000000",
-  "radius_km": "5.00",
-  "delivery_price": "4.00",
-  "is_active": true
-}
-```
-
-
-
-### Delivery area detail
-
-Method: `GET`  
-URL: `/api/v1/locations/delivery-areas/9/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 9,
-  "service_city_id": 5,
-  "name": "Doc Area",
-  "center_latitude": "31.1000000",
-  "center_longitude": "3.1000000",
-  "radius_km": "5.00",
-  "delivery_price": "4.00",
-  "is_active": true
-}
-```
-
-
-
-### Delivery area update
-
-Method: `PATCH`  
-URL: `/api/v1/locations/delivery-areas/9/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "delivery_price": "5.00"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 9,
-  "service_city_id": 5,
-  "name": "Doc Area",
-  "center_latitude": "31.1000000",
-  "center_longitude": "3.1000000",
-  "radius_km": "5.00",
-  "delivery_price": "5.00",
-  "is_active": true
-}
-```
-
-
-
-### Delivery area replace
-
-Method: `PUT`  
-URL: `/api/v1/locations/delivery-areas/9/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "service_city_id": 5,
-  "name": "Doc Area",
-  "center_latitude": "31.1000000",
-  "center_longitude": "3.1000000",
-  "radius_km": "5.00",
-  "delivery_price": "5.00",
-  "is_active": true
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 9,
-  "service_city_id": 5,
-  "name": "Doc Area",
-  "center_latitude": "31.1000000",
-  "center_longitude": "3.1000000",
-  "radius_km": "5.00",
-  "delivery_price": "5.00",
-  "is_active": true
-}
-```
-
-
-
-### Delivery area delete
-
-Method: `DELETE`  
-URL: `/api/v1/locations/delivery-areas/9/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `204`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```text
-empty
-```
-
-
-
-### Service city delete
-
-Method: `DELETE`  
-URL: `/api/v1/locations/service-cities/5/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `204`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```text
-empty
-```
-
-
-
-## Addresses
-
-### Address list
-
-Method: `GET`  
-URL: `/api/v1/addresses/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 1,
-    "name": "المنزل",
-    "fullName": "المنزل",
-    "phone": "+213555100002",
-    "phoneNumber": "+213555100002",
-    "line1": "المنزل",
-    "street": "المنزل",
-    "city": "الجزائر",
-    "state": "",
-    "country": "Egypt",
-    "postalCode": "",
-    "latitude": "36.7525000",
-    "longitude": "3.0419000",
-    "details": "",
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "center_latitude": "36.7538000",
-      "center_longitude": "3.0588000",
-      "radius_km": "35.00",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "service_city_id": 1,
-    "service_city_name": "الجزائر",
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area_id": 1,
-    "delivery_area_name": "وسط الجزائر",
-    "delivery_area_price": "250.00",
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "250.00",
-    "is_default": true,
-    "isDefault": true,
-    "created_at": "2026-07-05T07:25:39.513913Z"
-  },
-  "... 1 more item(s)"
-]
-```
-
-
-
-### Address create
-
-Method: `POST`  
-URL: `/api/v1/addresses/`  
-Auth: Client token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "name": "Doc Address",
-  "line1": "Doc Street",
-  "service_city_id": 1,
-  "delivery_area_id": 1,
-  "delivery_type": "fixed_area",
-  "is_default": false
-}
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 1,
-    "name": "المنزل",
-    "fullName": "المنزل",
-    "phone": "+213555100002",
-    "phoneNumber": "+213555100002",
-    "line1": "المنزل",
-    "street": "المنزل",
-    "city": "الجزائر",
-    "state": "",
-    "country": "Egypt",
-    "postalCode": "",
-    "latitude": "36.7525000",
-    "longitude": "3.0419000",
-    "details": "",
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "center_latitude": "36.7538000",
-      "center_longitude": "3.0588000",
-      "radius_km": "35.00",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "service_city_id": 1,
-    "service_city_name": "الجزائر",
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area_id": 1,
-    "delivery_area_name": "وسط الجزائر",
-    "delivery_area_price": "250.00",
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "250.00",
-    "is_default": true,
-    "isDefault": true,
-    "created_at": "2026-07-05T07:25:39.513913Z"
-  },
-  "... 2 more item(s)"
-]
-```
-
-
-
-### Default address
-
-Method: `GET`  
-URL: `/api/v1/addresses/default/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 1,
-  "name": "المنزل",
-  "fullName": "المنزل",
-  "phone": "+213555100002",
-  "phoneNumber": "+213555100002",
-  "line1": "المنزل",
-  "street": "المنزل",
-  "city": "الجزائر",
+  "id": 4,
+  "name": "عنوان عام",
+  "fullName": "عنوان عام",
+  "phone": "+201001000003",
+  "phoneNumber": "+201001000003",
+  "line1": "شارع الثورة بجوار بنزينة التعاون",
+  "street": "شارع الثورة بجوار بنزينة التعاون",
+  "city": "",
   "state": "",
   "country": "Egypt",
   "postalCode": "",
-  "latitude": "36.7525000",
-  "longitude": "3.0419000",
-  "details": "",
-  "manual_city": null,
-  "manual_area": null,
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "center_latitude": "36.7538000",
-    "center_longitude": "3.0588000",
-    "radius_km": "35.00",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "service_city_id": 1,
-  "service_city_name": "الجزائر",
-  "delivery_area": {
-    "id": 1,
-    "service_city_id": 1,
-    "name": "وسط الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_area_id": 1,
-  "delivery_area_name": "وسط الجزائر",
-  "delivery_area_price": "250.00",
-  "delivery_type": "fixed_area",
-  "delivery_price_preview": "250.00",
+  "latitude": "30.0860000",
+  "longitude": "31.3300000",
+  "details": "شارع الثورة بجوار بنزينة التعاون",
+  "manual_city": "القاهرة",
+  "manual_area": "مصر الجديدة",
+  "service_city": null,
+  "service_city_id": null,
+  "service_city_name": null,
+  "delivery_area": null,
+  "delivery_area_id": null,
+  "delivery_area_name": null,
+  "delivery_area_price": null,
+  "delivery_type": "delivery",
+  "delivery_price_preview": null,
   "is_default": true,
   "isDefault": true,
-  "created_at": "2026-07-05T07:25:39.513913Z"
+  "created_at": "2026-07-05T15:42:38.609944Z"
 }
 ```
 
+### Service-city fixed-area address
 
-
-### Address locations alias list
-
-Method: `GET`  
-URL: `/api/v1/locations/addresses/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 1,
-    "name": "المنزل",
-    "fullName": "المنزل",
-    "phone": "+213555100002",
-    "phoneNumber": "+213555100002",
-    "line1": "المنزل",
-    "street": "المنزل",
-    "city": "الجزائر",
-    "state": "",
-    "country": "Egypt",
-    "postalCode": "",
-    "latitude": "36.7525000",
-    "longitude": "3.0419000",
-    "details": "",
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "center_latitude": "36.7538000",
-      "center_longitude": "3.0588000",
-      "radius_km": "35.00",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "service_city_id": 1,
-    "service_city_name": "الجزائر",
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area_id": 1,
-    "delivery_area_name": "وسط الجزائر",
-    "delivery_area_price": "250.00",
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "250.00",
-    "is_default": true,
-    "isDefault": true,
-    "created_at": "2026-07-05T07:25:39.513913Z"
-  },
-  "... 2 more item(s)"
-]
-```
-
-
-
-### Address update
-
-Method: `PATCH`  
-URL: `/api/v1/addresses/10/`  
-Auth: Client token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
+Request:
 
 ```json
 {
-  "line1": "Doc Street Updated",
-  "name": "Doc Address Updated",
+  "name": "عنوان السلام",
+  "line1": "السلام، شارع رئيسي",
   "service_city_id": 1,
-  "delivery_area_id": 1
+  "delivery_area_id": 4,
+  "manual_city": null,
+  "manual_area": null,
+  "isDefault": false
 }
 ```
 
-Response body:
+النظام يجعل `delivery_type=fixed_area` ويعرض `delivery_price_preview` من سعر `delivery_area`.
 
-```json
-[
-  {
-    "id": 1,
-    "name": "المنزل",
-    "fullName": "المنزل",
-    "phone": "+213555100002",
-    "phoneNumber": "+213555100002",
-    "line1": "المنزل",
-    "street": "المنزل",
-    "city": "الجزائر",
-    "state": "",
-    "country": "Egypt",
-    "postalCode": "",
-    "latitude": "36.7525000",
-    "longitude": "3.0419000",
-    "details": "",
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "center_latitude": "36.7538000",
-      "center_longitude": "3.0588000",
-      "radius_km": "35.00",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "service_city_id": 1,
-    "service_city_name": "الجزائر",
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area_id": 1,
-    "delivery_area_name": "وسط الجزائر",
-    "delivery_area_price": "250.00",
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "250.00",
-    "is_default": true,
-    "isDefault": true,
-    "created_at": "2026-07-05T07:25:39.513913Z"
-  },
-  "... 2 more item(s)"
-]
-```
+### Service-city unsupported/manual area address
 
-
-
-### Set default address
-
-Method: `PATCH`  
-URL: `/api/v1/addresses/10/default/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 10,
-    "name": "Doc Address Updated",
-    "fullName": "Doc Address Updated",
-    "phone": "+213555100002",
-    "phoneNumber": "+213555100002",
-    "line1": "Doc Street Updated",
-    "street": "Doc Street Updated",
-    "city": "الجزائر",
-    "state": "",
-    "country": "Egypt",
-    "postalCode": "",
-    "latitude": null,
-    "longitude": null,
-    "details": "Doc Street Updated",
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "center_latitude": "36.7538000",
-      "center_longitude": "3.0588000",
-      "radius_km": "35.00",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "service_city_id": 1,
-    "service_city_name": "الجزائر",
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area_id": 1,
-    "delivery_area_name": "وسط الجزائر",
-    "delivery_area_price": "250.00",
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "250.00",
-    "is_default": true,
-    "isDefault": true,
-    "created_at": "2026-07-05T07:25:57.112118Z"
-  },
-  "... 2 more item(s)"
-]
-```
-
-
-
-### Address delete
-
-Method: `DELETE`  
-URL: `/api/v1/addresses/10/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 2,
-    "name": "العمل",
-    "fullName": "العمل",
-    "phone": "+213555100002",
-    "phoneNumber": "+213555100002",
-    "line1": "العمل",
-    "street": "العمل",
-    "city": "الجزائر",
-    "state": "",
-    "country": "Egypt",
-    "postalCode": "",
-    "latitude": "36.7110000",
-    "longitude": "3.1810000",
-    "details": "",
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "center_latitude": "36.7538000",
-      "center_longitude": "3.0588000",
-      "radius_km": "35.00",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "service_city_id": 1,
-    "service_city_name": "الجزائر",
-    "delivery_area": {
-      "id": 2,
-      "service_city_id": 1,
-      "name": "باب الزوار",
-      "delivery_price": "300.00",
-      "is_active": true
-    },
-    "delivery_area_id": 2,
-    "delivery_area_name": "باب الزوار",
-    "delivery_area_price": "300.00",
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "300.00",
-    "is_default": true,
-    "isDefault": true,
-    "created_at": "2026-07-05T07:25:39.516567Z"
-  },
-  "... 1 more item(s)"
-]
-```
-
-
-
-## Orders
-
-### Order preview
-
-Method: `POST`  
-URL: `/api/v1/orders/preview/`  
-Auth: Client token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
+Request:
 
 ```json
 {
-  "address_id": 1,
-  "items": [
+  "name": "عنوان آخر",
+  "line1": "القاهرة، منطقة غير مضافة، قرب الطريق الرئيسي",
+  "service_city_id": 1,
+  "delivery_area_id": null,
+  "manual_city": null,
+  "manual_area": "منطقة غير مضافة",
+  "latitude": "30.0130000",
+  "longitude": "31.4280000"
+}
+```
+
+النظام يجعل `delivery_type=delivery`, `delivery_area=null`, `delivery_price_preview=null`.
+
+## Catalog / Home / Offers
+
+- Admin endpoints تحت `/api/v1/catalog/` و`/api/v1/home/markets/` ترجع بيانات إدارية كاملة.
+- Client home/offers/search ترجع فقط المحلات والمنتجات والعروض المطابقة لاختيار `market_region`.
+- Product variants هي التي تُرسل في الطلبات عبر `variant_id`، وليس `product_id`.
+
+Product example:
+
+```json
+{
+  "id": 6,
+  "market": {
+    "id": 1,
+    "name": "سوق يلا العام",
+    "branch": "",
+    "status": "active",
+    "classification_id": 1
+  },
+  "category": {
+    "id": 3,
+    "name": "منتجات بقالة",
+    "classification": {
+      "id": 2,
+      "name": "منتجات غذائية"
+    }
+  },
+  "is_available": true,
+  "name": "أرز مصري",
+  "description": "أرز أبيض درجة أولى.",
+  "image": null,
+  "discount": "0.00",
+  "variants": [
     {
-      "variant_id": 15,
-      "quantity": 1
+      "id": 11,
+      "price": "55.00",
+      "sku": "SEED-0006-1",
+      "attribute_values": [
+        {
+          "id": 7,
+          "attribute": {
+            "id": 8,
+            "name": "العبوة",
+            "options": [
+              {
+                "id": 20,
+                "value": "عبوة"
+              },
+              {
+                "id": 21,
+                "value": "كرتونة"
+              }
+            ]
+          },
+          "option": {
+            "id": 20,
+            "value": "عبوة"
+          }
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "price": "105.00",
+      "sku": "SEED-0006-2",
+      "attribute_values": [
+        {
+          "id": 8,
+          "attribute": {
+            "id": 8,
+            "name": "العبوة",
+            "options": [
+              {
+                "id": 20,
+                "value": "عبوة"
+              },
+              {
+                "id": 21,
+                "value": "كرتونة"
+              }
+            ]
+          },
+          "option": {
+            "id": 21,
+            "value": "كرتونة"
+          }
+        }
+      ]
     }
   ],
+  "additions": [
+    5
+  ],
+  "created_at": "2026-07-05T15:42:38.649818Z",
+  "updated_at": "2026-07-05T15:42:38.649835Z"
+}
+```
+
+Offer example:
+
+```json
+{
+  "id": 18,
+  "market_id": 5,
+  "scope": "service_city",
+  "service_city_id": 3,
+  "service_city": {
+    "id": 3,
+    "name": "الإسكندرية",
+    "delivery_price": "55.00",
+    "is_active": true
+  },
+  "product_ids": [
+    31
+  ],
+  "title": "عرض مخبز منتهي",
+  "description": "عرض مخبز منتهي متاح ضمن بيانات العرض التجريبية.",
+  "image": null,
+  "type": "discount",
+  "discount": "15.00",
+  "start_time": "2026-06-15T15:42:34.729502Z",
+  "end_time": "2026-07-04T15:42:34.729502Z",
+  "active_days": [
+    "sunday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday"
+  ],
+  "use_limits": null,
+  "user_limit": null,
+  "status": "expired"
+}
+```
+
+## Orders Client Flow
+
+الخطوات الموصى بها للعميل:
+
+1. Login.
+2. اختيار `/api/v1/market-region/me/`.
+3. إنشاء/اختيار address متوافق مع نفس المنطقة.
+4. استدعاء `/api/v1/orders/preview/`.
+5. إن كان preview مناسباً، استدعاء `/api/v1/orders/create/` بنفس `items/offers/address_id` مع `payment_method`.
+
+### Preview request shape
+
+```json
+{
+  "address_id": 4,
+  "items": [
+    {"variant_id": 5, "quantity": 2}
+  ],
   "offers": [
-    {
-      "offer_id": 10
-    }
+    {"offer_id": 1}
   ]
 }
 ```
 
-Response body:
+`items` أو `offers` واحد منهم على الأقل مطلوب.
+
+### Create request shape
 
 ```json
 {
-  "addresses": [
-    {
-      "id": 2,
-      "name": "العمل",
-      "latitude": "36.7110000",
-      "longitude": "3.1810000",
-      "manual_city": null,
-      "manual_area": null,
-      "service_city": {
-        "id": 1,
-        "name": "الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      },
-      "service_city_id": 1,
-      "delivery_area": {
-        "id": 2,
-        "service_city_id": 1,
-        "name": "باب الزوار",
-        "delivery_price": "300.00",
-        "is_active": true
-      },
-      "delivery_area_id": 2,
-      "delivery_type": "fixed_area",
-      "delivery_price_preview": "300.00",
-      "is_default": true,
-      "created_at": "2026-07-05T07:25:39.516567Z"
-    },
-    "... 1 more item(s)"
+  "address_id": 4,
+  "items": [
+    {"variant_id": 5, "quantity": 2}
   ],
+  "offers": [
+    {"offer_id": 1}
+  ],
+  "payment_method": "cash",
+  "description": "",
+  "delivery_note": ""
+}
+```
+
+## General Multi-Market Order
+
+هذا المثال يثبت السلوك الصحيح لطلب عام بعنوان يدوي في القاهرة/مصر الجديدة: النص محفوظ، لكن الطلب يبقى `general` ولا يأخذ `service_city`.
+
+Preview request:
+
+```json
+{
+  "address_id": 4,
+  "items": [
+    {"variant_id": 5, "quantity": 2},
+    {"variant_id": 13, "quantity": 1}
+  ],
+  "offers": [
+    {"offer_id": 1}
+  ]
+}
+```
+
+Preview response `200`:
+
+```json
+{
+  "order_scope": "general",
+  "service_city": null,
   "selected_address": {
-    "id": 1,
-    "name": "المنزل",
-    "latitude": "36.7525000",
-    "longitude": "3.0419000",
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "service_city_id": 1,
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area_id": 1,
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "250.00",
-    "is_default": false,
-    "created_at": "2026-07-05T07:25:39.513913Z"
+    "id": 4,
+    "name": "عنوان عام",
+    "manual_city": "القاهرة",
+    "manual_area": "مصر الجديدة",
+    "service_city": null,
+    "service_city_id": null,
+    "delivery_area": null,
+    "delivery_area_id": null,
+    "delivery_type": "delivery",
+    "delivery_price_preview": null,
+    "is_default": true
   },
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
+  "market_count": 2,
+  "is_multi_market": true,
+  "market_names_summary": "سوق يلا العام, متجر العروض العامة",
   "market_groups": [
     {
       "market": {
-        "id": 2,
-        "name": "مطبخ أطلس العائلي",
-        "branch": "باب الزوار"
-      },
-      "service_city": {
         "id": 1,
-        "name": "الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
+        "name": "سوق يلا العام",
+        "branch": ""
       },
-      "delivery_area": {
-        "id": 1,
-        "service_city_id": 1,
-        "name": "وسط الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      },
-      "delivery_type": "fixed_area",
-      "delivery_price": "250.00",
-      "delivery_message": "",
+      "service_city": null,
+      "delivery_area": null,
+      "delivery_type": "delivery",
+      "delivery_price": null,
+      "delivery_message": "Delivery price will be determined later.",
       "delivery_available": true,
       "selected_products": [
         {
-          "variant_id": 15,
-          "product_id": 8,
-          "product_name": "دجاج مشوي",
+          "variant_id": 5,
+          "product_id": 3,
+          "product_name": "مياه معدنية",
           "image": null,
-          "quantity": 1,
-          "unit_price": "980.00",
-          "subtotal": "980.00"
+          "quantity": 2,
+          "unit_price": "35.00",
+          "subtotal": "70.00"
         }
       ],
       "selected_offers": [
         {
-          "id": 10,
-          "title": "Doc Offer Updated",
-          "description": "Doc offer",
-          "image": null,
+          "id": 1,
+          "title": "عرض الجمعة العام",
           "type": "flash",
-          "discount_percentage": "5.00",
-          "offer_products_subtotal": "980.00",
-          "discount_amount": "49.00",
-          "products": [
-            {
-              "product_id": 8,
-              "product_name": "دجاج مشوي",
-              "image": null,
-              "variant_id": 15,
-              "quantity": 1,
-              "unit_price": "980.00",
-              "subtotal": "980.00",
-              "is_selected": true
-            }
-          ]
+          "discount_percentage": "15.00",
+          "discount_amount": "51.00",
+          "products_count": 3
         }
       ],
       "pricing": {
-        "products_subtotal": "980.00",
-        "total_offer_discounts": "49.00",
-        "delivery_price": "250.00",
-        "market_total": "1181.00"
+        "products_subtotal": "340.00",
+        "total_offer_discounts": "51.00",
+        "delivery_price": null,
+        "market_total": "289.00"
+      }
+    },
+    {
+      "market": {
+        "id": 2,
+        "name": "متجر العروض العامة",
+        "branch": ""
+      },
+      "service_city": null,
+      "delivery_area": null,
+      "delivery_type": "delivery",
+      "delivery_price": null,
+      "delivery_message": "Delivery price will be determined later.",
+      "delivery_available": true,
+      "selected_products": [
+        {
+          "variant_id": 13,
+          "product_id": 7,
+          "product_name": "كرتونة رمضان",
+          "image": null,
+          "quantity": 1,
+          "unit_price": "700.00",
+          "subtotal": "700.00"
+        }
+      ],
+      "selected_offers": [],
+      "pricing": {
+        "products_subtotal": "700.00",
+        "total_offer_discounts": "0.00",
+        "delivery_price": null,
+        "market_total": "700.00"
       }
     }
   ],
   "summary": {
-    "subtotal": "980.00",
-    "discount_total": "49.00",
-    "delivery_total": "250.00",
-    "grand_total": "1181.00"
+    "subtotal": "1040.00",
+    "discount_total": "51.00",
+    "delivery_total": "0.00",
+    "grand_total": "989.00"
   }
 }
 ```
 
-
-
-### Client order create
-
-Method: `POST`  
-URL: `/api/v1/orders/create/`  
-Auth: Client token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "address_id": 1,
-  "payment_method": "cash",
-  "description": "Client doc order",
-  "delivery_note": "Call me",
-  "items": [
-    {
-      "variant_id": 15,
-      "quantity": 1
-    }
-  ],
-  "offers": [
-    {
-      "offer_id": 10
-    }
-  ]
-}
-```
-
-Response body:
+Create response `201`: لاحظ أنها قائمة بعنصر واحد.
 
 ```json
 [
   {
-    "id": 8,
-    "user_id": 2,
+    "id": 26,
     "customer": {
-      "id": 2,
-      "name": "أمينة بن سالم",
-      "phone": "+213555100002"
+      "id": 3,
+      "name": "كريم محمود",
+      "phone": "+201001000003"
     },
-    "delivery_address_id": 1,
-    "delivery_address": {
-      "id": 1,
-      "name": "المنزل",
-      "details": "",
-      "latitude": 36.7525,
-      "longitude": 3.0419,
-      "manual_city": null,
-      "manual_area": null,
-      "service_city": {
-        "id": 1,
-        "name": "الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      },
-      "delivery_area": {
-        "id": 1,
-        "service_city_id": 1,
-        "name": "وسط الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      },
-      "delivery_type": "fixed_area",
-      "delivery_price_preview": "250.00"
-    },
-    "assigned_representative_id": null,
-    "market_id": 2,
-    "market": {
-      "id": 2,
-      "name": "مطبخ أطلس العائلي",
-      "branch": "باب الزوار",
-      "status": "active"
-    },
-    "service_city_id": 1,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area_id": 1,
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area",
+    "order_scope": "general",
+    "service_city_id": null,
+    "service_city": null,
+    "delivery_area_id": null,
+    "delivery_area": null,
+    "delivery_type": "delivery",
+    "delivery_price": null,
     "payment_method": "cash",
-    "discount": "49.00",
-    "description": "Client doc order",
     "status": "pending",
     "review_status": "pending_review",
-    "delivery_price": "250.00",
-    "subtotal_price": "980.00",
-    "total_price": "1181.00",
-    "image": null,
-    "assigned_at": null,
-    "delivered_at": null,
-    "delivery_note": "Call me",
-    "delivery_proof": null,
-    "approved_by": null,
-    "approved_at": null,
-    "rejected_by": null,
-    "rejected_at": null,
-    "rejection_reason": "",
-    "items": [
-      {
-        "id": 13,
-        "variant_id": 15,
-        "quantity": 1,
-        "unit_price": "980.00"
-      }
-    ],
-    "offers": [
-      {
-        "id": 8,
-        "offer_id": 10,
-        "discount_amount": "49.00",
-        "created_at": "2026-07-05T07:25:57.438190Z"
-      }
-    ],
-    "created_at": "2026-07-05T07:25:57.436112Z",
-    "updated_at": "2026-07-05T07:25:57.436149Z"
-  }
-]
-```
-
-
-
-### Client my orders
-
-Method: `GET`  
-URL: `/api/v1/orders/my/`  
-Auth: Client token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 8,
-    "user_id": 2,
-    "customer": {
-      "id": 2,
-      "name": "أمينة بن سالم",
-      "phone": "+213555100002"
-    },
-    "delivery_address_id": 1,
+    "subtotal_price": "1040.00",
+    "discount": "51.00",
+    "total_price": "989.00",
     "delivery_address": {
-      "id": 1,
-      "name": "المنزل",
-      "details": "",
-      "latitude": 36.7525,
-      "longitude": 3.0419,
-      "manual_city": null,
-      "manual_area": null,
-      "service_city": {
-        "id": 1,
-        "name": "الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      },
-      "delivery_area": {
-        "id": 1,
-        "service_city_id": 1,
-        "name": "وسط الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      },
-      "delivery_type": "fixed_area",
-      "delivery_price_preview": "250.00"
+      "id": 4,
+      "name": "عنوان عام",
+      "details": "شارع الثورة بجوار بنزينة التعاون",
+      "manual_city": "القاهرة",
+      "manual_area": "مصر الجديدة",
+      "service_city": null,
+      "delivery_area": null,
+      "delivery_type": "delivery",
+      "delivery_price_preview": null
     },
-    "assigned_representative_id": null,
-    "market_id": 2,
-    "market": {
-      "id": 2,
-      "name": "مطبخ أطلس العائلي",
-      "branch": "باب الزوار",
-      "status": "active"
-    },
-    "service_city_id": 1,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area_id": 1,
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area",
-    "payment_method": "cash",
-    "discount": "49.00",
-    "description": "Client doc order",
-    "status": "pending",
-    "review_status": "pending_review",
-    "delivery_price": "250.00",
-    "subtotal_price": "980.00",
-    "total_price": "1181.00",
-    "image": null,
-    "assigned_at": null,
-    "delivered_at": null,
-    "delivery_note": "Call me",
-    "delivery_proof": null,
-    "approved_by": null,
-    "approved_at": null,
-    "rejected_by": null,
-    "rejected_at": null,
-    "rejection_reason": "",
-    "items": [
+    "is_multi_market": true,
+    "market_count": 2,
+    "market_names_summary": "سوق يلا العام, متجر العروض العامة",
+    "market_sections": [
       {
-        "id": 13,
-        "variant_id": 15,
-        "quantity": 1,
-        "unit_price": "980.00"
-      }
-    ],
-    "offers": [
-      {
-        "id": 8,
-        "offer_id": 10,
-        "discount_amount": "49.00",
-        "created_at": "2026-07-05T07:25:57.438190Z"
-      }
-    ],
-    "created_at": "2026-07-05T07:25:57.436112Z",
-    "updated_at": "2026-07-05T07:25:57.436149Z"
-  },
-  "... 2 more item(s)"
-]
-```
-
-
-
-### Admin order create
-
-Method: `POST`  
-URL: `/api/v1/orders/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "user_id": 2,
-  "delivery_address_id": 1,
-  "market_id": 2,
-  "service_city_id": 1,
-  "payment_method": "cash",
-  "description": "Admin doc order",
-  "delivery_note": "Admin note",
-  "items": [
-    {
-      "variant_id": 15,
-      "quantity": 2,
-      "unit_price": "10.00"
-    }
-  ],
-  "offers": [
-    {
-      "offer_id": 10,
-      "discount_amount": "3.00"
-    }
-  ]
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 9,
-  "user_id": 2,
-  "customer": {
-    "id": 2,
-    "name": "أمينة بن سالم",
-    "phone": "+213555100002"
-  },
-  "delivery_address_id": 1,
-  "delivery_address": {
-    "id": 1,
-    "name": "المنزل",
-    "details": "",
-    "latitude": 36.7525,
-    "longitude": 3.0419,
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "250.00"
-  },
-  "assigned_representative_id": null,
-  "market_id": 2,
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "status": "active"
-  },
-  "service_city_id": 1,
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_area_id": 1,
-  "delivery_area": {
-    "id": 1,
-    "service_city_id": 1,
-    "name": "وسط الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_type": "fixed_area",
-  "payment_method": "cash",
-  "discount": "3.00",
-  "description": "Admin doc order",
-  "status": "pending",
-  "review_status": "pending_review",
-  "delivery_price": "250.00",
-  "subtotal_price": "20.00",
-  "total_price": "267.00",
-  "image": null,
-  "assigned_at": null,
-  "delivered_at": null,
-  "delivery_note": "Admin note",
-  "delivery_proof": null,
-  "approved_by": null,
-  "approved_at": null,
-  "rejected_by": null,
-  "rejected_at": null,
-  "rejection_reason": "",
-  "items": [
-    {
-      "id": 14,
-      "variant_id": 15,
-      "quantity": 2,
-      "unit_price": "10.00"
-    }
-  ],
-  "offers": [
-    {
-      "id": 9,
-      "offer_id": 10,
-      "discount_amount": "3.00",
-      "created_at": "2026-07-05T07:25:57.567865Z"
-    }
-  ],
-  "created_at": "2026-07-05T07:25:57.564803Z",
-  "updated_at": "2026-07-05T07:25:57.564867Z"
-}
-```
-
-
-
-### Admin order list
-
-Method: `GET`  
-URL: `/api/v1/orders/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-[
-  {
-    "id": 9,
-    "user_id": 2,
-    "customer": {
-      "id": 2,
-      "name": "أمينة بن سالم",
-      "phone": "+213555100002"
-    },
-    "delivery_address_id": 1,
-    "delivery_address": {
-      "id": 1,
-      "name": "المنزل",
-      "details": "",
-      "latitude": 36.7525,
-      "longitude": 3.0419,
-      "manual_city": null,
-      "manual_area": null,
-      "service_city": {
-        "id": 1,
-        "name": "الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      },
-      "delivery_area": {
-        "id": 1,
-        "service_city_id": 1,
-        "name": "وسط الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      },
-      "delivery_type": "fixed_area",
-      "delivery_price_preview": "250.00"
-    },
-    "assigned_representative_id": null,
-    "market_id": 2,
-    "market": {
-      "id": 2,
-      "name": "مطبخ أطلس العائلي",
-      "branch": "باب الزوار",
-      "status": "active"
-    },
-    "service_city_id": 1,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area_id": 1,
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area",
-    "payment_method": "cash",
-    "discount": "3.00",
-    "description": "Admin doc order",
-    "status": "pending",
-    "review_status": "pending_review",
-    "delivery_price": "250.00",
-    "subtotal_price": "20.00",
-    "total_price": "267.00",
-    "image": null,
-    "assigned_at": null,
-    "delivered_at": null,
-    "delivery_note": "Admin note",
-    "delivery_proof": null,
-    "approved_by": null,
-    "approved_at": null,
-    "rejected_by": null,
-    "rejected_at": null,
-    "rejection_reason": "",
-    "items": [
-      {
-        "id": 14,
-        "variant_id": 15,
-        "quantity": 2,
-        "unit_price": "10.00"
-      }
-    ],
-    "offers": [
-      {
-        "id": 9,
-        "offer_id": 10,
-        "discount_amount": "3.00",
-        "created_at": "2026-07-05T07:25:57.567865Z"
-      }
-    ],
-    "created_at": "2026-07-05T07:25:57.564803Z",
-    "updated_at": "2026-07-05T07:25:57.564867Z"
-  },
-  "... 8 more item(s)"
-]
-```
-
-
-
-### Admin order detail
-
-Method: `GET`  
-URL: `/api/v1/orders/9/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 9,
-  "user_id": 2,
-  "customer": {
-    "id": 2,
-    "name": "أمينة بن سالم",
-    "phone": "+213555100002"
-  },
-  "delivery_address_id": 1,
-  "delivery_address": {
-    "id": 1,
-    "name": "المنزل",
-    "details": "",
-    "latitude": 36.7525,
-    "longitude": 3.0419,
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "250.00"
-  },
-  "assigned_representative_id": null,
-  "market_id": 2,
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "status": "active"
-  },
-  "service_city_id": 1,
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_area_id": 1,
-  "delivery_area": {
-    "id": 1,
-    "service_city_id": 1,
-    "name": "وسط الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_type": "fixed_area",
-  "payment_method": "cash",
-  "discount": "3.00",
-  "description": "Admin doc order",
-  "status": "pending",
-  "review_status": "pending_review",
-  "delivery_price": "250.00",
-  "subtotal_price": "20.00",
-  "total_price": "267.00",
-  "image": null,
-  "assigned_at": null,
-  "delivered_at": null,
-  "delivery_note": "Admin note",
-  "delivery_proof": null,
-  "approved_by": null,
-  "approved_at": null,
-  "rejected_by": null,
-  "rejected_at": null,
-  "rejection_reason": "",
-  "items": [
-    {
-      "id": 14,
-      "variant_id": 15,
-      "quantity": 2,
-      "unit_price": "10.00"
-    }
-  ],
-  "offers": [
-    {
-      "id": 9,
-      "offer_id": 10,
-      "discount_amount": "3.00",
-      "created_at": "2026-07-05T07:25:57.567865Z"
-    }
-  ],
-  "created_at": "2026-07-05T07:25:57.564803Z",
-  "updated_at": "2026-07-05T07:25:57.564867Z"
-}
-```
-
-
-
-### Admin order status update
-
-Method: `PATCH`  
-URL: `/api/v1/orders/9/status/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "status": "under_preparation"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 9,
-  "user_id": 2,
-  "customer": {
-    "id": 2,
-    "name": "أمينة بن سالم",
-    "phone": "+213555100002"
-  },
-  "delivery_address_id": 1,
-  "delivery_address": {
-    "id": 1,
-    "name": "المنزل",
-    "details": "",
-    "latitude": 36.7525,
-    "longitude": 3.0419,
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "250.00"
-  },
-  "assigned_representative_id": null,
-  "market_id": 2,
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "status": "active"
-  },
-  "service_city_id": 1,
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_area_id": 1,
-  "delivery_area": {
-    "id": 1,
-    "service_city_id": 1,
-    "name": "وسط الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_type": "fixed_area",
-  "payment_method": "cash",
-  "discount": "3.00",
-  "description": "Admin doc order",
-  "status": "under_preparation",
-  "review_status": "pending_review",
-  "delivery_price": "250.00",
-  "subtotal_price": "20.00",
-  "total_price": "267.00",
-  "image": null,
-  "assigned_at": null,
-  "delivered_at": null,
-  "delivery_note": "Admin note",
-  "delivery_proof": null,
-  "approved_by": null,
-  "approved_at": null,
-  "rejected_by": null,
-  "rejected_at": null,
-  "rejection_reason": "",
-  "items": [
-    {
-      "id": 14,
-      "variant_id": 15,
-      "quantity": 2,
-      "unit_price": "10.00"
-    }
-  ],
-  "offers": [
-    {
-      "id": 9,
-      "offer_id": 10,
-      "discount_amount": "3.00",
-      "created_at": "2026-07-05T07:25:57.567865Z"
-    }
-  ],
-  "created_at": "2026-07-05T07:25:57.564803Z",
-  "updated_at": "2026-07-05T07:25:57.709969Z"
-}
-```
-
-
-
-### Admin order replace
-
-Method: `PUT`  
-URL: `/api/v1/orders/9/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "user_id": 2,
-  "delivery_address_id": 1,
-  "market_id": 2,
-  "service_city_id": 1,
-  "delivery_area_id": 1,
-  "delivery_type": "fixed_area",
-  "payment_method": "cash",
-  "description": "Admin doc order replaced",
-  "delivery_note": "PUT note",
-  "discount": "3.00",
-  "status": "pending",
-  "delivery_price": "250.00",
-  "subtotal_price": "20.00",
-  "total_price": "267.00",
-  "items": [
-    {
-      "variant_id": 15,
-      "quantity": 2,
-      "unit_price": "10.00"
-    }
-  ],
-  "offers": [
-    {
-      "offer_id": 10,
-      "discount_amount": "3.00"
-    }
-  ]
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 9,
-  "user_id": 2,
-  "customer": {
-    "id": 2,
-    "name": "أمينة بن سالم",
-    "phone": "+213555100002"
-  },
-  "delivery_address_id": 1,
-  "delivery_address": {
-    "id": 1,
-    "name": "المنزل",
-    "details": "",
-    "latitude": 36.7525,
-    "longitude": 3.0419,
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "250.00"
-  },
-  "assigned_representative_id": null,
-  "market_id": 2,
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "status": "active"
-  },
-  "service_city_id": 1,
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_area_id": 1,
-  "delivery_area": {
-    "id": 1,
-    "service_city_id": 1,
-    "name": "وسط الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_type": "fixed_area",
-  "payment_method": "cash",
-  "discount": "3.00",
-  "description": "Admin doc order replaced",
-  "status": "pending",
-  "review_status": "pending_review",
-  "delivery_price": "250.00",
-  "subtotal_price": "20.00",
-  "total_price": "267.00",
-  "image": null,
-  "assigned_at": null,
-  "delivered_at": null,
-  "delivery_note": "PUT note",
-  "delivery_proof": null,
-  "approved_by": null,
-  "approved_at": null,
-  "rejected_by": null,
-  "rejected_at": null,
-  "rejection_reason": "",
-  "items": [
-    {
-      "id": 15,
-      "variant_id": 15,
-      "quantity": 2,
-      "unit_price": "10.00"
-    }
-  ],
-  "offers": [
-    {
-      "id": 10,
-      "offer_id": 10,
-      "discount_amount": "3.00",
-      "created_at": "2026-07-05T07:25:57.788336Z"
-    }
-  ],
-  "created_at": "2026-07-05T07:25:57.564803Z",
-  "updated_at": "2026-07-05T07:25:57.784575Z"
-}
-```
-
-
-
-### Admin order patch detail
-
-Method: `PATCH`  
-URL: `/api/v1/orders/9/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "description": "Admin doc order patched"
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 9,
-  "user_id": 2,
-  "customer": {
-    "id": 2,
-    "name": "أمينة بن سالم",
-    "phone": "+213555100002"
-  },
-  "delivery_address_id": 1,
-  "delivery_address": {
-    "id": 1,
-    "name": "المنزل",
-    "details": "",
-    "latitude": 36.7525,
-    "longitude": 3.0419,
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "250.00"
-  },
-  "assigned_representative_id": null,
-  "market_id": 2,
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "status": "active"
-  },
-  "service_city_id": 1,
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_area_id": 1,
-  "delivery_area": {
-    "id": 1,
-    "service_city_id": 1,
-    "name": "وسط الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_type": "fixed_area",
-  "payment_method": "cash",
-  "discount": "3.00",
-  "description": "Admin doc order patched",
-  "status": "pending",
-  "review_status": "pending_review",
-  "delivery_price": "250.00",
-  "subtotal_price": "20.00",
-  "total_price": "267.00",
-  "image": null,
-  "assigned_at": null,
-  "delivered_at": null,
-  "delivery_note": "PUT note",
-  "delivery_proof": null,
-  "approved_by": null,
-  "approved_at": null,
-  "rejected_by": null,
-  "rejected_at": null,
-  "rejection_reason": "",
-  "items": [
-    {
-      "id": 15,
-      "variant_id": 15,
-      "quantity": 2,
-      "unit_price": "10.00"
-    }
-  ],
-  "offers": [
-    {
-      "id": 10,
-      "offer_id": 10,
-      "discount_amount": "3.00",
-      "created_at": "2026-07-05T07:25:57.788336Z"
-    }
-  ],
-  "created_at": "2026-07-05T07:25:57.564803Z",
-  "updated_at": "2026-07-05T07:25:57.840259Z"
-}
-```
-
-
-
-### Admin order delete cancel
-
-Method: `DELETE`  
-URL: `/api/v1/orders/9/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "id": 9,
-  "user_id": 2,
-  "customer": {
-    "id": 2,
-    "name": "أمينة بن سالم",
-    "phone": "+213555100002"
-  },
-  "delivery_address_id": 1,
-  "delivery_address": {
-    "id": 1,
-    "name": "المنزل",
-    "details": "",
-    "latitude": 36.7525,
-    "longitude": 3.0419,
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "250.00"
-  },
-  "assigned_representative_id": null,
-  "market_id": 2,
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "status": "active"
-  },
-  "service_city_id": 1,
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_area_id": 1,
-  "delivery_area": {
-    "id": 1,
-    "service_city_id": 1,
-    "name": "وسط الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_type": "fixed_area",
-  "payment_method": "cash",
-  "discount": "3.00",
-  "description": "Admin doc order patched",
-  "status": "cancelled",
-  "review_status": "pending_review",
-  "delivery_price": "250.00",
-  "subtotal_price": "20.00",
-  "total_price": "267.00",
-  "image": null,
-  "assigned_at": null,
-  "delivered_at": null,
-  "delivery_note": "PUT note",
-  "delivery_proof": null,
-  "approved_by": null,
-  "approved_at": null,
-  "rejected_by": null,
-  "rejected_at": null,
-  "rejection_reason": "",
-  "items": [
-    {
-      "id": 15,
-      "variant_id": 15,
-      "quantity": 2,
-      "unit_price": "10.00"
-    }
-  ],
-  "offers": [
-    {
-      "id": 10,
-      "offer_id": 10,
-      "discount_amount": "3.00",
-      "created_at": "2026-07-05T07:25:57.788336Z"
-    }
-  ],
-  "created_at": "2026-07-05T07:25:57.564803Z",
-  "updated_at": "2026-07-05T07:25:57.886189Z"
-}
-```
-
-
-
-### Admin order create for assignment
-
-Method: `POST`  
-URL: `/api/v1/orders/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "user_id": 2,
-  "delivery_address_id": 1,
-  "market_id": 2,
-  "service_city_id": 1,
-  "payment_method": "cash",
-  "description": "Assign doc order",
-  "delivery_note": "Admin note",
-  "items": [
-    {
-      "variant_id": 15,
-      "quantity": 2,
-      "unit_price": "10.00"
-    }
-  ],
-  "offers": [
-    {
-      "offer_id": 10,
-      "discount_amount": "3.00"
-    }
-  ]
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 10,
-  "user_id": 2,
-  "customer": {
-    "id": 2,
-    "name": "أمينة بن سالم",
-    "phone": "+213555100002"
-  },
-  "delivery_address_id": 1,
-  "delivery_address": {
-    "id": 1,
-    "name": "المنزل",
-    "details": "",
-    "latitude": 36.7525,
-    "longitude": 3.0419,
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "250.00"
-  },
-  "assigned_representative_id": null,
-  "market_id": 2,
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "status": "active"
-  },
-  "service_city_id": 1,
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_area_id": 1,
-  "delivery_area": {
-    "id": 1,
-    "service_city_id": 1,
-    "name": "وسط الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_type": "fixed_area",
-  "payment_method": "cash",
-  "discount": "3.00",
-  "description": "Assign doc order",
-  "status": "pending",
-  "review_status": "pending_review",
-  "delivery_price": "250.00",
-  "subtotal_price": "20.00",
-  "total_price": "267.00",
-  "image": null,
-  "assigned_at": null,
-  "delivered_at": null,
-  "delivery_note": "Admin note",
-  "delivery_proof": null,
-  "approved_by": null,
-  "approved_at": null,
-  "rejected_by": null,
-  "rejected_at": null,
-  "rejection_reason": "",
-  "items": [
-    {
-      "id": 16,
-      "variant_id": 15,
-      "quantity": 2,
-      "unit_price": "10.00"
-    }
-  ],
-  "offers": [
-    {
-      "id": 11,
-      "offer_id": 10,
-      "discount_amount": "3.00",
-      "created_at": "2026-07-05T07:25:57.937058Z"
-    }
-  ],
-  "created_at": "2026-07-05T07:25:57.934952Z",
-  "updated_at": "2026-07-05T07:25:57.934997Z"
-}
-```
-
-
-
-### Assign order
-
-Method: `PATCH`  
-URL: `/api/v1/orders/10/assignment/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{
-  "representative_id": 4
-}
-```
-
-Response body:
-
-```json
-{
-  "message": "Order assigned successfully.",
-  "order": {
-    "id": 10,
-    "user_id": 2,
-    "customer": {
-      "id": 2,
-      "name": "أمينة بن سالم",
-      "phone": "+213555100002"
-    },
-    "delivery_address_id": 1,
-    "delivery_address": {
-      "id": 1,
-      "name": "المنزل",
-      "details": "",
-      "latitude": 36.7525,
-      "longitude": 3.0419,
-      "manual_city": null,
-      "manual_area": null,
-      "service_city": {
-        "id": 1,
-        "name": "الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      },
-      "delivery_area": {
-        "id": 1,
-        "service_city_id": 1,
-        "name": "وسط الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      },
-      "delivery_type": "fixed_area",
-      "delivery_price_preview": "250.00"
-    },
-    "assigned_representative_id": 4,
-    "market_id": 2,
-    "market": {
-      "id": 2,
-      "name": "مطبخ أطلس العائلي",
-      "branch": "باب الزوار",
-      "status": "active"
-    },
-    "service_city_id": 1,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area_id": 1,
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area",
-    "payment_method": "cash",
-    "discount": "3.00",
-    "description": "Assign doc order",
-    "status": "ready",
-    "review_status": "approved",
-    "delivery_price": "250.00",
-    "subtotal_price": "20.00",
-    "total_price": "267.00",
-    "image": null,
-    "assigned_at": "2026-07-05T07:25:58.087344Z",
-    "delivered_at": null,
-    "delivery_note": "Admin note",
-    "delivery_proof": null,
-    "approved_by": 1,
-    "approved_at": "2026-07-05T07:25:58.018243Z",
-    "rejected_by": null,
-    "rejected_at": null,
-    "rejection_reason": "",
-    "items": [
-      {
-        "id": 16,
-        "variant_id": 15,
-        "quantity": 2,
-        "unit_price": "10.00"
-      }
-    ],
-    "offers": [
-      {
-        "id": 11,
-        "offer_id": 10,
-        "discount_amount": "3.00",
-        "created_at": "2026-07-05T07:25:57.937058Z"
-      }
-    ],
-    "created_at": "2026-07-05T07:25:57.934952Z",
-    "updated_at": "2026-07-05T07:25:58.087495Z"
-  },
-  "representative": {
-    "representative_id": 4,
-    "user_id": 4,
-    "name": "سفيان مندوب",
-    "phone": "+213555100004",
-    "service_city_id": 1,
-    "service_city": "الجزائر"
-  }
-}
-```
-
-
-
-### Admin order create for rejection
-
-Method: `POST`  
-URL: `/api/v1/orders/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `201`
-
-
-Request body:
-
-```json
-{
-  "user_id": 2,
-  "delivery_address_id": 1,
-  "market_id": 2,
-  "service_city_id": 1,
-  "payment_method": "cash",
-  "description": "Reject doc order",
-  "delivery_note": "Admin note",
-  "items": [
-    {
-      "variant_id": 15,
-      "quantity": 2,
-      "unit_price": "10.00"
-    }
-  ],
-  "offers": [
-    {
-      "offer_id": 10,
-      "discount_amount": "3.00"
-    }
-  ]
-}
-```
-
-Response body:
-
-```json
-{
-  "id": 11,
-  "user_id": 2,
-  "customer": {
-    "id": 2,
-    "name": "أمينة بن سالم",
-    "phone": "+213555100002"
-  },
-  "delivery_address_id": 1,
-  "delivery_address": {
-    "id": 1,
-    "name": "المنزل",
-    "details": "",
-    "latitude": 36.7525,
-    "longitude": 3.0419,
-    "manual_city": null,
-    "manual_area": null,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area",
-    "delivery_price_preview": "250.00"
-  },
-  "assigned_representative_id": null,
-  "market_id": 2,
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "status": "active"
-  },
-  "service_city_id": 1,
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_area_id": 1,
-  "delivery_area": {
-    "id": 1,
-    "service_city_id": 1,
-    "name": "وسط الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_type": "fixed_area",
-  "payment_method": "cash",
-  "discount": "3.00",
-  "description": "Reject doc order",
-  "status": "pending",
-  "review_status": "pending_review",
-  "delivery_price": "250.00",
-  "subtotal_price": "20.00",
-  "total_price": "267.00",
-  "image": null,
-  "assigned_at": null,
-  "delivered_at": null,
-  "delivery_note": "Admin note",
-  "delivery_proof": null,
-  "approved_by": null,
-  "approved_at": null,
-  "rejected_by": null,
-  "rejected_at": null,
-  "rejection_reason": "",
-  "items": [
-    {
-      "id": 17,
-      "variant_id": 15,
-      "quantity": 2,
-      "unit_price": "10.00"
-    }
-  ],
-  "offers": [
-    {
-      "id": 12,
-      "offer_id": 10,
-      "discount_amount": "3.00",
-      "created_at": "2026-07-05T07:25:58.266459Z"
-    }
-  ],
-  "created_at": "2026-07-05T07:25:58.263918Z",
-  "updated_at": "2026-07-05T07:25:58.263955Z"
-}
-```
-
-
-
-## Orders Admin Review
-
-### Order review blocker
-
-Method: `GET`  
-URL: `/api/v1/admin/order-review/blocker/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "blocked": true,
-  "pending_count": 3,
-  "orders": [
-    {
-      "id": 10,
-      "user_id": 2,
-      "customer": {
-        "id": 2,
-        "name": "أمينة بن سالم",
-        "phone": "+213555100002"
-      },
-      "delivery_address_id": 1,
-      "delivery_address": {
-        "id": 1,
-        "name": "المنزل",
-        "details": "",
-        "latitude": 36.7525,
-        "longitude": 3.0419,
-        "manual_city": null,
-        "manual_area": null,
-        "service_city": {
+        "id": 29,
+        "market_id": 1,
+        "market": {
           "id": 1,
-          "name": "الجزائر",
-          "delivery_price": "250.00",
-          "is_active": true
+          "name": "سوق يلا العام",
+          "branch": "",
+          "status": "active"
         },
-        "delivery_area": {
-          "id": 1,
-          "service_city_id": 1,
-          "name": "وسط الجزائر",
-          "delivery_price": "250.00",
-          "is_active": true
-        },
-        "delivery_type": "fixed_area",
-        "delivery_price_preview": "250.00"
+        "subtotal_price": "340.00",
+        "discount": "51.00",
+        "total_price": "289.00",
+        "pickup_status": "pending",
+        "sort_order": 0,
+        "items": [
+          {
+            "id": 45,
+            "section_id": 29,
+            "variant_id": 5,
+            "quantity": 2,
+            "unit_price": "35.00"
+          },
+          {
+            "id": 46,
+            "section_id": 29,
+            "variant_id": 7,
+            "quantity": 1,
+            "unit_price": "120.00"
+          },
+          {
+            "id": 47,
+            "section_id": 29,
+            "variant_id": 9,
+            "quantity": 1,
+            "unit_price": "150.00"
+          }
+        ],
+        "offers": [
+          {
+            "id": 15,
+            "section_id": 29,
+            "offer_id": 1,
+            "discount_amount": "51.00",
+            "created_at": "2026-07-05T15:42:43.514327Z"
+          }
+        ]
       },
-      "assigned_representative_id": null,
-      "market_id": 2,
+      {
+        "id": 30,
+        "market_id": 2,
+        "market": {
+          "id": 2,
+          "name": "متجر العروض العامة",
+          "branch": "",
+          "status": "active"
+        },
+        "subtotal_price": "700.00",
+        "discount": "0.00",
+        "total_price": "700.00",
+        "pickup_status": "pending",
+        "sort_order": 1,
+        "items": [
+          {
+            "id": 48,
+            "section_id": 30,
+            "variant_id": 13,
+            "quantity": 1,
+            "unit_price": "700.00"
+          }
+        ],
+        "offers": []
+      }
+    ],
+    "pickup_stops": [
+      {
+        "market_id": 1,
+        "market": {
+          "id": 1,
+          "name": "سوق يلا العام",
+          "branch": "",
+          "status": "active"
+        },
+        "pickup_status": "pending",
+        "picked_up_at": null,
+        "sort_order": 0
+      },
+      {
+        "market_id": 2,
+        "market": {
+          "id": 2,
+          "name": "متجر العروض العامة",
+          "branch": "",
+          "status": "active"
+        },
+        "pickup_status": "pending",
+        "picked_up_at": null,
+        "sort_order": 1
+      }
+    ]
+  }
+]
+```
+
+الحقول المهمة في الربط:
+
+- `order_scope="general"`
+- `service_city_id=null`
+- `delivery_area_id=null`
+- `delivery_type="delivery"`
+- `delivery_price=null`
+- `market_sections` يحتوي كل محل داخل الطلب الأب.
+- `pickup_stops` يستخدم لتتبع استلام المندوب من كل محل.
+- `items` و`offers` ما زالت موجودة كتوافق قديم، لكن الربط الجديد الأفضل يعتمد على `market_sections` أو `grouped_items/grouped_offers`.
+
+## Service-City Fixed-Area Order
+
+Preview request:
+
+```json
+{
+  "address_id": 3,
+  "items": [
+    {"variant_id": 25, "quantity": 1}
+  ],
+  "offers": [
+    {"offer_id": 4}
+  ]
+}
+```
+
+Preview response:
+
+```json
+{
+  "order_scope": "service_city",
+  "service_city": {
+    "id": 1,
+    "name": "القاهرة",
+    "delivery_price": "45.00",
+    "is_active": true
+  },
+  "selected_address": {
+    "id": 3,
+    "name": "عنوان السلام",
+    "manual_city": null,
+    "manual_area": null,
+    "service_city": {
+      "id": 1,
+      "name": "القاهرة",
+      "delivery_price": "45.00",
+      "is_active": true
+    },
+    "service_city_id": 1,
+    "delivery_area": {
+      "id": 4,
+      "service_city_id": 1,
+      "name": "السلام",
+      "delivery_price": "46.00",
+      "is_active": true
+    },
+    "delivery_area_id": 4,
+    "delivery_type": "fixed_area",
+    "delivery_price_preview": "46.00",
+    "is_default": false
+  },
+  "market_count": 1,
+  "is_multi_market": false,
+  "market_names_summary": "مطبخ النيل العائلي",
+  "market_groups": [
+    {
       "market": {
-        "id": 2,
-        "name": "مطبخ أطلس العائلي",
-        "branch": "باب الزوار",
-        "status": "active"
+        "id": 3,
+        "name": "مطبخ النيل العائلي",
+        "branch": "مدينة نصر"
       },
-      "service_city_id": 1,
       "service_city": {
         "id": 1,
-        "name": "الجزائر",
-        "delivery_price": "250.00",
+        "name": "القاهرة",
+        "delivery_price": "45.00",
         "is_active": true
       },
-      "delivery_area_id": 1,
       "delivery_area": {
-        "id": 1,
+        "id": 4,
         "service_city_id": 1,
-        "name": "وسط الجزائر",
-        "delivery_price": "250.00",
+        "name": "السلام",
+        "delivery_price": "46.00",
         "is_active": true
       },
       "delivery_type": "fixed_area",
-      "payment_method": "cash",
-      "discount": "3.00",
-      "description": "Assign doc order",
-      "status": "pending",
-      "review_status": "pending_review",
-      "delivery_price": "250.00",
-      "subtotal_price": "20.00",
-      "total_price": "267.00",
-      "image": null,
-      "assigned_at": null,
-      "delivered_at": null,
-      "delivery_note": "Admin note",
-      "delivery_proof": null,
-      "approved_by": null,
-      "approved_at": null,
-      "rejected_by": null,
-      "rejected_at": null,
-      "rejection_reason": "",
-      "items": [
+      "delivery_price": "46.00",
+      "delivery_message": "",
+      "delivery_available": true,
+      "selected_products": [
         {
-          "id": 16,
-          "variant_id": 15,
-          "quantity": 2,
-          "unit_price": "10.00"
+          "variant_id": 25,
+          "product_id": 13,
+          "product_name": "دجاج مشوي",
+          "image": null,
+          "quantity": 1,
+          "unit_price": "180.00",
+          "subtotal": "180.00"
         }
       ],
-      "offers": [
+      "selected_offers": [
         {
-          "id": 11,
-          "offer_id": 10,
-          "discount_amount": "3.00",
-          "created_at": "2026-07-05T07:25:57.937058Z"
+          "id": 4,
+          "title": "باقة العائلة",
+          "type": "package",
+          "discount_percentage": "18.00",
+          "discount_amount": "69.30",
+          "products_count": 3
         }
       ],
-      "created_at": "2026-07-05T07:25:57.934952Z",
-      "updated_at": "2026-07-05T07:25:57.934997Z"
-    },
-    "... 2 more item(s)"
-  ]
+      "pricing": {
+        "products_subtotal": "385.00",
+        "total_offer_discounts": "69.30",
+        "delivery_price": "46.00",
+        "market_total": "361.70"
+      }
+    }
+  ],
+  "summary": {
+    "subtotal": "385.00",
+    "discount_total": "69.30",
+    "delivery_total": "46.00",
+    "grand_total": "361.70"
+  }
 }
 ```
 
+في هذا المثال العنوان مربوط بمنطقة `السلام` داخل القاهرة، لذلك:
 
+- `order_scope="service_city"`
+- `delivery_type="fixed_area"`
+- `delivery_area.id=4`
+- `delivery_price="46.00"`
+- `summary.delivery_total="46.00"` مرة واحدة على الطلب الأب.
 
-### Approve order
+## Service-City Unsupported/Manual Area Order
 
-Method: `POST`  
-URL: `/api/v1/admin/orders/10/approve/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
+Create request:
 
 ```json
-{}
+{
+  "address_id": 2,
+  "items": [
+    {"variant_id": 25, "quantity": 1}
+  ],
+  "payment_method": "cash"
+}
 ```
 
-Response body:
+Create response `201`:
+
+```json
+[
+  {
+    "id": 27,
+    "customer": {
+      "id": 2,
+      "name": "أمينة حسن",
+      "phone": "+201001000002"
+    },
+    "order_scope": "service_city",
+    "service_city_id": 1,
+    "service_city": {
+      "id": 1,
+      "name": "القاهرة",
+      "delivery_price": "45.00",
+      "is_active": true
+    },
+    "delivery_area_id": null,
+    "delivery_area": null,
+    "delivery_type": "delivery",
+    "delivery_price": null,
+    "payment_method": "cash",
+    "status": "pending",
+    "review_status": "pending_review",
+    "subtotal_price": "180.00",
+    "discount": "0.00",
+    "total_price": "180.00",
+    "delivery_address": {
+      "id": 2,
+      "name": "عنوان آخر",
+      "details": "القاهرة، منطقة غير مضافة، قرب الطريق الرئيسي",
+      "manual_city": null,
+      "manual_area": "منطقة غير مضافة",
+      "service_city": {
+        "id": 1,
+        "name": "القاهرة",
+        "delivery_price": "45.00",
+        "is_active": true
+      },
+      "delivery_area": null,
+      "delivery_type": "delivery",
+      "delivery_price_preview": null
+    },
+    "is_multi_market": false,
+    "market_count": 1,
+    "market_names_summary": "مطبخ النيل العائلي",
+    "market_sections": [
+      {
+        "id": 31,
+        "market_id": 3,
+        "market": {
+          "id": 3,
+          "name": "مطبخ النيل العائلي",
+          "branch": "مدينة نصر",
+          "status": "active"
+        },
+        "subtotal_price": "180.00",
+        "discount": "0.00",
+        "total_price": "180.00",
+        "pickup_status": "pending",
+        "sort_order": 0,
+        "items": [
+          {
+            "id": 49,
+            "section_id": 31,
+            "variant_id": 25,
+            "quantity": 1,
+            "unit_price": "180.00"
+          }
+        ],
+        "offers": []
+      }
+    ],
+    "pickup_stops": [
+      {
+        "market_id": 3,
+        "market": {
+          "id": 3,
+          "name": "مطبخ النيل العائلي",
+          "branch": "مدينة نصر",
+          "status": "active"
+        },
+        "pickup_status": "pending",
+        "picked_up_at": null,
+        "sort_order": 0
+      }
+    ]
+  }
+]
+```
+
+هذا هو السلوك المقصود عندما تكون المنطقة غير مضافة في `DeliveryArea`:
+
+- `service_city` تبقى القاهرة.
+- `delivery_area=null`.
+- `delivery_type="delivery"`.
+- `delivery_price=null`.
+- `delivery_address.manual_area` يظهر للمندوب والإدارة.
+- إسناد المندوب يطابق `Order.service_city` وليس `delivery_area`.
+
+## Order Response Contract
+
+أهم الحقول في `OrderSerializer`:
+
+| الحقل | النوع | ملاحظات |
+|---|---|---|
+| `id` | number | رقم الطلب |
+| `customer` | object | `id`, `name`, `phone` |
+| `delivery_address` | object/null | يحتوي `manual_city`, `manual_area`, `delivery_area`, `delivery_type` |
+| `assigned_representative_id` | number/null | المندوب المسند |
+| `market` | object | أول محل للتوافق القديم |
+| `order_scope` | string | `general` أو `service_city` |
+| `service_city` | object/null | null في الطلب العام |
+| `delivery_area` | object/null | null في العام أو المنطقة اليدوية |
+| `delivery_type` | string | `delivery` أو `fixed_area` |
+| `delivery_price` | string/null | null عندما السعر يحدد لاحقاً |
+| `subtotal_price` | string | مجموع المنتجات قبل الخصم والتوصيل |
+| `discount` | string | خصم العروض |
+| `total_price` | string | النهائي |
+| `review_status` | string | يبدأ `pending_review` |
+| `market_sections` | array | المصدر الأساسي لتجميع المحلات |
+| `grouped_items` | array | توافق للعرض حسب المحل |
+| `grouped_offers` | array | توافق للعروض حسب المحل |
+| `pickup_stops` | array | نقاط الاستلام للمندوب |
+| `items` | array | توافق قديم، لا يكفي وحده للـ multi-market |
+| `offers` | array | توافق قديم |
+
+## Admin Order Flow
+
+### Review blocker
+
+```http
+GET /api/v1/admin/order-review/blocker/
+```
+
+Response fields:
+
+- `blocked`: boolean، تكون `true` إذا يوجد طلبات `pending_review`.
+- `pending_count`: عدد الطلبات التي تنتظر مراجعة الإدارة.
+- `orders`: قائمة `OrderSerializer[]` لنفس الطلبات العالقة.
+
+### Approve
+
+```http
+POST /api/v1/admin/orders/{order_id}/approve/
+```
+
+Response example:
 
 ```json
 {
   "message": "Order approved successfully.",
   "order": {
-    "id": 10,
-    "user_id": 2,
-    "customer": {
-      "id": 2,
-      "name": "أمينة بن سالم",
-      "phone": "+213555100002"
-    },
-    "delivery_address_id": 1,
-    "delivery_address": {
-      "id": 1,
-      "name": "المنزل",
-      "details": "",
-      "latitude": 36.7525,
-      "longitude": 3.0419,
-      "manual_city": null,
-      "manual_area": null,
-      "service_city": {
-        "id": 1,
-        "name": "الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      },
-      "delivery_area": {
-        "id": 1,
-        "service_city_id": 1,
-        "name": "وسط الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      },
-      "delivery_type": "fixed_area",
-      "delivery_price_preview": "250.00"
-    },
-    "assigned_representative_id": null,
-    "market_id": 2,
-    "market": {
-      "id": 2,
-      "name": "مطبخ أطلس العائلي",
-      "branch": "باب الزوار",
-      "status": "active"
-    },
+    "id": 27,
+    "order_scope": "service_city",
     "service_city_id": 1,
-    "service_city": {
-      "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_area_id": 1,
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area",
-    "payment_method": "cash",
-    "discount": "3.00",
-    "description": "Assign doc order",
+    "delivery_area_id": null,
+    "delivery_type": "delivery",
     "status": "under_preparation",
     "review_status": "approved",
-    "delivery_price": "250.00",
-    "subtotal_price": "20.00",
-    "total_price": "267.00",
-    "image": null,
-    "assigned_at": null,
-    "delivered_at": null,
-    "delivery_note": "Admin note",
-    "delivery_proof": null,
-    "approved_by": 1,
-    "approved_at": "2026-07-05T07:25:58.018243Z",
-    "rejected_by": null,
-    "rejected_at": null,
-    "rejection_reason": "",
-    "items": [
-      {
-        "id": 16,
-        "variant_id": 15,
-        "quantity": 2,
-        "unit_price": "10.00"
-      }
-    ],
-    "offers": [
-      {
-        "id": 11,
-        "offer_id": 10,
-        "discount_amount": "3.00",
-        "created_at": "2026-07-05T07:25:57.937058Z"
-      }
-    ],
-    "created_at": "2026-07-05T07:25:57.934952Z",
-    "updated_at": "2026-07-05T07:25:58.018431Z"
+    "assigned_representative_id": null
   },
   "service_city": {
     "id": 1,
-    "name": "الجزائر"
+    "name": "القاهرة"
   },
   "available_representatives": [
     {
-      "representative_id": 4,
-      "user_id": 4,
-      "name": "سفيان مندوب",
-      "phone": "+213555100004",
+      "representative_id": 5,
+      "user_id": 5,
+      "name": "أحمد مندوب",
+      "phone": "+201001000004",
       "service_city_id": 1,
-      "service_city": "الجزائر"
-    }
-  ]
-}
-```
-
-
-
-### Service-city representatives for order
-
-Method: `GET`  
-URL: `/api/v1/admin/orders/10/service-city-representatives/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
-
-```json
-{
-  "order_id": 10,
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر"
-  },
-  "representatives": [
+      "service_city": "القاهرة"
+    },
     {
-      "representative_id": 4,
-      "user_id": 4,
-      "name": "سفيان مندوب",
-      "phone": "+213555100004",
+      "representative_id": 6,
+      "user_id": 6,
+      "name": "محمود مندوب",
+      "phone": "+201001000005",
       "service_city_id": 1,
-      "service_city": "الجزائر"
+      "service_city": "القاهرة"
     }
   ]
 }
 ```
 
+للطلب العام `service_city` في هذه الاستجابة يكون `null`، و`available_representatives` يرجع أي مندوب نشط لديه `courier_profile`.
 
+### Representatives for order
 
-### Reject order
+```http
+GET /api/v1/admin/orders/{order_id}/service-city-representatives/
+```
 
-Method: `POST`  
-URL: `/api/v1/admin/orders/11/reject/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
+- طلب `service_city`: يرجع مندوبين نفس `Order.service_city`.
+- طلب `general`: يرجع كل المندوبين النشطين المتاحين أصحاب profile، و`service_city=null`.
 
+### Assign courier
 
-Request body:
+```http
+PATCH /api/v1/orders/{order_id}/assignment/
+```
+
+Request:
 
 ```json
 {
-  "rejection_reason": "Out of stock"
+  "representative_id": 5
 }
 ```
 
-Response body:
+Response example:
 
 ```json
 {
-  "message": "Order rejected successfully.",
-  "order_id": 11,
-  "status": "cancelled",
-  "review_status": "rejected",
-  "rejection_reason": "Out of stock"
+  "message": "Order assigned successfully.",
+  "order": {
+    "id": 27,
+    "status": "ready",
+    "review_status": "approved",
+    "assigned_representative_id": 5
+  },
+  "representative": {
+    "representative_id": 5,
+    "user_id": 5,
+    "name": "أحمد مندوب",
+    "phone": "+201001000004",
+    "service_city_id": 1,
+    "service_city": "القاهرة"
+  }
 }
 ```
 
+بعد الإسناد يصبح `status="ready"` ويُملأ `assigned_at`.
 
+### Admin create order
 
-## Courier
-
-### Courier order list
-
-Method: `GET`  
-URL: `/api/v1/courier/orders/`  
-Auth: Courier token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
+```http
+POST /api/v1/orders/
 ```
 
-Response body:
+Request minimum:
+
+```json
+{
+  "user_id": 2,
+  "delivery_address_id": 2,
+  "market_id": 3,
+  "payment_method": "cash",
+  "description": "",
+  "delivery_note": "",
+  "items": [
+    {"variant_id": 25, "quantity": 1, "unit_price": "0.00"}
+  ],
+  "offers": []
+}
+```
+
+ملاحظة مهمة: عند الإنشاء الإداري لا ترسل الحقول التالية لأنها system-controlled وسيتم رفضها لو كانت موجودة: `order_scope`, `delivery_area_id`, `delivery_type`, `delivery_price`, `discount`, `subtotal_price`, `total_price`, `status`, `review_status`, `assigned_representative_id`, `assigned_at`, `delivered_at`, `approved_by`, `approved_at`, `rejected_by`, `rejected_at`, `rejection_reason`, `image`, `delivery_proof`.
+
+## Courier Flow
+
+### List assigned orders
+
+```http
+GET /api/v1/courier/orders/
+```
+
+Response example:
 
 ```json
 [
   {
-    "id": 10,
+    "id": 27,
     "status": "ready",
+    "order_scope": "service_city",
     "service_city": {
       "id": 1,
-      "name": "الجزائر",
-      "delivery_price": "250.00",
+      "name": "القاهرة",
+      "delivery_price": "45.00",
       "is_active": true
     },
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area",
+    "delivery_area": null,
+    "delivery_type": "delivery",
     "market": {
-      "id": 2,
-      "name": "مطبخ أطلس العائلي",
-      "branch": "باب الزوار",
+      "id": 3,
+      "name": "مطبخ النيل العائلي",
+      "branch": "مدينة نصر",
       "status": "active"
     },
+    "market_count": 1,
     "customer": {
       "id": 2,
-      "name": "أمينة بن سالم",
-      "phone": "+213555100002"
+      "name": "أمينة حسن",
+      "phone": "+201001000002"
     },
     "delivery_address": {
-      "id": 1,
-      "name": "المنزل",
-      "details": "",
-      "delivery_area": {
-        "id": 1,
-        "service_city_id": 1,
-        "name": "وسط الجزائر",
-        "delivery_price": "250.00",
-        "is_active": true
-      },
-      "delivery_type": "fixed_area"
+      "id": 2,
+      "name": "عنوان آخر",
+      "details": "القاهرة، منطقة غير مضافة، قرب الطريق الرئيسي",
+      "manual_city": null,
+      "manual_area": "منطقة غير مضافة",
+      "delivery_area": null,
+      "delivery_type": "delivery"
     },
-    "total_price": "267.00",
-    "delivery_price": "250.00",
-    "created_at": "2026-07-05T07:25:57.934952Z",
-    "assigned_at": "2026-07-05T07:25:58.087344Z"
-  },
-  "... 2 more item(s)"
+    "total_price": "180.00",
+    "delivery_price": null,
+    "created_at": "2026-07-05T15:42:43.566728Z",
+    "assigned_at": "2026-07-05T15:42:43.626821Z"
+  }
 ]
 ```
 
+`delivery_address` في courier response يحتوي `manual_city` و`manual_area` حتى تظهر المناطق اليدوية للمندوب.
 
+### Status transitions
 
-### Courier order detail
-
-Method: `GET`  
-URL: `/api/v1/courier/orders/10/`  
-Auth: Courier token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
+```http
+PATCH /api/v1/courier/orders/{order_id}/status/
 ```
 
-Response body:
+Allowed transitions:
 
-```json
-{
-  "id": 10,
-  "status": "ready",
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_area": {
-    "id": 1,
-    "service_city_id": 1,
-    "name": "وسط الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_type": "fixed_area",
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "status": "active"
-  },
-  "customer": {
-    "id": 2,
-    "name": "أمينة بن سالم",
-    "phone": "+213555100002"
-  },
-  "delivery_address": {
-    "id": 1,
-    "name": "المنزل",
-    "details": "",
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area"
-  },
-  "total_price": "267.00",
-  "delivery_price": "250.00",
-  "created_at": "2026-07-05T07:25:57.934952Z",
-  "assigned_at": "2026-07-05T07:25:58.087344Z",
-  "items": [
-    {
-      "id": 16,
-      "quantity": 2,
-      "unit_price": "10.00",
-      "product": {
-        "id": 8,
-        "name": "دجاج مشوي",
-        "description": "منتج تجريبي: دجاج مشوي.",
-        "image": null
-      },
-      "variant": {
-        "id": 15,
-        "sku": "SEED-08-1",
-        "price": 980.0
-      }
-    }
-  ],
-  "offers": [
-    {
-      "id": 11,
-      "offer": {
-        "id": 10,
-        "title": "Doc Offer Updated",
-        "description": "Doc offer",
-        "type": "flash",
-        "discount": 5.0
-      },
-      "discount_amount": "3.00",
-      "created_at": "2026-07-05T07:25:57.937058Z"
-    }
-  ],
-  "subtotal_price": "20.00",
-  "discount": "3.00",
-  "delivery_note": "Admin note",
-  "delivery_proof": null,
-  "delivered_at": null
-}
-```
+| الحالي | التالي المسموح |
+|---|---|
+| `ready` | `picked_up` |
+| `picked_up` | `on_the_way` |
+| `on_the_way` | `delivered`, `failed_delivery` |
 
-
-
-### Courier order status
-
-Method: `PATCH`  
-URL: `/api/v1/courier/orders/10/status/`  
-Auth: Courier token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
+Request:
 
 ```json
 {
@@ -7544,236 +1424,54 @@ Request body:
 }
 ```
 
-Response body:
+إذا أرسل المندوب انتقالاً غير مسموح يرجع:
 
 ```json
 {
-  "id": 10,
-  "status": "picked_up",
-  "service_city": {
-    "id": 1,
-    "name": "الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_area": {
-    "id": 1,
-    "service_city_id": 1,
-    "name": "وسط الجزائر",
-    "delivery_price": "250.00",
-    "is_active": true
-  },
-  "delivery_type": "fixed_area",
-  "market": {
-    "id": 2,
-    "name": "مطبخ أطلس العائلي",
-    "branch": "باب الزوار",
-    "status": "active"
-  },
-  "customer": {
-    "id": 2,
-    "name": "أمينة بن سالم",
-    "phone": "+213555100002"
-  },
-  "delivery_address": {
-    "id": 1,
-    "name": "المنزل",
-    "details": "",
-    "delivery_area": {
-      "id": 1,
-      "service_city_id": 1,
-      "name": "وسط الجزائر",
-      "delivery_price": "250.00",
-      "is_active": true
-    },
-    "delivery_type": "fixed_area"
-  },
-  "total_price": "267.00",
-  "delivery_price": "250.00",
-  "created_at": "2026-07-05T07:25:57.934952Z",
-  "assigned_at": "2026-07-05T07:25:58.087344Z",
-  "items": [
-    {
-      "id": 16,
-      "quantity": 2,
-      "unit_price": "10.00",
-      "product": {
-        "id": 8,
-        "name": "دجاج مشوي",
-        "description": "منتج تجريبي: دجاج مشوي.",
-        "image": null
-      },
-      "variant": {
-        "id": 15,
-        "sku": "SEED-08-1",
-        "price": 980.0
-      }
-    }
-  ],
-  "offers": [
-    {
-      "id": 11,
-      "offer": {
-        "id": 10,
-        "title": "Doc Offer Updated",
-        "description": "Doc offer",
-        "type": "flash",
-        "discount": 5.0
-      },
-      "discount_amount": "3.00",
-      "created_at": "2026-07-05T07:25:57.937058Z"
-    }
-  ],
-  "subtotal_price": "20.00",
-  "discount": "3.00",
-  "delivery_note": "Admin note",
-  "delivery_proof": null,
-  "delivered_at": null
+  "status": "Invalid status transition."
 }
 ```
-
-
 
 ## Notifications
 
-### Notifications list
+List:
 
-Method: `GET`  
-URL: `/api/v1/notifications/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
+```http
+GET /api/v1/notifications/?unread=true&type=new_order_review&is_blocking=true
 ```
 
-Response body:
-
-```json
-[
-  {
-    "id": 1,
-    "audience": "admin",
-    "type": "new_order_review",
-    "title": "New order requires review",
-    "message": "Order #8 requires admin review.",
-    "order_id": 8,
-    "is_read": false,
-    "is_blocking": true,
-    "is_resolved": false,
-    "created_at": "2026-07-05T07:25:57.438990Z"
-  }
-]
-```
-
-
-
-### Mark notification read
-
-Method: `PATCH`  
-URL: `/api/v1/notifications/1/read/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{}
-```
-
-Response body:
+Notification shape:
 
 ```json
 {
-  "id": 1,
+  "id": 20,
   "audience": "admin",
   "type": "new_order_review",
   "title": "New order requires review",
-  "message": "Order #8 requires admin review.",
-  "order_id": 8,
+  "message": "Order #27 requires admin review.",
+  "order_id": 27,
   "is_read": true,
   "is_blocking": true,
-  "is_resolved": false,
-  "created_at": "2026-07-05T07:25:57.438990Z"
+  "is_resolved": true,
+  "created_at": "2026-07-05T15:42:43.568514Z"
 }
 ```
 
-
-
-### Unread notification count
-
-Method: `GET`  
-URL: `/api/v1/notifications/unread-count/`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
-```
-
-Response body:
+Unread count:
 
 ```json
 {
-  "unread_count": 0
+  "unread_count": 9
 }
 ```
-
-
-
-### Mark all notifications read
-
-Method: `POST`  
-URL: `/api/v1/notifications/mark-all-read/`  
-Auth: Admin token  
-Content-Type: `application/json`  
-HTTP status: `200`
-
-
-Request body:
-
-```json
-{}
-```
-
-Response body:
-
-```json
-{
-  "marked_read": 0
-}
-```
-
-
 
 ## Dashboard
 
-### Dashboard overview
-
-Method: `GET`  
-URL: `/api/v1/dashboard/overview/?from=2026-01-01&to=2026-12-31`  
-Auth: Admin token  
-Content-Type: `none`  
-HTTP status: `200`
-
-
-Request body:
-
-```text
-none
+```http
+GET /api/v1/dashboard/overview/?from=2026-01-01&to=2026-12-31
 ```
 
-Response body:
+Response shape:
 
 ```json
 {
@@ -7784,64 +1482,90 @@ Response body:
   },
   "currency": "EGP",
   "revenue": {
-    "total": "2765.00",
-    "percentage": 23.8
+    "total": "793.35",
+    "percentage": 11.4
   },
   "orders": {
-    "total": 11,
-    "completed": 2,
-    "incomplete": 9,
-    "completion_rate": 18.2
+    "total": 27,
+    "completed": 5,
+    "incomplete": 22,
+    "completion_rate": 18.5
   },
   "customers": {
-    "new": 4,
+    "new": 3,
     "returning": 0,
     "return_rate": 0.0
   },
   "top_products": [
     {
-      "product_id": 1,
-      "name": "تفاح أحمر",
-      "revenue": "1120.00",
-      "quantity_sold": 2,
+      "product_id": 8,
+      "name": "عرض مدارس",
+      "revenue": "150.00",
+      "quantity_sold": 1,
       "orders_count": 1
     },
-    "... 3 more item(s)"
+    {
+      "product_id": 41,
+      "name": "فيتامين C",
+      "revenue": "120.00",
+      "quantity_sold": 1,
+      "orders_count": 1
+    }
   ],
   "active_orders": [
     {
-      "id": 8,
-      "number": "YM-20260705-000008",
+      "id": 27,
+      "number": "YM-20260705-000027",
       "customer": {
         "id": 2,
-        "name": "أمينة بن سالم"
+        "name": "أمينة حسن"
       },
-      "total": "1181.00",
-      "status": "pending",
-      "created_at": "2026-07-05T07:25:57.436112Z"
+      "total": "180.00",
+      "status": "ready",
+      "created_at": "2026-07-05T15:42:43.566728Z"
     },
-    "... 4 more item(s)"
+    {
+      "id": 26,
+      "number": "YM-20260705-000026",
+      "customer": {
+        "id": 3,
+        "name": "كريم محمود"
+      },
+      "total": "989.00",
+      "status": "pending",
+      "created_at": "2026-07-05T15:42:43.512571Z"
+    }
   ],
   "top_shops": [
     {
-      "market_id": 1,
-      "name": "سوق يلا الطازج - وسط الجزائر",
-      "zone": "الجزائر",
+      "market_id": 2,
+      "name": "متجر العروض العامة",
+      "zone": "",
       "orders_count": 1,
-      "average_items_per_order": 5.0,
-      "revenue": "1790.00"
+      "average_items_per_order": 3.0,
+      "revenue": "226.00"
     },
-    "... 1 more item(s)"
+    {
+      "market_id": 7,
+      "name": "صيدلية الحياة - الدقي",
+      "zone": "الجيزة",
+      "orders_count": 1,
+      "average_items_per_order": 2.0,
+      "revenue": "205.10"
+    }
   ]
 }
 ```
 
+## Integration Checklist
 
-
-## Compatibility Notes
-
-- Address endpoints exist under both `/api/v1/addresses/` and `/api/v1/locations/addresses/`; write examples use `/api/v1/addresses/`.
-
-- Admin order create rejects system-controlled fields: `status`, `review_status`, `assigned_representative_id`, `assigned_at`, `delivered_at`, `delivery_price`, `delivery_area_id`, `delivery_type`, `subtotal_price`, `total_price`, `discount`, `image`, `delivery_proof`, `approved_by`, `approved_at`, `rejected_by`, `rejected_at`, `rejection_reason`.
-
-- Long list responses are curl-verified but shortened to the first item plus a count marker when repeated. Object field shapes are kept intact.
+- خزّن `accessToken` وابعثه في `Authorization` لكل endpoint محمي.
+- لا تعرض Home أو Offers للعميل قبل اختيار `market_region`.
+- عند `general` أنشئ/استخدم عنواناً عاماً يدوياً فقط، ولا ترسل `service_city_id` في preview/create.
+- لا تعتبر `manual_city="القاهرة"` مدينة خدمة؛ هي نص فقط في الطلب العام.
+- عند `service_city` استخدم عنواناً بنفس المدينة المختارة.
+- اعتمد على `preview` لحساب السعر، ثم نفذ `create` بنفس السلة.
+- بعد `create` اقرأ الطلب من العنصر الأول في القائمة: `response[0]`.
+- في عرض multi-market اعتمد على `market_sections` و`pickup_stops`، لا على `market` فقط.
+- في courier UI اعرض `manual_city` و`manual_area` من `delivery_address`.
+- تعامل مع `delivery_price=null` كـ “السعر يحدد لاحقاً”، وليس كخطأ.

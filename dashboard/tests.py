@@ -2,8 +2,10 @@ from datetime import datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.db import connection
-from django.test import override_settings
+from django.db.models import Count
+from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework import status
@@ -17,7 +19,8 @@ from catalog.models import (
 )
 from locations.models import DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
-from orders.models import Order, OrderItem
+from notifications.models import Notification
+from orders.models import Order, OrderItem, OrderMarketSection
 
 User = get_user_model()
 OVERVIEW_URL = "/api/v1/dashboard/overview/"
@@ -284,3 +287,95 @@ class DashboardOverviewAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertLessEqual(len(queries), 12)
+
+
+@override_settings(DEBUG=True)
+class SeedDemoDataCommandTests(TestCase):
+    def run_seed(self):
+        call_command(
+            "seed_demo_data",
+            reset=True,
+            yes_delete_all=True,
+            no_media=True,
+            quiet=True,
+            verbosity=0,
+        )
+
+    def test_seed_demo_data_is_repeatable_and_creates_multi_market_sections(self):
+        self.run_seed()
+        first_counts = {
+            "orders": Order.objects.count(),
+            "sections": OrderMarketSection.objects.count(),
+            "notifications": Notification.objects.count(),
+        }
+
+        self.run_seed()
+        second_counts = {
+            "orders": Order.objects.count(),
+            "sections": OrderMarketSection.objects.count(),
+            "notifications": Notification.objects.count(),
+        }
+
+        multi_market_orders = Order.objects.annotate(
+            section_count=Count("market_sections")
+        ).filter(section_count__gt=1)
+        pending_review_orders = Order.objects.filter(
+            review_status=Order.ReviewStatus.PENDING_REVIEW
+        )
+
+        self.assertEqual(first_counts, second_counts)
+        self.assertFalse(User.objects.filter(phone__startswith="+213").exists())
+        self.assertGreaterEqual(multi_market_orders.count(), 3)
+        self.assertEqual(
+            Order.objects.filter(market_sections__isnull=False).distinct().count(),
+            Order.objects.count(),
+        )
+        self.assertFalse(
+            Order.objects.filter(order_scope=Order.Scope.GENERAL)
+            .exclude(
+                service_city__isnull=True,
+                delivery_area__isnull=True,
+                delivery_type=Order.DeliveryType.DELIVERY,
+                delivery_price__isnull=True,
+            )
+            .exists()
+        )
+        self.assertTrue(
+            Order.objects.filter(
+                order_scope=Order.Scope.GENERAL,
+                service_city__isnull=True,
+                delivery_area__isnull=True,
+                delivery_address__manual_city="القاهرة",
+                delivery_address__manual_area="مصر الجديدة",
+                delivery_address__details="شارع الثورة بجوار بنزينة التعاون",
+            )
+            .annotate(section_count=Count("market_sections"))
+            .filter(section_count__gt=1)
+            .exists()
+        )
+        self.assertTrue(
+            Order.objects.filter(
+                order_scope=Order.Scope.SERVICE_CITY,
+                service_city__name="القاهرة",
+                delivery_area__name="السلام",
+                delivery_type=Order.DeliveryType.FIXED_AREA,
+            ).exists()
+        )
+        self.assertTrue(
+            Order.objects.filter(
+                order_scope=Order.Scope.SERVICE_CITY,
+                service_city__name="القاهرة",
+                delivery_area__isnull=True,
+                delivery_type=Order.DeliveryType.DELIVERY,
+                delivery_address__manual_area="منطقة غير مضافة",
+            ).exists()
+        )
+        self.assertEqual(
+            Notification.objects.filter(
+                audience=Notification.Audience.ADMIN,
+                type=Notification.Type.NEW_ORDER_REVIEW,
+                is_blocking=True,
+                is_resolved=False,
+            ).count(),
+            pending_review_orders.count(),
+        )

@@ -15,6 +15,10 @@ from .models import Market
 REGION_SELECTION_REQUIRED_MESSAGE = (
     "Select a market browsing region before loading market content."
 )
+MIXED_MARKET_SCOPE_MESSAGE = "لا يمكن دمج محلات عامة مع محلات مدينة في نفس الطلب"
+SERVICE_CITY_OFFER_IN_GENERAL_MESSAGE = "لا يمكن استخدام عرض مدينة داخل طلب عام"
+GENERAL_OFFER_IN_SERVICE_CITY_MESSAGE = "لا يمكن استخدام عرض عام داخل طلب مدينة"
+MIXED_SERVICE_CITY_MARKETS_MESSAGE = "لا يمكن دمج منتجات من مدن مختلفة في نفس الطلب"
 EARTH_RADIUS_KM = 6371.0088
 
 
@@ -256,32 +260,63 @@ def order_region_validation_error(user, variants, offers):
             "Select a market browsing region before checkout."
         )
 
-    invalid_variant_ids = [
-        variant.id
+    errors = {}
+    if selection["mode"] == User.MarketRegionMode.GENERAL:
+        if any(
+            variant.product.market.scope != Market.Scope.GENERAL
+            for variant in variants
+        ):
+            errors["items"] = MIXED_MARKET_SCOPE_MESSAGE
+
+        for offer in offers:
+            offer_products = offer.products.select_related(
+                "market",
+                "market__classification",
+            ).prefetch_related("market__service_cities")
+            if offer.scope == Offer.Scope.SERVICE_CITY or offer.service_city_id:
+                errors["offers"] = SERVICE_CITY_OFFER_IN_GENERAL_MESSAGE
+                break
+            if (
+                offer.scope != Offer.Scope.GENERAL
+                or offer.market.scope != Market.Scope.GENERAL
+                or any(
+                    product.market.scope != Market.Scope.GENERAL
+                    for product in offer_products
+                )
+            ):
+                errors["offers"] = MIXED_MARKET_SCOPE_MESSAGE
+                break
+        return errors or None
+
+    if any(
+        variant.product.market.scope == Market.Scope.GENERAL
         for variant in variants
-        if not product_matches_region(variant.product, selection)
-    ]
-    invalid_offer_ids = []
+    ):
+        errors["items"] = MIXED_MARKET_SCOPE_MESSAGE
+    elif any(not product_matches_region(variant.product, selection) for variant in variants):
+        errors["items"] = MIXED_SERVICE_CITY_MARKETS_MESSAGE
+
     for offer in offers:
         offer_products = offer.products.select_related(
             "market",
             "market__classification",
         ).prefetch_related("market__service_cities")
+        if offer.scope == Offer.Scope.GENERAL or offer.service_city_id is None:
+            errors["offers"] = GENERAL_OFFER_IN_SERVICE_CITY_MESSAGE
+            break
+        if (
+            offer.market.scope == Market.Scope.GENERAL
+            or any(
+                product.market.scope == Market.Scope.GENERAL
+                for product in offer_products
+            )
+        ):
+            errors["offers"] = MIXED_MARKET_SCOPE_MESSAGE
+            break
         if not offer_matches_region(offer, selection) or any(
             not product_matches_region(product, selection)
             for product in offer_products
         ):
-            invalid_offer_ids.append(offer.id)
-
-    errors = {}
-    if invalid_variant_ids:
-        errors["items"] = (
-            "Selected product variants are outside the saved market region: "
-            f"{invalid_variant_ids}."
-        )
-    if invalid_offer_ids:
-        errors["offers"] = (
-            "Selected offers are outside the saved market region: "
-            f"{invalid_offer_ids}."
-        )
+            errors["offers"] = MIXED_SERVICE_CITY_MARKETS_MESSAGE
+            break
     return errors or None

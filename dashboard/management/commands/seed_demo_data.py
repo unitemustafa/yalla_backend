@@ -8,6 +8,7 @@ from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand, CommandError
 from django.core.management.color import no_style
 from django.db import connection, transaction
+from django.db.models import Count
 from django.utils import timezone
 
 from accounts.models import CourierProfile, OneTimePassword, User
@@ -27,7 +28,7 @@ from locations.models import Address, DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
 from notifications.models import Notification
 from offers.models import Offer
-from orders.models import Order, OrderItem, OrderOffer
+from orders.models import Order, OrderItem, OrderMarketSection, OrderOffer
 
 
 PASSWORD = "SeedPass1!"
@@ -114,6 +115,7 @@ class Command(BaseCommand):
             Notification,
             OrderOffer,
             OrderItem,
+            OrderMarketSection,
             Order,
             Offer,
             ProductAddition,
@@ -241,6 +243,7 @@ class Command(BaseCommand):
             ("القاهرة", "مدينة نصر", "30.0561000", "31.3300000", "8.00", "45.00"),
             ("القاهرة", "المعادي", "29.9602000", "31.2569000", "7.50", "50.00"),
             ("القاهرة", "مصر الجديدة", "30.0860000", "31.3300000", "7.00", "48.00"),
+            ("القاهرة", "السلام", "30.1680000", "31.4100000", "6.50", "46.00"),
             ("الجيزة", "الدقي", "30.0384000", "31.2123000", "6.50", "50.00"),
             ("الجيزة", "المهندسين", "30.0571000", "31.2008000", "6.50", "52.00"),
             ("الجيزة", "الهرم", "29.9888000", "31.1477000", "9.00", "55.00"),
@@ -469,27 +472,38 @@ class Command(BaseCommand):
             "amina_other": create_address(
                 "amina",
                 "عنوان آخر",
-                "التجمع الخامس، منطقة غير محددة",
+                "القاهرة، منطقة غير مضافة، قرب الطريق الرئيسي",
                 "القاهرة",
                 None,
                 Address.DeliveryType.DELIVERY,
                 False,
-                manual_area="التجمع الخامس",
+                manual_area="منطقة غير مضافة",
                 latitude="30.0130000",
                 longitude="31.4280000",
+            ),
+            "amina_salam": create_address(
+                "amina",
+                "عنوان السلام",
+                "مدينة السلام، شارع السوق، الدور الأول",
+                "القاهرة",
+                "السلام",
+                Address.DeliveryType.FIXED_AREA,
+                False,
+                latitude="30.1680000",
+                longitude="31.4100000",
             ),
             "karim_general": create_address(
                 "karim",
                 "عنوان عام",
-                "وسط البلد، عمارة 12، الدور الرابع",
+                "شارع الثورة بجوار بنزينة التعاون",
                 None,
                 None,
                 Address.DeliveryType.DELIVERY,
                 True,
                 manual_city="القاهرة",
-                manual_area="وسط البلد",
-                latitude="30.0500000",
-                longitude="31.2400000",
+                manual_area="مصر الجديدة",
+                latitude="30.0860000",
+                longitude="31.3300000",
             ),
             "karim_home": create_address(
                 "karim",
@@ -501,6 +515,17 @@ class Command(BaseCommand):
                 False,
                 latitude="30.0384000",
                 longitude="31.2123000",
+            ),
+            "karim_heliopolis": create_address(
+                "karim",
+                "عنوان مصر الجديدة",
+                "القاهرة، مصر الجديدة، شارع الميرغني",
+                "القاهرة",
+                "مصر الجديدة",
+                Address.DeliveryType.FIXED_AREA,
+                False,
+                latitude="30.0860000",
+                longitude="31.3300000",
             ),
             "karim_other": create_address(
                 "karim",
@@ -1098,7 +1123,7 @@ class Command(BaseCommand):
 
     def _seed_orders(self, context, now):
         specs = [
-            ("amina", "amina_home", "مطبخ النيل العائلي", [("دجاج مشوي", 1), ("شوربة خضار", 2)], ["عرض الشاورما السريع"], Order.Status.PENDING, Order.ReviewStatus.PENDING_REVIEW, None, 0),
+            ("amina", "amina_salam", "مطبخ النيل العائلي", [("دجاج مشوي", 1), ("شوربة خضار", 2)], ["عرض الشاورما السريع"], Order.Status.PENDING, Order.ReviewStatus.PENDING_REVIEW, None, 0),
             ("amina", "amina_other", "سوق يلا الطازج", [("تفاح أحمر", 2), ("حليب طازج", 1)], [], Order.Status.PENDING, Order.ReviewStatus.PENDING_REVIEW, None, 0),
             ("sara", "sara_home", "مخبز إسكندرية الذهبي", [("فينو", 1), ("كرواسون بالشوكولاتة", 2)], ["مخبوزات الصباح"], Order.Status.PENDING, Order.ReviewStatus.PENDING_REVIEW, None, 1),
             ("karim", "karim_general", "سوق يلا العام", [("قفة رمضان", 1)], ["عرض الجمعة العام"], Order.Status.PENDING, Order.ReviewStatus.PENDING_REVIEW, None, 0),
@@ -1125,6 +1150,254 @@ class Command(BaseCommand):
             order = self._create_order(context, now, *spec)
             context["orders"].append(order)
 
+        multi_specs = [
+            (
+                "karim",
+                "karim_general",
+                [
+                    ("سوق يلا العام", [("مياه معدنية", 2)], ["عرض الجمعة العام"]),
+                    ("متجر العروض العامة", [("كرتونة رمضان", 1)], ["باقة البيت العامة"]),
+                ],
+                Order.Status.PENDING,
+                Order.ReviewStatus.PENDING_REVIEW,
+                None,
+                0,
+                "طلب عام متعدد الأسواق إلى مصر الجديدة",
+            ),
+            (
+                "karim",
+                "karim_general",
+                [
+                    ("سوق يلا العام", [("أرز مصري", 1)], []),
+                    ("متجر العروض العامة", [("عرض مدارس", 1)], []),
+                ],
+                Order.Status.PENDING,
+                Order.ReviewStatus.PENDING_REVIEW,
+                None,
+                0,
+                "طلب عام متعدد الأسواق بعنوان يدوي",
+            ),
+            (
+                "amina",
+                "amina_home",
+                [
+                    ("مطبخ النيل العائلي", [("دجاج مشوي", 1)], ["باقة العائلة"]),
+                    ("سوق يلا الطازج", [("تفاح أحمر", 2)], ["خصم الخضار"]),
+                ],
+                Order.Status.UNDER_PREPARATION,
+                Order.ReviewStatus.APPROVED,
+                None,
+                1,
+                "طلب مدينة خدمة متعدد الأسواق",
+            ),
+        ]
+        for spec in multi_specs:
+            order = self._create_multi_market_order(context, now, *spec)
+            context["orders"].append(order)
+
+    def _create_multi_market_order(
+        self,
+        context,
+        now,
+        user_key,
+        address_key,
+        section_specs,
+        status,
+        review_status,
+        courier_key,
+        days_ago,
+        description,
+    ):
+        user = context["users"][user_key]
+        address = context["addresses"][address_key]
+        representative = context["users"].get(courier_key) if courier_key else None
+        first_market = context["markets"][section_specs[0][0]]
+        order_scope = (
+            Order.Scope.GENERAL
+            if first_market.scope == Market.Scope.GENERAL
+            else Order.Scope.SERVICE_CITY
+        )
+        service_city = (
+            None
+            if order_scope == Order.Scope.GENERAL
+            else address.service_city
+        )
+        delivery_area = None
+        delivery_type = Order.DeliveryType.DELIVERY
+        delivery_price = None
+        if order_scope == Order.Scope.SERVICE_CITY and address.delivery_area_id:
+            delivery_area = address.delivery_area
+            if (
+                address.delivery_type == Address.DeliveryType.FIXED_AREA
+                and delivery_area.is_active
+                and delivery_area.service_city_id == service_city.id
+            ):
+                delivery_type = Order.DeliveryType.FIXED_AREA
+                delivery_price = delivery_area.delivery_price
+            else:
+                delivery_area = None
+        created_at = now - timedelta(days=days_ago, hours=days_ago % 5)
+        approved_at = None
+        rejected_at = None
+        delivered_at = None
+        approved_by = None
+        rejected_by = None
+        rejection_reason = ""
+        assigned_at = None
+
+        if review_status == Order.ReviewStatus.APPROVED:
+            approved_by = context["users"]["admin"]
+            approved_at = created_at + timedelta(minutes=20)
+        if review_status == Order.ReviewStatus.REJECTED:
+            rejected_by = context["users"]["admin"]
+            rejected_at = created_at + timedelta(minutes=25)
+            rejection_reason = "بيانات العنوان غير مكتملة في الطلب التجريبي."
+        if representative is not None:
+            assigned_at = created_at + timedelta(minutes=35)
+        if status == Order.Status.DELIVERED:
+            delivered_at = created_at + timedelta(hours=2)
+
+        sections = []
+        subtotal = Decimal("0.00")
+        discount = Decimal("0.00")
+        for market_name, item_specs, offer_titles in section_specs:
+            market = context["markets"][market_name]
+            items = []
+            section_subtotal = Decimal("0.00")
+            selected_product_totals = {}
+            for product_name, quantity in item_specs:
+                product = context["products"][(market_name, product_name)]
+                variant = product.variants.order_by("price", "id").first()
+                line_total = variant.price * quantity
+                section_subtotal += line_total
+                selected_product_totals[product.id] = (
+                    selected_product_totals.get(product.id, Decimal("0.00"))
+                    + line_total
+                )
+                items.append(
+                    {
+                        "variant": variant,
+                        "quantity": quantity,
+                        "unit_price": variant.price,
+                    }
+                )
+
+            offers = []
+            section_discount = Decimal("0.00")
+            for title in offer_titles:
+                offer = context["offers"][title]
+                offer_base = Decimal("0.00")
+                for product in offer.products.filter(market=market):
+                    selected_total = selected_product_totals.get(product.id)
+                    if selected_total is not None:
+                        offer_base += selected_total
+                        continue
+                    variant = product.variants.order_by("price", "id").first()
+                    if variant is None:
+                        continue
+                    offer_base += variant.price
+                    section_subtotal += variant.price
+                    items.append(
+                        {
+                            "variant": variant,
+                            "quantity": 1,
+                            "unit_price": variant.price,
+                        }
+                    )
+                discount_amount = self._percentage_amount(
+                    offer_base,
+                    offer.discount,
+                )
+                section_discount += discount_amount
+                offers.append({"offer": offer, "discount_amount": discount_amount})
+
+            sections.append(
+                {
+                    "market": market,
+                    "items": items,
+                    "offers": offers,
+                    "subtotal": section_subtotal,
+                    "discount": section_discount,
+                }
+            )
+            subtotal += section_subtotal
+            discount += section_discount
+
+        total = subtotal + (delivery_price or Decimal("0.00")) - discount
+        if total < Decimal("0.00"):
+            total = Decimal("0.00")
+
+        order = Order.objects.create(
+            user=user,
+            delivery_address=address,
+            assigned_representative=representative,
+            market=first_market,
+            order_scope=order_scope,
+            service_city=service_city,
+            delivery_area=delivery_area,
+            delivery_type=delivery_type,
+            payment_method="cash",
+            discount=discount,
+            description=description,
+            status=status,
+            review_status=review_status,
+            delivery_price=delivery_price,
+            subtotal_price=subtotal,
+            total_price=total,
+            assigned_at=assigned_at,
+            delivered_at=delivered_at,
+            delivery_note="يرجى الاتصال قبل الوصول.",
+            approved_by=approved_by,
+            approved_at=approved_at,
+            rejected_by=rejected_by,
+            rejected_at=rejected_at,
+            rejection_reason=rejection_reason,
+        )
+        section_picked_up = status in {
+            Order.Status.PICKED_UP,
+            Order.Status.ON_THE_WAY,
+            Order.Status.DELIVERED,
+            Order.Status.FAILED_DELIVERY,
+        }
+        for sort_order, section_data in enumerate(sections):
+            section = OrderMarketSection.objects.create(
+                order=order,
+                market=section_data["market"],
+                subtotal_price=section_data["subtotal"],
+                discount=section_data["discount"],
+                pickup_status=(
+                    OrderMarketSection.PickupStatus.PICKED_UP
+                    if section_picked_up
+                    else OrderMarketSection.PickupStatus.PENDING
+                ),
+                picked_up_at=(
+                    assigned_at + timedelta(minutes=20)
+                    if section_picked_up and assigned_at
+                    else None
+                ),
+                sort_order=sort_order,
+            )
+            OrderItem.objects.bulk_create(
+                [
+                    OrderItem(order=order, section=section, **item)
+                    for item in section_data["items"]
+                ]
+            )
+            OrderOffer.objects.bulk_create(
+                [
+                    OrderOffer(order=order, section=section, **offer)
+                    for offer in section_data["offers"]
+                ]
+            )
+
+        Order.objects.filter(pk=order.pk).update(
+            created_at=created_at,
+            updated_at=created_at + timedelta(minutes=45),
+        )
+        order.created_at = created_at
+        order.updated_at = created_at + timedelta(minutes=45)
+        return order
+
     def _create_order(
         self,
         context,
@@ -1142,14 +1415,30 @@ class Command(BaseCommand):
         user = context["users"][user_key]
         address = context["addresses"][address_key]
         market = context["markets"][market_name]
-        service_city = address.service_city
-        delivery_area = address.delivery_area
-        delivery_type = address.delivery_type
-        delivery_price = (
-            delivery_area.delivery_price
-            if delivery_type == Address.DeliveryType.FIXED_AREA and delivery_area
-            else None
+        order_scope = (
+            Order.Scope.GENERAL
+            if market.scope == Market.Scope.GENERAL
+            else Order.Scope.SERVICE_CITY
         )
+        service_city = (
+            None
+            if order_scope == Order.Scope.GENERAL
+            else address.service_city
+        )
+        delivery_area = None
+        delivery_type = Order.DeliveryType.DELIVERY
+        delivery_price = None
+        if order_scope == Order.Scope.SERVICE_CITY and address.delivery_area_id:
+            delivery_area = address.delivery_area
+            if (
+                address.delivery_type == Address.DeliveryType.FIXED_AREA
+                and delivery_area.is_active
+                and delivery_area.service_city_id == service_city.id
+            ):
+                delivery_type = Order.DeliveryType.FIXED_AREA
+                delivery_price = delivery_area.delivery_price
+            else:
+                delivery_area = None
         representative = context["users"].get(courier_key) if courier_key else None
         created_at = now - timedelta(days=days_ago, hours=days_ago % 5)
         approved_at = None
@@ -1212,6 +1501,7 @@ class Command(BaseCommand):
             delivery_address=address,
             assigned_representative=representative,
             market=market,
+            order_scope=order_scope,
             service_city=service_city,
             delivery_area=delivery_area,
             delivery_type=delivery_type,
@@ -1232,11 +1522,34 @@ class Command(BaseCommand):
             rejected_at=rejected_at,
             rejection_reason=rejection_reason,
         )
+        section_picked_up = status in {
+            Order.Status.PICKED_UP,
+            Order.Status.ON_THE_WAY,
+            Order.Status.DELIVERED,
+            Order.Status.FAILED_DELIVERY,
+        }
+        section = OrderMarketSection.objects.create(
+            order=order,
+            market=market,
+            subtotal_price=subtotal,
+            discount=discount,
+            pickup_status=(
+                OrderMarketSection.PickupStatus.PICKED_UP
+                if section_picked_up
+                else OrderMarketSection.PickupStatus.PENDING
+            ),
+            picked_up_at=(
+                assigned_at + timedelta(minutes=20)
+                if section_picked_up and assigned_at
+                else None
+            ),
+            sort_order=0,
+        )
         OrderItem.objects.bulk_create(
-            [OrderItem(order=order, **item) for item in items]
+            [OrderItem(order=order, section=section, **item) for item in items]
         )
         OrderOffer.objects.bulk_create(
-            [OrderOffer(order=order, **item) for item in offers]
+            [OrderOffer(order=order, section=section, **item) for item in offers]
         )
         Order.objects.filter(pk=order.pk).update(
             created_at=created_at,
@@ -1402,6 +1715,13 @@ class Command(BaseCommand):
             ).count(),
             "offers": Offer.objects.count(),
             "orders": Order.objects.count(),
+            "order_sections": OrderMarketSection.objects.count(),
+            "orders_with_sections": Order.objects.filter(
+                market_sections__isnull=False
+            ).distinct().count(),
+            "multi_market_orders": Order.objects.annotate(
+                section_count=Count("market_sections")
+            ).filter(section_count__gt=1).count(),
             "notifications": Notification.objects.count(),
             "pending_review_orders": Order.objects.filter(
                 review_status=Order.ReviewStatus.PENDING_REVIEW
@@ -1418,6 +1738,37 @@ class Command(BaseCommand):
                 delivery_area__isnull=True,
                 delivery_price__isnull=True,
             ).count(),
+            "general_orders_with_fixed_delivery": Order.objects.filter(
+                order_scope=Order.Scope.GENERAL,
+            )
+            .exclude(
+                delivery_area__isnull=True,
+                delivery_type=Order.DeliveryType.DELIVERY,
+                delivery_price__isnull=True,
+            )
+            .count(),
+            "general_manual_masr_el_gedida_order": Order.objects.filter(
+                order_scope=Order.Scope.GENERAL,
+                delivery_address__manual_city="القاهرة",
+                delivery_address__manual_area="مصر الجديدة",
+                delivery_address__details="شارع الثورة بجوار بنزينة التعاون",
+            )
+            .annotate(section_count=Count("market_sections"))
+            .filter(section_count__gt=1)
+            .exists(),
+            "service_city_salam_fixed_order": Order.objects.filter(
+                order_scope=Order.Scope.SERVICE_CITY,
+                service_city__name="القاهرة",
+                delivery_area__name="السلام",
+                delivery_type=Order.DeliveryType.FIXED_AREA,
+            ).exists(),
+            "service_city_manual_unsupported_order": Order.objects.filter(
+                order_scope=Order.Scope.SERVICE_CITY,
+                service_city__name="القاهرة",
+                delivery_area__isnull=True,
+                delivery_type=Order.DeliveryType.DELIVERY,
+                delivery_address__manual_area="منطقة غير مضافة",
+            ).exists(),
         }
         failures = []
         checks = [
@@ -1444,6 +1795,14 @@ class Command(BaseCommand):
             ),
             ("at least 15 offers", assertions["offers"] >= 15),
             ("at least 20 orders", assertions["orders"] >= 20),
+            (
+                "every order has a market section",
+                assertions["orders_with_sections"] == assertions["orders"],
+            ),
+            (
+                "at least 3 multi-market parent orders",
+                assertions["multi_market_orders"] >= 3,
+            ),
             ("at least 5 notifications", assertions["notifications"] >= 5),
             (
                 "at least 3 pending review orders",
@@ -1452,6 +1811,22 @@ class Command(BaseCommand):
             (
                 "at least 1 ready courier order",
                 assertions["ready_courier_orders"] >= 1,
+            ),
+            (
+                "general orders do not use fixed-area delivery",
+                assertions["general_orders_with_fixed_delivery"] == 0,
+            ),
+            (
+                "general manual Masr El Gedida multi-market order exists",
+                assertions["general_manual_masr_el_gedida_order"],
+            ),
+            (
+                "service-city Salam fixed-area order exists",
+                assertions["service_city_salam_fixed_order"],
+            ),
+            (
+                "service-city manual unsupported-area order exists",
+                assertions["service_city_manual_unsupported_order"],
             ),
         ]
         for label, passed in checks:
@@ -1479,6 +1854,7 @@ class Command(BaseCommand):
             "variants": ProductVariant.objects.count(),
             "offers": Offer.objects.count(),
             "orders": Order.objects.count(),
+            "order_sections": OrderMarketSection.objects.count(),
             "notifications": Notification.objects.count(),
             "liked_products": Product.objects.filter(liked_by__isnull=False)
             .distinct()
