@@ -1,13 +1,18 @@
+import shutil
+import tempfile
+from io import BytesIO
 from datetime import datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.db.models import Count
 from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from PIL import Image
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -21,9 +26,224 @@ from locations.models import DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
 from notifications.models import Notification
 from orders.models import Order, OrderItem, OrderMarketSection
+from .models import DashboardSettings
 
 User = get_user_model()
 OVERVIEW_URL = "/api/v1/dashboard/overview/"
+SETTINGS_URL = "/api/v1/dashboard/settings/"
+
+
+def small_png(name="logo.png"):
+    image = Image.new("RGB", (1, 1), color="white")
+    content = BytesIO()
+    image.save(content, format="PNG")
+    return SimpleUploadedFile(name, content.getvalue(), content_type="image/png")
+
+
+class DashboardSettingsAPITests(APITestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+        self.admin = User.objects.create_user(
+            username="settings_admin",
+            email="settings-admin@example.com",
+            phone="+213555810001",
+            password="Password1!",
+            role=User.Role.ADMIN,
+        )
+        self.client_user = User.objects.create_user(
+            username="settings_client",
+            email="settings-client@example.com",
+            phone="+213555810002",
+            password="Password1!",
+            role=User.Role.CLIENT,
+        )
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def authenticate_admin(self):
+        self.client.force_authenticate(self.admin)
+
+    def test_settings_requires_authentication(self):
+        response = self.client.get(SETTINGS_URL)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_settings_requires_admin_role(self):
+        self.client.force_authenticate(self.client_user)
+
+        response = self.client.get(SETTINGS_URL)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_get_returns_default_singleton_settings(self):
+        self.authenticate_admin()
+
+        response = self.client.get(SETTINGS_URL)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(DashboardSettings.objects.count(), 1)
+        self.assertEqual(response.data["primary_color"], "#155d72")
+        self.assertEqual(response.data["subtle_color"], "#e7f2f4")
+        self.assertEqual(response.data["accent_color"], "#f0b64f")
+        self.assertEqual(response.data["font_family"], "Cairo")
+        self.assertEqual(response.data["brand_name"], "يلا ماركت")
+        self.assertEqual(
+            response.data["brand_tagline"],
+            "أول أونلاين ماركت في النيل الكبير",
+        )
+        self.assertIsNone(response.data["logo_url"])
+        self.assertIn("updated_at", response.data)
+
+    def test_repeated_get_does_not_create_additional_settings_rows(self):
+        self.authenticate_admin()
+
+        first_response = self.client.get(SETTINGS_URL)
+        second_response = self.client.get(SETTINGS_URL)
+
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(DashboardSettings.objects.count(), 1)
+
+    def test_admin_patch_updates_colors(self):
+        self.authenticate_admin()
+
+        response = self.client.patch(
+            SETTINGS_URL,
+            {
+                "primary_color": "#123456",
+                "subtle_color": "#abcdef",
+                "accent_color": "#FEDCBA",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["primary_color"], "#123456")
+        self.assertEqual(response.data["subtle_color"], "#abcdef")
+        self.assertEqual(response.data["accent_color"], "#FEDCBA")
+
+    def test_admin_patch_updates_font_family(self):
+        self.authenticate_admin()
+
+        response = self.client.patch(
+            SETTINGS_URL,
+            {"font_family": "Tajawal"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["font_family"], "Tajawal")
+
+    def test_admin_patch_updates_brand_name_and_tagline(self):
+        self.authenticate_admin()
+
+        response = self.client.patch(
+            SETTINGS_URL,
+            {
+                "brand_name": "  يلا الجديد  ",
+                "brand_tagline": "  توصيل أسرع  ",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["brand_name"], "يلا الجديد")
+        self.assertEqual(response.data["brand_tagline"], "توصيل أسرع")
+
+    def test_invalid_color_is_rejected(self):
+        self.authenticate_admin()
+
+        response = self.client.patch(
+            SETTINGS_URL,
+            {"primary_color": "123456"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("primary_color", response.data)
+
+    def test_unsupported_font_is_rejected(self):
+        self.authenticate_admin()
+
+        response = self.client.patch(
+            SETTINGS_URL,
+            {"font_family": "Roboto"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("font_family", response.data)
+
+    def test_empty_brand_name_is_rejected(self):
+        self.authenticate_admin()
+
+        response = self.client.patch(
+            SETTINGS_URL,
+            {"brand_name": "   "},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("brand_name", response.data)
+
+    def test_multipart_logo_upload_persists_file_and_returns_logo_url(self):
+        self.authenticate_admin()
+
+        response = self.client.patch(
+            SETTINGS_URL,
+            {"logo": small_png()},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        settings = DashboardSettings.objects.get(pk=1)
+        self.assertTrue(settings.logo)
+        self.assertTrue(settings.logo.storage.exists(settings.logo.name))
+        self.assertIn("/media/dashboard/branding/", response.data["logo_url"])
+
+    def test_text_patch_preserves_existing_logo(self):
+        self.authenticate_admin()
+        self.client.patch(SETTINGS_URL, {"logo": small_png()}, format="multipart")
+        settings = DashboardSettings.objects.get(pk=1)
+        original_logo = settings.logo.name
+
+        response = self.client.patch(
+            SETTINGS_URL,
+            {"brand_name": "Yalla"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        settings.refresh_from_db()
+        self.assertEqual(settings.logo.name, original_logo)
+        self.assertTrue(settings.logo.storage.exists(original_logo))
+
+    def test_replacing_logo_changes_url_and_removes_old_file(self):
+        self.authenticate_admin()
+        first_response = self.client.patch(
+            SETTINGS_URL,
+            {"logo": small_png("first.png")},
+            format="multipart",
+        )
+        settings = DashboardSettings.objects.get(pk=1)
+        old_logo_name = settings.logo.name
+
+        second_response = self.client.patch(
+            SETTINGS_URL,
+            {"logo": small_png("second.png")},
+            format="multipart",
+        )
+
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+        settings.refresh_from_db()
+        self.assertNotEqual(settings.logo.name, old_logo_name)
+        self.assertNotEqual(second_response.data["logo_url"], first_response.data["logo_url"])
+        self.assertFalse(settings.logo.storage.exists(old_logo_name))
 
 
 @override_settings(TIME_ZONE="UTC", USE_TZ=True)
