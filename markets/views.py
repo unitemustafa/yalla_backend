@@ -1,14 +1,19 @@
+from datetime import datetime, time, timedelta
+
 from django.db.models import ProtectedError
 from django.db.models import Count, Max, Min, Prefetch, Q
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.generics import get_object_or_404
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.permissions import BasePermission, IsAuthenticated
+from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
 from catalog.models import Product, ProductVariant
+from locations.models import DeliveryArea, ServiceCity
+from orders.models import Order
 
 from .models import Market, MarketClassification
 from .region import (
@@ -66,6 +71,31 @@ class ProductSearchPagination(PageNumberPagination):
 
 class AddressProductPagination(PageNumberPagination):
     page_size = 4
+
+
+class LoginDashboardSnapshotView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        local_today = timezone.localdate()
+        current_timezone = timezone.get_current_timezone()
+        start_of_day = timezone.make_aware(
+            datetime.combine(local_today, time.min),
+            current_timezone,
+        )
+        end_of_day = start_of_day + timedelta(days=1)
+
+        return Response(
+            {
+                "todayOrders": Order.objects.filter(
+                    created_at__gte=start_of_day,
+                    created_at__lt=end_of_day,
+                ).count(),
+                "availableCities": ServiceCity.objects.filter(is_active=True).count(),
+                "deliveryZones": DeliveryArea.objects.filter(is_active=True).count(),
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class AdminMarketClassificationListCreateView(APIView):

@@ -1,7 +1,8 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -21,11 +22,92 @@ from catalog.models import (
 )
 from locations.models import Address, DeliveryArea, ServiceCity
 from offers.models import Offer
+from orders.models import Order
 
 from .models import Market, MarketClassification
 
 User = get_user_model()
 HOME_BASE = "/api/v1/home"
+
+
+@override_settings(TIME_ZONE="Africa/Cairo", USE_TZ=True)
+class LoginDashboardSnapshotAPITests(APITestCase):
+    snapshot_url = f"{HOME_BASE}/login-dashboard-snapshot/"
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="login_snapshot_user",
+            email="login-snapshot@example.com",
+            phone="+213555900001",
+            password="Password1!",
+        )
+        self.city = ServiceCity.objects.create(name="Active City")
+        self.inactive_city = ServiceCity.objects.create(
+            name="Inactive City",
+            is_active=False,
+        )
+        self.active_area = DeliveryArea.objects.create(
+            service_city=self.city,
+            name="Active Area",
+            delivery_price=Decimal("100.00"),
+        )
+        self.inactive_area = DeliveryArea.objects.create(
+            service_city=self.city,
+            name="Inactive Area",
+            delivery_price=Decimal("100.00"),
+            is_active=False,
+        )
+        classification = MarketClassification.objects.create(name="Snapshot Market")
+        self.market = Market.objects.create(
+            classification=classification,
+            name="Snapshot Market",
+        )
+        self.market.service_cities.add(self.city)
+        self.market.delivery_areas.add(self.active_area)
+
+    @staticmethod
+    def local_datetime(local_date, local_time):
+        return timezone.make_aware(
+            datetime.combine(local_date, local_time),
+            timezone.get_current_timezone(),
+        )
+
+    def create_order_at(self, created_at):
+        order = Order.objects.create(
+            user=self.user,
+            market=self.market,
+            service_city=self.city,
+            payment_method="cash",
+            subtotal_price=Decimal("100.00"),
+            total_price=Decimal("100.00"),
+        )
+        Order.objects.filter(pk=order.pk).update(created_at=created_at)
+        return order
+
+    def test_snapshot_is_public_and_returns_only_active_aggregate_counts(self):
+        today = timezone.localdate()
+        self.create_order_at(self.local_datetime(today, time(0, 0)))
+        self.create_order_at(self.local_datetime(today, time(12, 0)))
+        self.create_order_at(self.local_datetime(today - timedelta(days=1), time(23, 59)))
+
+        response = self.client.get(self.snapshot_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            set(response.data),
+            {"todayOrders", "availableCities", "deliveryZones"},
+        )
+        self.assertEqual(
+            response.data,
+            {
+                "todayOrders": 2,
+                "availableCities": 1,
+                "deliveryZones": 1,
+            },
+        )
+        self.assertTrue(
+            all(isinstance(value, int) for value in response.data.values())
+        )
 
 
 class HomeAPITests(APITestCase):

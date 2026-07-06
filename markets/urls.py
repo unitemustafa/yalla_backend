@@ -7,6 +7,7 @@ from .views import (
     AdminMarketDetailView,
     AdminMarketListCreateView,
     HomeView,
+    LoginDashboardSnapshotView,
     FeaturedMarketClassificationSummaryView,
     MarketClassificationMarketsView,
     MarketClassificationSummaryView,
@@ -18,6 +19,11 @@ from .views import (
 
 urlpatterns = [
     path("", HomeView.as_view(), name="home"),
+    path(
+        "login-dashboard-snapshot/",
+        LoginDashboardSnapshotView.as_view(),
+        name="login-dashboard-snapshot",
+    ),
     path(
         "market-classifications/",
         AdminMarketClassificationListCreateView.as_view(),
