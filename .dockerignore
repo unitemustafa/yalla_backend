@@ -1,0 +1,18 @@
+.git
+.agents
+.codex
+.serena
+.venv
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.sqlite3
+db.sqlite3
+media/
+staticfiles/
+API_REPORT.md
+Yalla System APIs.postman_collection.json
