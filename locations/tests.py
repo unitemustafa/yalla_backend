@@ -676,16 +676,17 @@ class LocationManagementAPITests(TestCase):
 
     def create_offer_for_city(self, city):
         now = timezone.now()
-        return Offer.objects.create(
+        offer = Offer.objects.create(
             market=self.create_market_for_city(city, "Offer Market"),
-            scope=Offer.Scope.SERVICE_CITY,
-            service_city=city,
+            show_in_general=False,
             title="City Offer",
             discount=Decimal("10.00"),
             start_time=now,
             end_time=now + timedelta(days=1),
             status=Offer.Status.ACTIVE,
         )
+        offer.service_cities.set([city])
+        return offer
 
     def create_client_user(self, username, city=None):
         return User.objects.create_user(

@@ -449,11 +449,14 @@ class MarketWithCommonProductsSerializer(HomeMarketSerializer):
 class HomeOfferSerializer(serializers.ModelSerializer):
     market = HomeMarketSerializer(read_only=True)
     products = HomeProductSerializer(many=True, read_only=True)
+    service_cities = ServiceCitySummarySerializer(many=True, read_only=True)
 
     class Meta:
         model = Offer
         fields = (
             "id",
+            "show_in_general",
+            "service_cities",
             "title",
             "description",
             "image",

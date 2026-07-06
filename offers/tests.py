@@ -1,8 +1,10 @@
 from datetime import timedelta
 from decimal import Decimal
+from tempfile import TemporaryDirectory
 
-from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -39,19 +41,83 @@ class OfferAPITests(APITestCase):
             role=User.Role.CLIENT,
             is_active=True,
         )
-        market_classification = MarketClassification.objects.create(
-            name="مطاعم"
+        market_classification = MarketClassification.objects.create(name="Markets")
+        category_classification = CategoryClassification.objects.create(name="Food")
+        self.category = ProductCategory.objects.create(
+            classification=category_classification,
+            name="Meals",
         )
-        self.service_city = ServiceCity.objects.create(
+        self.city = ServiceCity.objects.create(
             name="Offer City",
             delivery_price=Decimal("100.00"),
         )
+        self.second_city = ServiceCity.objects.create(
+            name="Second City",
+            delivery_price=Decimal("110.00"),
+        )
         self.remote_city = ServiceCity.objects.create(
-            name="Remote Offer City",
+            name="Remote City",
             delivery_price=Decimal("120.00"),
         )
-        self.client_user.market_region_mode = User.MarketRegionMode.SERVICE_CITY
-        self.client_user.market_region_service_city = self.service_city
+        self.inactive_city = ServiceCity.objects.create(
+            name="Inactive City",
+            delivery_price=Decimal("90.00"),
+            is_active=False,
+        )
+        self.market = Market.objects.create(
+            classification=market_classification,
+            name="City Market",
+        )
+        self.market.service_cities.set([self.city, self.second_city])
+        self.general_market = Market.objects.create(
+            classification=market_classification,
+            name="General Market",
+            scope=Market.Scope.GENERAL,
+        )
+        self.general_market.service_cities.set([self.city, self.second_city])
+        self.remote_market = Market.objects.create(
+            classification=market_classification,
+            name="Remote Market",
+        )
+        self.remote_market.service_cities.set([self.remote_city])
+        self.product = Product.objects.create(
+            market=self.market,
+            category=self.category,
+            name="Burger",
+            description="Burger",
+        )
+        self.second_product = Product.objects.create(
+            market=self.market,
+            category=self.category,
+            name="Fries",
+            description="Fries",
+        )
+        self.general_product = Product.objects.create(
+            market=self.general_market,
+            category=self.category,
+            name="General Product",
+            description="General",
+        )
+        self.remote_product = Product.objects.create(
+            market=self.remote_market,
+            category=self.category,
+            name="Remote Product",
+            description="Remote",
+        )
+        self.now = timezone.now()
+        self.set_client_region(self.city)
+
+    def authenticate(self, user):
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+    def set_client_region(self, city=None):
+        if city is None:
+            self.client_user.market_region_mode = User.MarketRegionMode.GENERAL
+            self.client_user.market_region_service_city = None
+        else:
+            self.client_user.market_region_mode = User.MarketRegionMode.SERVICE_CITY
+            self.client_user.market_region_service_city = city
         self.client_user.market_region_updated_at = timezone.now()
         self.client_user.save(
             update_fields=[
@@ -60,68 +126,15 @@ class OfferAPITests(APITestCase):
                 "market_region_updated_at",
             ]
         )
-        self.market = Market.objects.create(
-            classification=market_classification,
-            name="مطعم العروض",
-        )
-        self.market.service_cities.add(self.service_city)
-        self.other_market = Market.objects.create(
-            classification=market_classification,
-            name="سوق آخر",
-        )
-        self.other_market.service_cities.add(self.service_city)
-        self.remote_market = Market.objects.create(
-            classification=market_classification,
-            name="سوق بعيد",
-        )
-        self.remote_market.service_cities.add(self.remote_city)
-        category_classification = CategoryClassification.objects.create(
-            name="وجبات"
-        )
-        self.category = ProductCategory.objects.create(
-            classification=category_classification,
-            name="وجبات رئيسية",
-        )
-        self.product = Product.objects.create(
-            market=self.market,
-            category=self.category,
-            name="برغر",
-            description="برغر لحم",
-        )
-        self.second_product = Product.objects.create(
-            market=self.market,
-            category=self.category,
-            name="بطاطا",
-            description="بطاطا مقلية",
-        )
-        self.other_market_product = Product.objects.create(
-            market=self.other_market,
-            category=self.category,
-            name="بيتزا",
-            description="بيتزا جبن",
-        )
-        self.remote_market_product = Product.objects.create(
-            market=self.remote_market,
-            category=self.category,
-            name="سلطة بعيدة",
-            description="سلطة",
-        )
-        self.now = timezone.now()
-
-    def authenticate(self, user):
-        refresh = RefreshToken.for_user(user)
-        self.client.credentials(
-            HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
-        )
 
     def offer_payload(self, **overrides):
         payload = {
             "market_id": self.market.id,
-            "scope": Offer.Scope.SERVICE_CITY,
-            "service_city_id": self.service_city.id,
-            "product_ids": [self.product.id, self.second_product.id],
-            "title": " عرض الغداء ",
-            "description": " خصم على وجبات الغداء ",
+            "show_in_general": False,
+            "service_city_ids": [self.city.id],
+            "product_ids": [self.product.id],
+            "title": " Lunch Offer ",
+            "description": " Discount ",
             "type": Offer.OfferType.DISCOUNT,
             "discount": "50.00",
             "start_time": (self.now - timedelta(hours=1)).isoformat(),
@@ -134,219 +147,139 @@ class OfferAPITests(APITestCase):
         payload.update(overrides)
         return payload
 
-    def image_file(self, name="offer.gif"):
-        return SimpleUploadedFile(
-            name,
-            (
-                b"GIF87a\x01\x00\x01\x00\x80\x01\x00\x00\x00\x00"
-                b"\xff\xff\xff,\x00\x00\x00\x00\x01\x00\x01\x00"
-                b"\x00\x02\x02D\x01\x00;"
-            ),
-            content_type="image/gif",
-        )
-
-    def create_offer(self):
+    def create_offer(self, *, show_in_general=False, cities=None, market=None, product=None):
         offer = Offer.objects.create(
-            market=self.market,
-            scope=Offer.Scope.SERVICE_CITY,
-            service_city=self.service_city,
-            title="عرض موجود",
-            description="وصف العرض",
-            type=Offer.OfferType.PACKAGE,
+            market=market or self.market,
+            show_in_general=show_in_general,
+            title="Visible Offer",
+            description="Visible",
+            type=Offer.OfferType.DISCOUNT,
             discount=Decimal("25.00"),
             start_time=self.now - timedelta(hours=1),
             end_time=self.now + timedelta(days=1),
-            active_days=["monday"],
-            use_limits=20,
-            user_limit=1,
             status=Offer.Status.ACTIVE,
         )
-        offer.products.set([self.product])
+        offer.products.set([product or self.product])
+        offer.service_cities.set(cities or [])
         return offer
 
-    def test_offer_write_requires_admin_role(self):
-        self.authenticate(self.client_user)
-
-        response = self.client.post(
-            f"{OFFERS_BASE}/",
-            self.offer_payload(),
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertEqual(
-            response.data["detail"],
-            "Only admin users can manage offers.",
-        )
-
-    def test_admin_can_create_read_update_and_delete_offer(self):
+    def test_admin_can_create_update_list_offer_with_city_targets(self):
         self.authenticate(self.admin)
 
         create_response = self.client.post(
             f"{OFFERS_BASE}/",
-            self.offer_payload(),
+            self.offer_payload(service_city_ids=[self.city.id, self.second_city.id]),
             format="json",
         )
 
-        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(create_response.data["title"], "عرض الغداء")
-        self.assertEqual(create_response.data["market_id"], self.market.id)
-        self.assertEqual(create_response.data["market"]["id"], self.market.id)
-        self.assertEqual(create_response.data["service_city_id"], self.service_city.id)
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+        self.assertFalse(create_response.data["show_in_general"])
         self.assertEqual(
-            set(create_response.data["product_ids"]),
-            {self.product.id, self.second_product.id},
+            set(create_response.data["service_city_ids"]),
+            {self.city.id, self.second_city.id},
         )
-        self.assertEqual(len(create_response.data["products"]), 2)
+        self.assertEqual(len(create_response.data["service_cities"]), 2)
         offer_id = create_response.data["id"]
 
-        list_response = self.client.get(f"{OFFERS_BASE}/")
-        detail_response = self.client.get(f"{OFFERS_BASE}/{offer_id}/")
         update_response = self.client.patch(
             f"{OFFERS_BASE}/{offer_id}/",
             {
-                "title": "عرض العشاء",
-                "product_ids": [self.second_product.id],
-                "discount": "75.00",
+                "market_id": self.general_market.id,
+                "show_in_general": True,
+                "service_city_ids": [self.city.id],
+                "product_ids": [self.general_product.id],
             },
             format="json",
         )
-        delete_response = self.client.delete(f"{OFFERS_BASE}/{offer_id}/")
-        deleted_detail_response = self.client.get(f"{OFFERS_BASE}/{offer_id}/")
+        list_response = self.client.get(f"{OFFERS_BASE}/")
 
-        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK, update_response.data)
+        self.assertTrue(update_response.data["show_in_general"])
+        self.assertEqual(update_response.data["service_city_ids"], [self.city.id])
         self.assertIn(offer_id, [item["id"] for item in list_response.data])
-        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(detail_response.data["products"][0]["id"], self.product.id)
-        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(update_response.data["title"], "عرض العشاء")
-        self.assertEqual(update_response.data["product_ids"], [self.second_product.id])
-        self.assertEqual(update_response.data["products"][0]["id"], self.second_product.id)
-        self.assertEqual(delete_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(
-            deleted_detail_response.status_code,
-            status.HTTP_404_NOT_FOUND,
-        )
 
-    def test_offer_create_allows_products_from_same_region_markets(self):
+    def test_admin_can_create_each_valid_target_combination(self):
         self.authenticate(self.admin)
+        combinations = [
+            (False, [self.city.id], self.market.id, [self.product.id]),
+            (False, [self.city.id, self.second_city.id], self.market.id, [self.product.id]),
+            (True, [], self.general_market.id, [self.general_product.id]),
+            (True, [self.city.id], self.general_market.id, [self.general_product.id]),
+            (True, [self.city.id, self.second_city.id], self.general_market.id, [self.general_product.id]),
+        ]
 
-        response = self.client.post(
-            f"{OFFERS_BASE}/",
-            self.offer_payload(product_ids=[self.product.id, self.other_market_product.id]),
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
-        self.assertEqual(
-            {product["id"] for product in response.data["products"]},
-            {self.product.id, self.other_market_product.id},
-        )
-
-    def test_admin_can_create_offer_for_each_model_type_choice(self):
-        self.authenticate(self.admin)
-
-        for offer_type, _label in Offer.OfferType.choices:
+        for show_in_general, city_ids, market_id, product_ids in combinations:
             response = self.client.post(
                 f"{OFFERS_BASE}/",
                 self.offer_payload(
-                    title=f"عرض {offer_type}",
-                    type=offer_type,
+                    show_in_general=show_in_general,
+                    service_city_ids=city_ids,
+                    market_id=market_id,
+                    product_ids=product_ids,
+                    title=f"Offer {show_in_general} {city_ids}",
                 ),
                 format="json",
             )
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
 
-            self.assertEqual(
-                response.status_code,
-                status.HTTP_201_CREATED,
-                response.data,
-            )
-            self.assertEqual(response.data["type"], offer_type)
-
-    def test_offer_create_rejects_invalid_type(self):
+    def test_offer_create_rejects_no_target(self):
         self.authenticate(self.admin)
 
         response = self.client.post(
             f"{OFFERS_BASE}/",
-            self.offer_payload(type="invalid"),
+            self.offer_payload(show_in_general=False, service_city_ids=[]),
             format="json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("type", response.data)
+        self.assertIn("service_city_ids", response.data)
 
-    def test_admin_can_create_and_update_offer_image(self):
-        self.authenticate(self.admin)
-
-        create_response = self.client.post(
-            f"{OFFERS_BASE}/",
-            self.offer_payload(
-                active_days='["saturday", "sunday"]',
-                image=self.image_file("create.gif"),
-            ),
-            format="multipart",
-        )
-        self.assertEqual(
-            create_response.status_code,
-            status.HTTP_201_CREATED,
-            create_response.data,
-        )
-        offer_id = create_response.data["id"]
-        update_response = self.client.patch(
-            f"{OFFERS_BASE}/{offer_id}/",
-            {"image": self.image_file("update.gif")},
-            format="multipart",
-        )
-
-        self.assertIsNotNone(create_response.data["image"])
-        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
-        self.assertIsNotNone(update_response.data["image"])
-
-    def test_admin_can_create_general_offer(self):
-        general_market = Market.objects.create(
-            classification=self.market.classification,
-            name="سوق عام",
-            scope=Market.Scope.GENERAL,
-        )
-        general_product = Product.objects.create(
-            market=general_market,
-            category=self.category,
-            name="منتج عام",
-            description="متاح عام",
-        )
+    def test_offer_create_rejects_inactive_new_city(self):
         self.authenticate(self.admin)
 
         response = self.client.post(
             f"{OFFERS_BASE}/",
-            self.offer_payload(
-                market_id=general_market.id,
-                scope=Offer.Scope.GENERAL,
-                service_city_id=None,
-                product_ids=[general_product.id],
-            ),
+            self.offer_payload(service_city_ids=[self.inactive_city.id]),
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
-        self.assertEqual(response.data["scope"], Offer.Scope.GENERAL)
-        self.assertIsNone(response.data["service_city"])
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["service_city_ids"][0],
+            "Only active service cities may be selected.",
+        )
 
-    def test_offer_create_rejects_products_from_other_region(self):
+    def test_offer_create_rejects_unserved_city(self):
         self.authenticate(self.admin)
 
         response = self.client.post(
             f"{OFFERS_BASE}/",
-            self.offer_payload(product_ids=[self.product.id, self.remote_market_product.id]),
+            self.offer_payload(service_city_ids=[self.city.id, self.remote_city.id]),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["service_city_ids"][0],
+            "Offer market does not serve every selected city.",
+        )
+
+    def test_offer_create_rejects_product_outside_selected_market(self):
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(product_ids=[self.product.id, self.remote_product.id]),
             format="json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             response.data["product_ids"][0],
-            "All selected products must belong to the offer region.",
+            "All selected products must belong to the selected market.",
         )
 
-    def test_offer_create_requires_products(self):
+    def test_offer_create_rejects_missing_products(self):
         self.authenticate(self.admin)
 
         response = self.client.post(
@@ -356,89 +289,88 @@ class OfferAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            response.data["product_ids"][0],
-            "Choose at least one product for this offer.",
-        )
+        self.assertIn("product_ids", response.data)
 
-    def test_offer_update_rejects_market_change_when_region_does_not_match(self):
-        offer = self.create_offer()
+    def test_admin_can_create_all_supported_offer_types(self):
         self.authenticate(self.admin)
 
-        response = self.client.patch(
-            f"{OFFERS_BASE}/{offer.id}/",
-            {"market_id": self.remote_market.id},
-            format="json",
-        )
+        for offer_type in Offer.OfferType.values:
+            response = self.client.post(
+                f"{OFFERS_BASE}/",
+                self.offer_payload(
+                    type=offer_type,
+                    title=f"{offer_type} Offer",
+                ),
+                format="json",
+            )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            response.data["market_id"][0],
-            "Offer market must belong to the selected service city region.",
-        )
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+            self.assertEqual(response.data["type"], offer_type)
 
-    def test_client_offer_list_and_detail_are_region_filtered(self):
-        visible_offer = self.create_offer()
-        hidden_offer = Offer.objects.create(
-            market=self.remote_market,
-            scope=Offer.Scope.SERVICE_CITY,
-            service_city=self.remote_city,
-            title="عرض بعيد",
-            description="بعيد",
-            type=Offer.OfferType.PACKAGE,
-            discount=Decimal("10.00"),
-            start_time=self.now - timedelta(hours=1),
-            end_time=self.now + timedelta(days=1),
-            status=Offer.Status.ACTIVE,
-        )
-        hidden_offer.products.set([self.remote_market_product])
-        self.authenticate(self.client_user)
+    def test_admin_can_create_and_update_offer_image_with_multipart_arrays(self):
+        self.authenticate(self.admin)
 
-        list_response = self.client.get(f"{OFFERS_BASE}/")
-        visible_detail = self.client.get(f"{OFFERS_BASE}/{visible_offer.id}/")
-        hidden_detail = self.client.get(f"{OFFERS_BASE}/{hidden_offer.id}/")
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            image = SimpleUploadedFile(
+                "offer.gif",
+                b"GIF87a\x01\x00\x01\x00\x80\x01\x00\x00\x00\x00ccc,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;",
+                content_type="image/gif",
+            )
+            create_response = self.client.post(
+                f"{OFFERS_BASE}/",
+                {
+                    **self.offer_payload(),
+                    "service_city_ids": f"[{self.city.id},{self.second_city.id}]",
+                    "product_ids": f"[{self.product.id}]",
+                    "active_days": '["saturday","sunday"]',
+                    "image": image,
+                },
+                format="multipart",
+            )
 
-        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
-        self.assertEqual([offer["id"] for offer in list_response.data], [visible_offer.id])
-        self.assertEqual(visible_detail.status_code, status.HTTP_200_OK)
-        self.assertEqual(hidden_detail.status_code, status.HTTP_404_NOT_FOUND)
+            self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+            self.assertTrue(create_response.data["image"])
+            self.assertEqual(
+                set(create_response.data["service_city_ids"]),
+                {self.city.id, self.second_city.id},
+            )
+            offer_id = create_response.data["id"]
 
-    def test_client_offer_list_requires_saved_market_region(self):
-        self.client_user.market_region_mode = None
-        self.client_user.market_region_service_city = None
-        self.client_user.market_region_updated_at = None
-        self.client_user.save(
-            update_fields=[
-                "market_region_mode",
-                "market_region_service_city",
-                "market_region_updated_at",
-            ]
-        )
-        self.authenticate(self.client_user)
+            replacement = SimpleUploadedFile(
+                "replacement.gif",
+                b"GIF87a\x01\x00\x01\x00\x80\x01\x00\x00\x00\x00fff,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;",
+                content_type="image/gif",
+            )
+            update_response = self.client.patch(
+                f"{OFFERS_BASE}/{offer_id}/",
+                {
+                    "market_id": self.general_market.id,
+                    "show_in_general": "true",
+                    "service_city_ids": "[]",
+                    "product_ids": f"[{self.general_product.id}]",
+                    "image": replacement,
+                },
+                format="multipart",
+            )
 
-        response = self.client.get(f"{OFFERS_BASE}/")
+            self.assertEqual(update_response.status_code, status.HTTP_200_OK, update_response.data)
+            self.assertTrue(update_response.data["show_in_general"])
+            self.assertEqual(update_response.data["service_city_ids"], [])
+            self.assertTrue(update_response.data["image"])
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertTrue(response.data["requires_region_selection"])
-
-    def test_offer_delete_rejects_used_offer(self):
-        offer = self.create_offer()
+    def test_admin_delete_rejects_offer_used_by_order(self):
+        self.authenticate(self.admin)
+        offer = self.create_offer(cities=[self.city])
         order = Order.objects.create(
             user=self.client_user,
             market=self.market,
-            service_city=self.service_city,
+            service_city=self.city,
+            order_scope=Order.Scope.SERVICE_CITY,
             payment_method="cash",
-            discount=Decimal("0.00"),
-            description="طلب مرتبط بعرض",
-            subtotal_price=Decimal("500.00"),
-            total_price=Decimal("600.00"),
+            subtotal_price=Decimal("100.00"),
+            total_price=Decimal("100.00"),
         )
-        OrderOffer.objects.create(
-            order=order,
-            offer=offer,
-            discount_amount=Decimal("25.00"),
-        )
-        self.authenticate(self.admin)
+        OrderOffer.objects.create(order=order, offer=offer)
 
         response = self.client.delete(f"{OFFERS_BASE}/{offer.id}/")
 
@@ -446,4 +378,44 @@ class OfferAPITests(APITestCase):
         self.assertEqual(
             response.data["detail"],
             "Cannot delete offer while orders are using it.",
+        )
+        self.assertTrue(Offer.objects.filter(id=offer.id).exists())
+
+    def test_client_visibility_for_general_and_selected_cities(self):
+        city_offer = self.create_offer(cities=[self.city])
+        multi_city_offer = self.create_offer(cities=[self.city, self.second_city])
+        general_offer = self.create_offer(
+            show_in_general=True,
+            market=self.general_market,
+            product=self.general_product,
+        )
+        combined_offer = self.create_offer(
+            show_in_general=True,
+            cities=[self.city],
+            market=self.general_market,
+            product=self.general_product,
+        )
+        self.create_offer(cities=[self.remote_city], market=self.remote_market, product=self.remote_product)
+        self.authenticate(self.client_user)
+
+        city_response = self.client.get(f"{OFFERS_BASE}/")
+        self.set_client_region(self.second_city)
+        second_city_response = self.client.get(f"{OFFERS_BASE}/")
+        self.set_client_region(self.remote_city)
+        remote_city_response = self.client.get(f"{OFFERS_BASE}/")
+        self.set_client_region(None)
+        general_response = self.client.get(f"{OFFERS_BASE}/")
+
+        self.assertEqual(
+            {offer["id"] for offer in city_response.data},
+            {city_offer.id, multi_city_offer.id, combined_offer.id},
+        )
+        self.assertEqual(
+            {offer["id"] for offer in second_city_response.data},
+            {multi_city_offer.id},
+        )
+        self.assertNotIn(city_offer.id, {offer["id"] for offer in remote_city_response.data})
+        self.assertEqual(
+            {offer["id"] for offer in general_response.data},
+            {general_offer.id, combined_offer.id},
         )

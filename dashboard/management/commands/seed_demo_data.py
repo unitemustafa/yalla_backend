@@ -939,8 +939,7 @@ class Command(BaseCommand):
             service_city = context["cities"].get(city_name) if city_name else None
             created = Offer.objects.create(
                 market=market,
-                scope=scope,
-                service_city=service_city,
+                show_in_general=scope == Market.Scope.GENERAL,
                 title=title,
                 description=f"{title} متاح ضمن بيانات العرض التجريبية.",
                 type=offer_type,
@@ -955,6 +954,7 @@ class Command(BaseCommand):
             created.products.set(
                 [context["products"][(market_name, name)] for name in product_names]
             )
+            created.service_cities.set([service_city] if service_city is not None else [])
             if with_image:
                 self._attach_image(created, "image", f"seed_offer_{created.id}.png")
             context["offers"][title] = created
@@ -966,7 +966,7 @@ class Command(BaseCommand):
             ["مياه معدنية", "تمر مصري فاخر", "زيت زيتون"],
             Offer.OfferType.FLASH,
             "15.00",
-            scope=Offer.Scope.GENERAL,
+            scope=Market.Scope.GENERAL,
             use_limits=100,
             user_limit=1,
             with_image=True,
@@ -977,7 +977,7 @@ class Command(BaseCommand):
             ["كرتونة رمضان", "باقة عناية"],
             Offer.OfferType.PACKAGE,
             "12.00",
-            scope=Offer.Scope.GENERAL,
+            scope=Market.Scope.GENERAL,
         )
         offer(
             "توصيل عام مخفض",
@@ -985,7 +985,7 @@ class Command(BaseCommand):
             ["قفة رمضان"],
             Offer.OfferType.DELIVERY,
             "5.00",
-            scope=Offer.Scope.GENERAL,
+            scope=Market.Scope.GENERAL,
         )
         offer(
             "باقة العائلة",
@@ -1078,7 +1078,7 @@ class Command(BaseCommand):
             Offer.OfferType.DISCOUNT,
             "10.00",
             status=Offer.Status.INACTIVE,
-            scope=Offer.Scope.GENERAL,
+            scope=Market.Scope.GENERAL,
         )
         offer(
             "عرض مطبخ غير نشط",
@@ -1105,7 +1105,7 @@ class Command(BaseCommand):
             Offer.OfferType.PACKAGE,
             "20.00",
             status=Offer.Status.EXPIRED,
-            scope=Offer.Scope.GENERAL,
+            scope=Market.Scope.GENERAL,
             starts=-30,
             ends=-2,
         )

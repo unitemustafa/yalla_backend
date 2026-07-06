@@ -186,16 +186,12 @@ def region_filtered_offer_queryset(queryset, user):
         return queryset.none()
 
     if selection["mode"] == User.MarketRegionMode.GENERAL:
-        return queryset.filter(
-            scope=Offer.Scope.GENERAL,
-            service_city__isnull=True,
-        )
+        return queryset.filter(show_in_general=True)
 
     return queryset.filter(
-        scope=Offer.Scope.SERVICE_CITY,
-        service_city_id=selection["service_city"]["id"],
-        service_city__is_active=True,
-    )
+        service_cities__id=selection["service_city"]["id"],
+        service_cities__is_active=True,
+    ).distinct()
 
 
 def visible_offer_queryset(user):
@@ -241,16 +237,11 @@ def product_matches_region(product, selection):
 
 def offer_matches_region(offer, selection):
     if selection["mode"] == User.MarketRegionMode.GENERAL:
-        return (
-            offer.scope == Offer.Scope.GENERAL
-            and offer.service_city_id is None
-        )
-    return (
-        offer.scope == Offer.Scope.SERVICE_CITY
-        and offer.service_city_id == selection["service_city"]["id"]
-        and offer.service_city is not None
-        and offer.service_city.is_active
-    )
+        return offer.show_in_general
+    return offer.service_cities.filter(
+        pk=selection["service_city"]["id"],
+        is_active=True,
+    ).exists()
 
 
 def order_region_validation_error(user, variants, offers):
@@ -273,12 +264,11 @@ def order_region_validation_error(user, variants, offers):
                 "market",
                 "market__classification",
             ).prefetch_related("market__service_cities")
-            if offer.scope == Offer.Scope.SERVICE_CITY or offer.service_city_id:
+            if not offer.show_in_general:
                 errors["offers"] = SERVICE_CITY_OFFER_IN_GENERAL_MESSAGE
                 break
             if (
-                offer.scope != Offer.Scope.GENERAL
-                or offer.market.scope != Market.Scope.GENERAL
+                offer.market.scope != Market.Scope.GENERAL
                 or any(
                     product.market.scope != Market.Scope.GENERAL
                     for product in offer_products
@@ -296,17 +286,8 @@ def order_region_validation_error(user, variants, offers):
             "market",
             "market__classification",
         ).prefetch_related("market__service_cities")
-        if offer.scope == Offer.Scope.GENERAL or offer.service_city_id is None:
+        if not offer_matches_region(offer, selection):
             errors["offers"] = GENERAL_OFFER_IN_SERVICE_CITY_MESSAGE
-            break
-        if (
-            offer.market.scope == Market.Scope.GENERAL
-            or any(
-                product.market.scope == Market.Scope.GENERAL
-                for product in offer_products
-            )
-        ):
-            errors["offers"] = MIXED_MARKET_SCOPE_MESSAGE
             break
         if not offer_matches_region(offer, selection) or any(
             not product_matches_region(product, selection)

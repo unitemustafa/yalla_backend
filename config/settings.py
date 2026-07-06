@@ -88,8 +88,8 @@ WSGI_APPLICATION = 'config.wsgi.application'
 DATABASES = {
     "default": dj_database_url.config(
         default=os.environ.get("DATABASE_URL"),
-        conn_max_age=600,
-        ssl_require=True,
+        conn_max_age=0 if DEBUG else 600,
+        ssl_require=not DEBUG,
     )
 }
 
@@ -136,7 +136,11 @@ CLOUDINARY_STORAGE = {
 
 STORAGES = {
     "default": {
-        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+        "BACKEND": (
+            "django.core.files.storage.FileSystemStorage"
+            if DEBUG
+            else "cloudinary_storage.storage.MediaCloudinaryStorage"
+        ),
     },
     "staticfiles": {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",

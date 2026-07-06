@@ -602,7 +602,7 @@ class Command(BaseCommand):
             (
                 "عرض الفواكه الطازجة",
                 "سوق يلا الطازج",
-                Offer.Scope.GENERAL,
+                "general",
                 Offer.OfferType.DISCOUNT,
                 "10.00",
                 ["تفاح أحمر", "موز"],
@@ -610,7 +610,7 @@ class Command(BaseCommand):
             (
                 "عرض عشاء العائلة",
                 "مطبخ النيل العائلي",
-                Offer.Scope.SERVICE_CITY,
+                "service_city",
                 Offer.OfferType.PACKAGE,
                 "15.00",
                 ["كشري بالدجاج", "شوربة خضار"],
@@ -618,7 +618,7 @@ class Command(BaseCommand):
             (
                 "أساسيات الانتعاش",
                 "سوق يلا الطازج",
-                Offer.Scope.GENERAL,
+                "general",
                 Offer.OfferType.DELIVERY,
                 "8.00",
                 ["مياه معدنية", "عصير برتقال"],
@@ -626,7 +626,7 @@ class Command(BaseCommand):
             (
                 "غداء القاهرة السريع",
                 "مطبخ النيل العائلي",
-                Offer.Scope.SERVICE_CITY,
+                "service_city",
                 Offer.OfferType.FLASH,
                 "12.00",
                 ["دجاج مشوي", "شوربة خضار"],
@@ -634,21 +634,21 @@ class Command(BaseCommand):
             (
                 "عرض المخبزة الصباحي",
                 "مخبزة الجيزة الذهبية",
-                Offer.Scope.SERVICE_CITY,
+                "service_city",
                 Offer.OfferType.FLASH,
                 "12.00",
                 ["عيش بلدي", "كرواسون بالشوكولاتة"],
             ),
-            ("أطباق إسكندرية", "نكهة إسكندرية", Offer.Scope.SERVICE_CITY, Offer.OfferType.PACKAGE, "18.00", ["مكرونة إسكندراني", "طاجن خضار"]),
-            ("حلويات البحر", "حلويات البحر", Offer.Scope.SERVICE_CITY, Offer.OfferType.DISCOUNT, "10.00", ["بقلاوة", "بسبوسة بالعسل"]),
-            ("أسبوع المنتجات العضوية", "خيرات المنصورة", Offer.Scope.SERVICE_CITY, Offer.OfferType.ANNOUNCEMENT, "5.00", ["عسل مصري", "زيت زيتون"]),
-            ("توصيل مخبزة الدلتا", "مخبزة الدلتا", Offer.Scope.SERVICE_CITY, Offer.OfferType.DELIVERY, "7.00", ["خبز كامل", "بريوش"]),
+            ("أطباق إسكندرية", "نكهة إسكندرية", "service_city", Offer.OfferType.PACKAGE, "18.00", ["مكرونة إسكندراني", "طاجن خضار"]),
+            ("حلويات البحر", "حلويات البحر", "service_city", Offer.OfferType.DISCOUNT, "10.00", ["بقلاوة", "بسبوسة بالعسل"]),
+            ("أسبوع المنتجات العضوية", "خيرات المنصورة", "service_city", Offer.OfferType.ANNOUNCEMENT, "5.00", ["عسل مصري", "زيت زيتون"]),
+            ("توصيل مخبزة الدلتا", "مخبزة الدلتا", "service_city", Offer.OfferType.DELIVERY, "7.00", ["خبز كامل", "بريوش"]),
         ]
         offers = {}
         for title, market_name, scope, offer_type, discount, product_names in definitions:
             market = markets[market_name]
             service_city = None
-            if scope == Offer.Scope.SERVICE_CITY:
+            if scope == "service_city":
                 service_city = market.service_cities.filter(
                     is_active=True,
                 ).order_by("id").first()
@@ -656,8 +656,7 @@ class Command(BaseCommand):
                 market=market,
                 title=title,
                 defaults={
-                    "scope": scope,
-                    "service_city": service_city,
+                    "show_in_general": scope == "general",
                     "description": f"عرض تجريبي: {title}.",
                     "type": offer_type,
                     "discount": Decimal(discount),
@@ -670,6 +669,7 @@ class Command(BaseCommand):
                 },
             )
             offer.products.set([products[name] for name in product_names])
+            offer.service_cities.set([service_city] if service_city is not None else [])
             offers[title] = offer
         return offers
 

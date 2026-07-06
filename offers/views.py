@@ -26,11 +26,11 @@ class OfferListCreateView(APIView):
         return (
             Offer.objects.select_related(
                 "market__classification",
-                "service_city",
             )
             .prefetch_related(
                 "market__delivery_areas",
                 "market__service_cities",
+                "service_cities",
                 "products",
             )
             .order_by("-created_at", "-id")
@@ -52,6 +52,7 @@ class OfferListCreateView(APIView):
             .prefetch_related(
                 "market__service_cities",
                 "market__delivery_areas",
+                "service_cities",
                 "products__category__classification",
                 "products__market__classification",
                 "products__market__service_cities",
@@ -92,11 +93,11 @@ class OfferDetailView(APIView):
         return (
             Offer.objects.select_related(
                 "market__classification",
-                "service_city",
             )
             .prefetch_related(
                 "market__delivery_areas",
                 "market__service_cities",
+                "service_cities",
                 "products",
             )
         )
@@ -114,6 +115,7 @@ class OfferDetailView(APIView):
                 .prefetch_related(
                     "market__service_cities",
                     "market__delivery_areas",
+                    "service_cities",
                     "products__category__classification",
                     "products__market__classification",
                     "products__market__service_cities",

@@ -250,6 +250,7 @@ class HomeView(APIView):
             .prefetch_related(
                 "market__service_cities",
                 "market__delivery_areas",
+                "service_cities",
                 Prefetch(
                     "products",
                     queryset=Product.objects.filter(

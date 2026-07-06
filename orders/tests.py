@@ -154,24 +154,24 @@ class OrderAPITests(APITestCase):
         now = timezone.now()
         self.offer = Offer.objects.create(
             market=self.market,
-            scope=Offer.Scope.SERVICE_CITY,
-            service_city=self.service_city,
+            show_in_general=False,
             title="Lunch",
             discount=Decimal("10.00"),
             start_time=now - timedelta(hours=1),
             end_time=now + timedelta(hours=1),
         )
         self.offer.products.set([self.product])
+        self.offer.service_cities.set([self.service_city])
         self.second_offer = Offer.objects.create(
             market=self.second_market,
-            scope=Offer.Scope.SERVICE_CITY,
-            service_city=self.service_city,
+            show_in_general=False,
             title="Pizza Deal",
             discount=Decimal("20.00"),
             start_time=now - timedelta(hours=1),
             end_time=now + timedelta(hours=1),
         )
         self.second_offer.products.set([self.second_product])
+        self.second_offer.service_cities.set([self.service_city])
         token = RefreshToken.for_user(self.admin).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
@@ -197,9 +197,9 @@ class OrderAPITests(APITestCase):
         self.market.save(update_fields=["scope"])
         self.market.service_cities.clear()
         self.market.delivery_areas.clear()
-        self.offer.scope = Offer.Scope.GENERAL
-        self.offer.service_city = None
-        self.offer.save(update_fields=["scope", "service_city"])
+        self.offer.show_in_general = True
+        self.offer.save(update_fields=["show_in_general"])
+        self.offer.service_cities.clear()
 
     def create_general_address(self, **kwargs):
         data = {
@@ -1183,9 +1183,9 @@ class OrderAPITests(APITestCase):
         self.market.save(update_fields=["scope"])
         self.market.service_cities.clear()
         self.market.delivery_areas.clear()
-        self.offer.scope = Offer.Scope.GENERAL
-        self.offer.service_city = None
-        self.offer.save(update_fields=["scope", "service_city"])
+        self.offer.show_in_general = True
+        self.offer.save(update_fields=["show_in_general"])
+        self.offer.service_cities.clear()
         general_address = Address.objects.create(
             user=self.customer,
             name="General Home",

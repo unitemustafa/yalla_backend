@@ -58,8 +58,8 @@ class OrderPreviewOfferSerializer(serializers.Serializer):
     offer_id = serializers.PrimaryKeyRelatedField(
         queryset=Offer.objects.select_related(
             "market",
-            "service_city",
         ).prefetch_related(
+            "service_cities",
             "products__variants",
             "products__market__service_cities",
         ),
@@ -1489,7 +1489,7 @@ class OrderSerializer(serializers.ModelSerializer):
         if order_scope == Order.Scope.GENERAL:
             return market.scope == Market.Scope.GENERAL
         return (
-            market.scope == Market.Scope.SERVICE_CITY
+            market.scope in [Market.Scope.GENERAL, Market.Scope.SERVICE_CITY]
             and service_city is not None
             and market.service_cities.filter(
                 pk=service_city.pk,
@@ -1499,13 +1499,15 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def _offer_matches_order_scope(self, offer, order_scope, service_city):
         if order_scope == Order.Scope.GENERAL:
-            if offer.scope != Offer.Scope.GENERAL or offer.service_city_id is not None:
+            if not offer.show_in_general:
                 return False
         elif order_scope == Order.Scope.SERVICE_CITY:
             if (
                 service_city is None
-                or offer.scope != Offer.Scope.SERVICE_CITY
-                or offer.service_city_id != service_city.id
+                or not offer.service_cities.filter(
+                    pk=service_city.id,
+                    is_active=True,
+                ).exists()
             ):
                 return False
         else:
@@ -1535,13 +1537,17 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def _offer_scope_error_message(self, offer, order_scope, service_city):
         if order_scope == Order.Scope.GENERAL:
-            if offer.scope == Offer.Scope.SERVICE_CITY or offer.service_city_id:
+            if not offer.show_in_general:
                 return SERVICE_CITY_OFFER_IN_GENERAL_MESSAGE
             return MIXED_MARKET_SCOPE_MESSAGE
-        if offer.scope == Offer.Scope.GENERAL or offer.service_city_id is None:
+        if (
+            service_city is None
+            or not offer.service_cities.filter(
+                pk=service_city.id,
+                is_active=True,
+            ).exists()
+        ):
             return GENERAL_OFFER_IN_SERVICE_CITY_MESSAGE
-        if offer.market.scope == Market.Scope.GENERAL:
-            return MIXED_MARKET_SCOPE_MESSAGE
         return MIXED_SERVICE_CITY_MARKETS_MESSAGE
 
     @staticmethod

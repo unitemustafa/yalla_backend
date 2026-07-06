@@ -755,8 +755,7 @@ class HomeAPITests(APITestCase):
         )
         general_offer = Offer.objects.create(
             market=general_market,
-            scope=Offer.Scope.GENERAL,
-            service_city=None,
+            show_in_general=True,
             title="General Offer",
             description="General offer",
             type=Offer.OfferType.DISCOUNT,
@@ -1713,8 +1712,6 @@ class HomeAPITests(APITestCase):
     def _create_offer(self, title, market, product, now):
         offer = Offer.objects.create(
             market=market,
-            scope=Offer.Scope.SERVICE_CITY,
-            service_city=market.service_cities.filter(is_active=True).first(),
             title=title,
             description=f"Description for {title}",
             type=Offer.OfferType.DISCOUNT,
@@ -1724,4 +1721,5 @@ class HomeAPITests(APITestCase):
             status=Offer.Status.ACTIVE,
         )
         offer.products.add(product)
+        offer.service_cities.set(market.service_cities.filter(is_active=True))
         return offer
