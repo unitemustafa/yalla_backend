@@ -139,6 +139,43 @@ class DashboardOverviewAPITests(APITestCase):
         )
         return order
 
+    def create_section_order(
+        self,
+        *,
+        user,
+        market,
+        order_status,
+        total,
+        created_at,
+        sections,
+    ):
+        order = self.create_order(
+            user=user,
+            market=market,
+            order_status=order_status,
+            total=total,
+            created_at=created_at,
+        )
+        for index, section_data in enumerate(sections):
+            section = OrderMarketSection.objects.create(
+                order=order,
+                market=section_data["market"],
+                subtotal_price=section_data["subtotal"],
+                discount=section_data.get("discount", Decimal("0.00")),
+                sort_order=index,
+            )
+            OrderItem.objects.bulk_create(
+                OrderItem(
+                    order=order,
+                    section=section,
+                    variant=variant,
+                    quantity=quantity,
+                    unit_price=unit_price,
+                )
+                for variant, quantity, unit_price in section_data.get("items", ())
+            )
+        return order
+
     def seed_dashboard_orders(self):
         self.create_order(
             user=self.returning_user,
@@ -231,7 +268,7 @@ class DashboardOverviewAPITests(APITestCase):
         self.assertEqual(response.data["active_orders"], [])
         self.assertEqual(response.data["top_shops"], [])
 
-    def test_overview_aggregates_inclusive_range_and_rankings(self):
+    def test_overview_uses_to_day_for_orders_and_full_period_for_revenue_and_products(self):
         first, last, older_active, newer_active = self.seed_dashboard_orders()
         self.client.force_authenticate(self.admin)
 
@@ -247,10 +284,10 @@ class DashboardOverviewAPITests(APITestCase):
         self.assertEqual(
             response.data["orders"],
             {
-                "total": 5,
-                "completed": 2,
-                "incomplete": 3,
-                "completion_rate": 40.0,
+                "total": 1,
+                "completed": 1,
+                "incomplete": 0,
+                "completion_rate": 100.0,
             },
         )
         self.assertEqual(
@@ -277,6 +314,162 @@ class DashboardOverviewAPITests(APITestCase):
         self.assertEqual(response.data["top_shops"][0]["revenue"], "300.00")
         self.assertEqual(response.data["top_shops"][0]["zone"], "Algiers")
         self.assertEqual(response.data["top_shops"][0]["average_items_per_order"], 3.0)
+
+    def test_active_orders_include_in_progress_statuses_and_exclude_terminal_statuses(self):
+        picked_up = self.create_order(
+            user=self.client_user,
+            market=self.main_market,
+            order_status=Order.Status.PICKED_UP,
+            total=Decimal("40.00"),
+            created_at=self.at("2026-05-12T10:00:00"),
+        )
+        on_the_way = self.create_order(
+            user=self.client_user,
+            market=self.main_market,
+            order_status=Order.Status.ON_THE_WAY,
+            total=Decimal("50.00"),
+            created_at=self.at("2026-05-12T11:00:00"),
+        )
+        for terminal_status in (
+            Order.Status.DELIVERED,
+            Order.Status.FAILED_DELIVERY,
+            Order.Status.CANCELLED,
+        ):
+            self.create_order(
+                user=self.client_user,
+                market=self.main_market,
+                order_status=terminal_status,
+                total=Decimal("60.00"),
+                created_at=self.at("2026-05-12T12:00:00"),
+            )
+        self.client.force_authenticate(self.admin)
+
+        response = self.request_overview("2026-05-01", "2026-05-31")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        active_ids = {item["id"] for item in response.data["active_orders"]}
+        self.assertEqual(active_ids, {picked_up.id, on_the_way.id})
+
+    def test_active_orders_return_real_number_and_multi_market_fields(self):
+        order = self.create_section_order(
+            user=self.client_user,
+            market=self.main_market,
+            order_status=Order.Status.ON_THE_WAY,
+            total=Decimal("120.00"),
+            created_at=self.at("2026-05-14T09:00:00"),
+            sections=(
+                {
+                    "market": self.second_market,
+                    "subtotal": Decimal("60.00"),
+                    "items": ((self.juice_variant, 1, Decimal("50.00")),),
+                },
+                {
+                    "market": self.main_market,
+                    "subtotal": Decimal("60.00"),
+                    "items": ((self.apples_small, 1, Decimal("100.00")),),
+                },
+            ),
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.request_overview("2026-05-01", "2026-05-31")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        active_order = response.data["active_orders"][0]
+        self.assertEqual(active_order["id"], order.id)
+        self.assertEqual(active_order["number"], f"YM-20260514-{order.id:06d}")
+        self.assertEqual(active_order["market_count"], 2)
+        self.assertEqual(active_order["market_names_summary"], "Second Market, Yalla Market - Main")
+        self.assertTrue(active_order["is_multi_market"])
+
+    def test_active_orders_fall_back_to_legacy_market_without_sections(self):
+        order = self.create_order(
+            user=self.client_user,
+            market=self.main_market,
+            order_status=Order.Status.PENDING,
+            total=Decimal("20.00"),
+            created_at=self.at("2026-05-15T09:00:00"),
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.request_overview("2026-05-01", "2026-05-31")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        active_order = response.data["active_orders"][0]
+        self.assertEqual(active_order["id"], order.id)
+        self.assertEqual(active_order["market_count"], 1)
+        self.assertEqual(active_order["market_names_summary"], "Yalla Market - Main")
+        self.assertFalse(active_order["is_multi_market"])
+
+    def test_top_shops_attribute_multi_market_sections_to_their_own_markets(self):
+        self.create_section_order(
+            user=self.client_user,
+            market=self.main_market,
+            order_status=Order.Status.DELIVERED,
+            total=Decimal("250.00"),
+            created_at=self.at("2026-06-03T10:00:00"),
+            sections=(
+                {
+                    "market": self.main_market,
+                    "subtotal": Decimal("120.00"),
+                    "discount": Decimal("20.00"),
+                    "items": ((self.apples_small, 2, Decimal("100.00")),),
+                },
+                {
+                    "market": self.second_market,
+                    "subtotal": Decimal("70.00"),
+                    "discount": Decimal("10.00"),
+                    "items": ((self.juice_variant, 3, Decimal("50.00")),),
+                },
+            ),
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.request_overview("2026-06-01", "2026-06-30")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        shops = {shop["market_id"]: shop for shop in response.data["top_shops"]}
+        self.assertEqual(shops[self.main_market.id]["orders_count"], 1)
+        self.assertEqual(shops[self.main_market.id]["revenue"], "100.00")
+        self.assertEqual(shops[self.main_market.id]["average_items_per_order"], 2.0)
+        self.assertEqual(shops[self.second_market.id]["orders_count"], 1)
+        self.assertEqual(shops[self.second_market.id]["revenue"], "60.00")
+        self.assertEqual(shops[self.second_market.id]["average_items_per_order"], 3.0)
+
+    def test_top_shops_include_legacy_orders_without_double_counting_sections(self):
+        self.create_order(
+            user=self.client_user,
+            market=self.second_market,
+            order_status=Order.Status.DELIVERED,
+            total=Decimal("80.00"),
+            created_at=self.at("2026-06-05T10:00:00"),
+            items=((self.juice_variant, 4, Decimal("20.00")),),
+        )
+        self.create_section_order(
+            user=self.client_user,
+            market=self.second_market,
+            order_status=Order.Status.DELIVERED,
+            total=Decimal("500.00"),
+            created_at=self.at("2026-06-06T10:00:00"),
+            sections=(
+                {
+                    "market": self.main_market,
+                    "subtotal": Decimal("100.00"),
+                    "items": ((self.apples_small, 2, Decimal("50.00")),),
+                },
+            ),
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.request_overview("2026-06-01", "2026-06-30")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        shops = {shop["market_id"]: shop for shop in response.data["top_shops"]}
+        self.assertEqual(shops[self.second_market.id]["orders_count"], 1)
+        self.assertEqual(shops[self.second_market.id]["revenue"], "80.00")
+        self.assertEqual(shops[self.second_market.id]["average_items_per_order"], 4.0)
+        self.assertEqual(shops[self.main_market.id]["orders_count"], 1)
+        self.assertEqual(shops[self.main_market.id]["revenue"], "100.00")
 
     def test_overview_query_count_is_bounded(self):
         self.seed_dashboard_orders()

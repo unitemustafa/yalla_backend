@@ -65,6 +65,9 @@ class ActiveOrderSerializer(serializers.Serializer):
     total = serializers.DecimalField(max_digits=20, decimal_places=2)
     status = serializers.CharField()
     created_at = serializers.DateTimeField()
+    market_count = serializers.IntegerField()
+    market_names_summary = serializers.CharField()
+    is_multi_market = serializers.BooleanField()
 
 
 class TopShopSerializer(serializers.Serializer):
