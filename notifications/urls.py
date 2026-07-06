@@ -1,6 +1,8 @@
 from django.urls import path
 
 from .views import (
+    NotificationClearReadView,
+    NotificationDeleteView,
     NotificationListView,
     NotificationMarkAllReadView,
     NotificationReadView,
@@ -9,6 +11,16 @@ from .views import (
 
 urlpatterns = [
     path("", NotificationListView.as_view(), name="notification-list"),
+    path(
+        "clear-read/",
+        NotificationClearReadView.as_view(),
+        name="notification-clear-read",
+    ),
+    path(
+        "<int:notification_id>/",
+        NotificationDeleteView.as_view(),
+        name="notification-delete",
+    ),
     path(
         "<int:notification_id>/read/",
         NotificationReadView.as_view(),

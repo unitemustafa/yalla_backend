@@ -1,3 +1,4 @@
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -88,6 +89,31 @@ class NotificationReadView(APIView):
         return Response(NotificationSerializer(notification).data)
 
 
+class NotificationDeleteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, notification_id):
+        notification = visible_notifications(request.user).filter(
+            pk=notification_id,
+        ).first()
+        if notification is None:
+            return Response(
+                {"detail": "Notification not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if notification.is_blocking and not notification.is_resolved:
+            return Response(
+                {
+                    "detail": (
+                        "Unresolved blocking notifications cannot be deleted."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        notification.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class NotificationMarkAllReadView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -99,6 +125,19 @@ class NotificationMarkAllReadView(APIView):
             updated_at=now,
         )
         return Response({"marked_read": count})
+
+
+class NotificationClearReadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        deleted_count, _ = (
+            visible_notifications(request.user)
+            .filter(is_read=True)
+            .filter(Q(is_blocking=False) | Q(is_resolved=True))
+            .delete()
+        )
+        return Response({"deleted_count": deleted_count})
 
 
 class NotificationUnreadCountView(APIView):

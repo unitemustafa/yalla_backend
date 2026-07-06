@@ -1,15 +1,18 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from locations.models import ServiceCity
+from catalog.models import CategoryClassification, Product, ProductCategory, ProductVariant
+from locations.models import Address, DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
 from orders.models import Order
 
 from .models import Notification
+from .services import create_new_order_review_notification
 
 User = get_user_model()
 
@@ -41,15 +44,62 @@ class NotificationAPITests(APITestCase):
             name="Notification City",
             delivery_price=Decimal("25.00"),
         )
+        self.city = city
+        self.delivery_area = DeliveryArea.objects.create(
+            service_city=city,
+            name="Notification Area",
+            center_latitude=Decimal("36.7525000"),
+            center_longitude=Decimal("3.0420000"),
+            radius_km=Decimal("5.00"),
+            delivery_price=Decimal("25.00"),
+        )
+        self.address = Address.objects.create(
+            user=self.customer,
+            name="Home",
+            latitude=Decimal("36.7525000"),
+            longitude=Decimal("3.0420000"),
+            service_city=city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+            is_default=True,
+        )
+        self.customer.market_region_mode = User.MarketRegionMode.SERVICE_CITY
+        self.customer.market_region_service_city = city
+        self.customer.market_region_updated_at = timezone.now()
+        self.customer.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
         classification = MarketClassification.objects.create(name="Notifications")
-        market = Market.objects.create(
+        self.market = Market.objects.create(
             classification=classification,
             name="Notification Market",
         )
-        market.service_cities.add(city)
+        self.market.service_cities.add(city)
+        self.market.delivery_areas.add(self.delivery_area)
+        category_classification = CategoryClassification.objects.create(
+            name="Notification Products",
+        )
+        category = ProductCategory.objects.create(
+            classification=category_classification,
+            name="Main",
+        )
+        product = Product.objects.create(
+            market=self.market,
+            category=category,
+            name="Notification Product",
+        )
+        self.variant = ProductVariant.objects.create(
+            product=product,
+            price=Decimal("100.00"),
+            sku="NOTIFY-1",
+        )
         self.order = Order.objects.create(
             user=self.customer,
-            market=market,
+            market=self.market,
             service_city=city,
             payment_method="cash",
             subtotal_price=Decimal("100.00"),
@@ -75,6 +125,19 @@ class NotificationAPITests(APITestCase):
     def authenticate(self, user):
         token = RefreshToken.for_user(user).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    def create_client_order_requiring_review(self):
+        self.authenticate(self.customer)
+        response = self.client.post(
+            "/api/v1/orders/create/",
+            {
+                "payment_method": "cash_on_delivery",
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        return Order.objects.get(pk=response.data[0]["id"])
 
     def test_admin_can_filter_blocking_order_review_notifications(self):
         self.authenticate(self.admin)
@@ -125,3 +188,250 @@ class NotificationAPITests(APITestCase):
         self.admin_notification.refresh_from_db()
         self.assertTrue(self.courier_notification.is_read)
         self.assertFalse(self.admin_notification.is_read)
+
+    def test_order_review_workflow_creates_single_blocking_notification(self):
+        order = self.create_client_order_requiring_review()
+
+        notification = Notification.objects.get(
+            order=order,
+            audience=Notification.Audience.ADMIN,
+            type=Notification.Type.NEW_ORDER_REVIEW,
+        )
+        self.assertTrue(notification.is_blocking)
+        self.assertFalse(notification.is_resolved)
+        self.assertFalse(notification.is_read)
+        self.assertEqual(order.review_status, Order.ReviewStatus.PENDING_REVIEW)
+
+        create_new_order_review_notification(order)
+
+        unresolved_count = Notification.objects.filter(
+            order=order,
+            audience=Notification.Audience.ADMIN,
+            type=Notification.Type.NEW_ORDER_REVIEW,
+            is_blocking=True,
+            is_resolved=False,
+        ).count()
+        self.assertEqual(unresolved_count, 1)
+
+    def test_unresolved_order_review_notification_blocks_delete_until_approval(self):
+        order = self.create_client_order_requiring_review()
+        notification = Notification.objects.get(
+            order=order,
+            audience=Notification.Audience.ADMIN,
+            type=Notification.Type.NEW_ORDER_REVIEW,
+        )
+        self.authenticate(self.admin)
+
+        blocked_delete = self.client.delete(f"/api/v1/notifications/{notification.id}/")
+        notification.refresh_from_db()
+
+        self.assertEqual(blocked_delete.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(
+            blocked_delete.data["detail"],
+            "Unresolved blocking notifications cannot be deleted.",
+        )
+        self.assertFalse(notification.is_resolved)
+        self.assertTrue(Notification.objects.filter(pk=notification.pk).exists())
+
+        approval_response = self.client.post(
+            f"/api/v1/admin/orders/{order.id}/approve/",
+            format="json",
+        )
+        self.assertEqual(approval_response.status_code, status.HTTP_200_OK)
+        order.refresh_from_db()
+        notification.refresh_from_db()
+        self.assertEqual(order.review_status, Order.ReviewStatus.APPROVED)
+        self.assertNotEqual(order.status, Order.Status.PENDING)
+        self.assertTrue(notification.is_resolved)
+        self.assertTrue(notification.is_read)
+        self.assertIsNotNone(notification.resolved_at)
+        self.assertIsNotNone(notification.read_at)
+
+        allowed_delete = self.client.delete(f"/api/v1/notifications/{notification.id}/")
+        self.assertEqual(allowed_delete.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Notification.objects.filter(pk=notification.pk).exists())
+
+    def test_order_rejection_resolves_review_and_keeps_client_notification(self):
+        order = self.create_client_order_requiring_review()
+        review_notification = Notification.objects.get(
+            order=order,
+            audience=Notification.Audience.ADMIN,
+            type=Notification.Type.NEW_ORDER_REVIEW,
+        )
+        self.authenticate(self.admin)
+
+        reject_response = self.client.post(
+            f"/api/v1/admin/orders/{order.id}/reject/",
+            {"rejection_reason": "Out of stock"},
+            format="json",
+        )
+
+        self.assertEqual(reject_response.status_code, status.HTTP_200_OK)
+        order.refresh_from_db()
+        review_notification.refresh_from_db()
+        self.assertEqual(order.review_status, Order.ReviewStatus.REJECTED)
+        self.assertEqual(order.status, Order.Status.CANCELLED)
+        self.assertTrue(review_notification.is_resolved)
+        self.assertTrue(review_notification.is_read)
+        self.assertIsNotNone(review_notification.resolved_at)
+        self.assertIsNotNone(review_notification.read_at)
+        self.assertTrue(
+            Notification.objects.filter(
+                order=order,
+                audience=Notification.Audience.CLIENT,
+                type=Notification.Type.ORDER_REJECTED,
+                recipient=self.customer,
+                is_blocking=False,
+                is_read=False,
+            ).exists()
+        )
+
+        delete_response = self.client.delete(
+            f"/api/v1/notifications/{review_notification.id}/",
+        )
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_order_cancellation_resolves_review_notification(self):
+        order = self.create_client_order_requiring_review()
+        notification = Notification.objects.get(
+            order=order,
+            audience=Notification.Audience.ADMIN,
+            type=Notification.Type.NEW_ORDER_REVIEW,
+        )
+        self.authenticate(self.admin)
+
+        cancel_response = self.client.delete(f"/api/v1/orders/{order.id}/")
+
+        self.assertEqual(cancel_response.status_code, status.HTTP_200_OK)
+        order.refresh_from_db()
+        notification.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.CANCELLED)
+        self.assertTrue(notification.is_resolved)
+        self.assertTrue(notification.is_read)
+        self.assertIsNotNone(notification.resolved_at)
+        self.assertIsNotNone(notification.read_at)
+        delete_response = self.client.delete(f"/api/v1/notifications/{notification.id}/")
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_unauthenticated_delete_is_rejected(self):
+        self.client.credentials()
+
+        response = self.client.delete(f"/api/v1/notifications/{self.admin_notification.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_visible_normal_notification_can_be_deleted(self):
+        normal_notification = Notification.objects.create(
+            audience=Notification.Audience.ADMIN,
+            type=Notification.Type.ORDER_ASSIGNED,
+            title="Normal",
+            message="Normal visible notification",
+            order=self.order,
+            is_read=True,
+        )
+        self.authenticate(self.admin)
+
+        response = self.client.delete(f"/api/v1/notifications/{normal_notification.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Notification.objects.filter(pk=normal_notification.pk).exists())
+
+    def test_non_visible_or_other_recipient_notification_returns_404(self):
+        self.authenticate(self.customer)
+
+        admin_response = self.client.delete(
+            f"/api/v1/notifications/{self.admin_notification.id}/",
+        )
+        other_user_response = self.client.delete(
+            f"/api/v1/notifications/{self.courier_notification.id}/",
+        )
+        missing_response = self.client.delete("/api/v1/notifications/999999/")
+
+        self.assertEqual(admin_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(other_user_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(missing_response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_unresolved_blocking_notification_cannot_be_deleted(self):
+        self.authenticate(self.admin)
+
+        response = self.client.delete(f"/api/v1/notifications/{self.admin_notification.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertTrue(Notification.objects.filter(pk=self.admin_notification.pk).exists())
+
+    def test_resolved_blocking_notification_can_be_deleted(self):
+        self.admin_notification.is_read = True
+        self.admin_notification.is_resolved = True
+        self.admin_notification.read_at = timezone.now()
+        self.admin_notification.resolved_at = timezone.now()
+        self.admin_notification.save()
+        self.authenticate(self.admin)
+
+        response = self.client.delete(f"/api/v1/notifications/{self.admin_notification.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Notification.objects.filter(pk=self.admin_notification.pk).exists())
+
+    def test_clear_read_deletes_only_eligible_visible_notifications(self):
+        visible_read_normal = Notification.objects.create(
+            audience=Notification.Audience.ADMIN,
+            type=Notification.Type.ORDER_ASSIGNED,
+            title="Read normal",
+            message="Read normal",
+            order=self.order,
+            is_read=True,
+        )
+        visible_unread = Notification.objects.create(
+            audience=Notification.Audience.ADMIN,
+            type=Notification.Type.ORDER_ASSIGNED,
+            title="Unread",
+            message="Unread",
+            order=self.order,
+            is_read=False,
+        )
+        visible_resolved_blocking = Notification.objects.create(
+            audience=Notification.Audience.ADMIN,
+            type=Notification.Type.NEW_ORDER_REVIEW,
+            title="Resolved blocking",
+            message="Resolved blocking",
+            order=self.order,
+            is_blocking=True,
+            is_resolved=True,
+            is_read=True,
+            read_at=timezone.now(),
+            resolved_at=timezone.now(),
+        )
+        visible_unresolved_blocking = Notification.objects.create(
+            audience=Notification.Audience.ADMIN,
+            type=Notification.Type.NEW_ORDER_REVIEW,
+            title="Unresolved blocking",
+            message="Unresolved blocking",
+            order=self.order,
+            is_blocking=True,
+            is_resolved=False,
+            is_read=True,
+        )
+        other_audience = Notification.objects.create(
+            audience=Notification.Audience.COURIER,
+            type=Notification.Type.ORDER_ASSIGNED,
+            title="Courier read",
+            message="Courier read",
+            order=self.order,
+            recipient=self.courier,
+            is_read=True,
+        )
+        self.authenticate(self.admin)
+
+        response = self.client.delete("/api/v1/notifications/clear-read/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["deleted_count"], 2)
+        self.assertFalse(Notification.objects.filter(pk=visible_read_normal.pk).exists())
+        self.assertFalse(
+            Notification.objects.filter(pk=visible_resolved_blocking.pk).exists()
+        )
+        self.assertTrue(Notification.objects.filter(pk=visible_unread.pk).exists())
+        self.assertTrue(
+            Notification.objects.filter(pk=visible_unresolved_blocking.pk).exists()
+        )
+        self.assertTrue(Notification.objects.filter(pk=other_audience.pk).exists())

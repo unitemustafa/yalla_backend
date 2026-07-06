@@ -4,14 +4,18 @@ from .models import Notification
 
 
 def create_new_order_review_notification(order):
-    return Notification.objects.create(
+    notification, _ = Notification.objects.get_or_create(
+        order=order,
         audience=Notification.Audience.ADMIN,
         type=Notification.Type.NEW_ORDER_REVIEW,
-        title="New order requires review",
-        message=f"Order #{order.id} requires admin review.",
-        order=order,
         is_blocking=True,
+        is_resolved=False,
+        defaults={
+            "title": "New order requires review",
+            "message": f"Order #{order.id} requires admin review.",
+        },
     )
+    return notification
 
 
 def create_order_assigned_notification(order, representative):

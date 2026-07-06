@@ -210,6 +210,7 @@ class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
                 "updated_at",
             ]
         )
+        resolve_order_review_notifications(order)
         return Response(
             self.get_serializer(order).data,
             status=status.HTTP_200_OK,

@@ -18,5 +18,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             "is_read",
             "is_blocking",
             "is_resolved",
+            "read_at",
+            "resolved_at",
             "created_at",
         )
