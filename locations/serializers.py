@@ -112,7 +112,11 @@ class DeliveryAreaSerializer(ServiceCitySerializer):
             raise serializers.ValidationError(
                 {"service_city_id": "Service city is required."}
             )
-        if not service_city.is_active:
+        service_city_changed = (
+            self.instance is None
+            or self.instance.service_city_id != service_city.id
+        )
+        if service_city_changed and not service_city.is_active:
             raise serializers.ValidationError(
                 {"service_city_id": "Service city must be active."}
             )

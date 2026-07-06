@@ -15,6 +15,7 @@ from rest_framework_simplejwt.token_blacklist.models import (
 )
 from rest_framework_simplejwt.views import TokenRefreshView
 
+from .courier_rules import active_assigned_orders_for_user
 from .models import OneTimePassword
 from .serializers import (
     AdminUserDetailSerializer,
@@ -332,6 +333,7 @@ class ClientProfileView(APIView):
 
 class AdminUserListCreateView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
 
     def get(self, request):
         users = User.objects.filter(deleted_at__isnull=True).order_by(
@@ -371,6 +373,7 @@ class AdminRepresentativeListView(APIView):
 
 class AdminUserDetailView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
 
     def get_user(self, user_id):
         return get_object_or_404(
@@ -397,10 +400,7 @@ class AdminUserDetailView(APIView):
     @transaction.atomic
     def delete(self, request, user_id):
         user = self.get_user(user_id)
-        if (
-            user.role == User.Role.REPRESENTATIVE
-            and user.assigned_orders.filter(status="ready").exists()
-        ):
+        if user.role == User.Role.REPRESENTATIVE and active_assigned_orders_for_user(user).exists():
             return Response(
                 {"detail": "Reassign active orders before deleting this courier."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -414,10 +414,15 @@ class CheckUsernameView(APIView):
 
     def get(self, request):
         username = request.query_params.get("username", "").strip()
-        registered = bool(username) and User.objects.filter(
+        queryset = User.objects.filter(
             username__iexact=username,
             deleted_at__isnull=True,
-        ).exists()
+        )
+        if request.user.is_authenticated and request.user.role == User.Role.ADMIN:
+            exclude_user_id = request.query_params.get("exclude_user_id")
+            if exclude_user_id:
+                queryset = queryset.exclude(pk=exclude_user_id)
+        registered = bool(username) and queryset.exists()
         return Response({"available": not registered, "registered": registered})
 
 
@@ -426,10 +431,15 @@ class CheckEmailView(APIView):
 
     def get(self, request):
         email = request.query_params.get("email", "").strip()
-        registered = bool(email) and User.objects.filter(
+        queryset = User.objects.filter(
             email__iexact=email,
             deleted_at__isnull=True,
-        ).exists()
+        )
+        if request.user.is_authenticated and request.user.role == User.Role.ADMIN:
+            exclude_user_id = request.query_params.get("exclude_user_id")
+            if exclude_user_id:
+                queryset = queryset.exclude(pk=exclude_user_id)
+        registered = bool(email) and queryset.exists()
         return Response({"available": not registered, "registered": registered})
 
 
@@ -438,10 +448,15 @@ class CheckPhoneView(APIView):
 
     def get(self, request):
         phone = request.query_params.get("phone", "").strip()
-        registered = bool(phone) and User.objects.filter(
+        queryset = User.objects.filter(
             phone__in=phone_candidates(phone),
             deleted_at__isnull=True,
-        ).exists()
+        )
+        if request.user.is_authenticated and request.user.role == User.Role.ADMIN:
+            exclude_user_id = request.query_params.get("exclude_user_id")
+            if exclude_user_id:
+                queryset = queryset.exclude(pk=exclude_user_id)
+        registered = bool(phone) and queryset.exists()
         return Response({"available": not registered, "registered": registered})
 
 

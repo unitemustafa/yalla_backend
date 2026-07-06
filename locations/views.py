@@ -7,6 +7,8 @@ from rest_framework import status
 from rest_framework.views import APIView
 
 from accounts.views import IsAdminRole
+from accounts.models import CourierProfile
+from orders.models import Order
 
 from .models import Address, DeliveryArea, ServiceCity
 from .serializers import (
@@ -87,6 +89,12 @@ class DeliveryAreaDetailView(
     protected_error_message = (
         "Delivery area cannot be deleted while representatives are using it."
     )
+    courier_error_message = (
+        "لا يمكن حذف منطقة التوصيل لأنها مستخدمة بواسطة مندوبين."
+    )
+    order_error_message = (
+        "لا يمكن حذف منطقة التوصيل لوجود طلبات مرتبطة بها."
+    )
 
     def get_queryset(self):
         queryset = DeliveryArea.objects.select_related("service_city")
@@ -96,6 +104,38 @@ class DeliveryAreaDetailView(
                 service_city__is_active=True,
             )
         return queryset
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        area = generics.get_object_or_404(
+            self.get_queryset().select_for_update(),
+            pk=kwargs[self.lookup_url_kwarg]
+        )
+
+        if CourierProfile.objects.filter(delivery_area=area).exists():
+            return Response(
+                {"detail": self.courier_error_message},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if Order.objects.filter(
+            delivery_area=area,
+        ).exists() or Order.objects.filter(
+            delivery_address__delivery_area=area,
+        ).exists():
+            return Response(
+                {"detail": self.order_error_message},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        area.markets.clear()
+        Address.objects.filter(delivery_area=area).update(
+            delivery_area=None,
+            delivery_type=Address.DeliveryType.DELIVERY,
+            manual_area=area.name,
+        )
+        area.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class DeliveryAreaListView(APIView):

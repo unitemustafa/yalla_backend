@@ -19,6 +19,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from locations.models import ServiceCity
 from orders.models import Order
 
+from .courier_rules import active_assigned_orders_for_user
 from .models import CourierProfile, OneTimePassword
 from .services import normalize_email, verify_otp
 
@@ -33,7 +34,7 @@ def contains_whitespace(value):
 
 
 def reject_whitespace(value):
-    if contains_whitespace(value):
+    if contains_whitespace((value or "").strip()):
         raise serializers.ValidationError("Spaces are not allowed in this field.")
     return value
 
@@ -108,10 +109,6 @@ class RequiredFieldMessagesMixin:
 
 
 class CourierProfileSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
-    delivery_area_name = serializers.CharField(
-        source="delivery_area.name",
-        read_only=True,
-    )
     service_city_name = serializers.CharField(
         source="service_city.name",
         read_only=True,
@@ -127,7 +124,6 @@ class CourierProfileSerializer(RequiredFieldMessagesMixin, serializers.ModelSeri
             "vehicle_type",
             "plate_number",
             "delivery_area",
-            "delivery_area_name",
             "service_city",
             "service_city_name",
             "max_active_orders",
@@ -144,17 +140,10 @@ class CourierProfileSerializer(RequiredFieldMessagesMixin, serializers.ModelSeri
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        delivery_area = attrs.get(
-            "delivery_area",
-            getattr(self.instance, "delivery_area", None),
-        )
         service_city = attrs.get(
             "service_city",
             getattr(self.instance, "service_city", None),
         )
-        if service_city is None and delivery_area is not None:
-            service_city = delivery_area.service_city
-            attrs["service_city"] = service_city
         if service_city is None:
             raise serializers.ValidationError(
                 {"service_city": "Service city is required for couriers."}
@@ -163,10 +152,7 @@ class CourierProfileSerializer(RequiredFieldMessagesMixin, serializers.ModelSeri
             raise serializers.ValidationError(
                 {"service_city": "Service city must be active."}
             )
-        if delivery_area is not None and delivery_area.service_city_id != service_city.id:
-            raise serializers.ValidationError(
-                {"delivery_area": "Delivery area must belong to the service city."}
-            )
+        attrs["delivery_area"] = None
         return attrs
 
 
@@ -346,8 +332,8 @@ class RegisterSerializer(
         return email
 
     def validate_username(self, value):
-        reject_whitespace(value)
         username = value.strip()
+        reject_whitespace(username)
         email = normalize_email(self.initial_data.get("email", ""))
         user = User.objects.filter(
             username__iexact=username,
@@ -550,6 +536,7 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
 
     def validate_username(self, value):
         username = value.strip()
+        reject_whitespace(username)
         user = self.context["request"].user
         if (
             User.objects.filter(username__iexact=username)
@@ -655,6 +642,11 @@ class AdminUserWriteSerializer(
         trim_whitespace=False,
     )
     courier_profile = CourierProfileSerializer(required=False)
+    avatar_image = serializers.ImageField(
+        required=False,
+        write_only=True,
+        allow_null=False,
+    )
 
     class Meta:
         model = User
@@ -668,6 +660,7 @@ class AdminUserWriteSerializer(
             "gender",
             "birth_date",
             "avatar_url",
+            "avatar_image",
             "role",
             "is_active",
             "is_staff",
@@ -697,8 +690,8 @@ class AdminUserWriteSerializer(
         return email
 
     def validate_username(self, value):
-        reject_whitespace(value)
         username = value.strip()
+        reject_whitespace(username)
         queryset = User.objects.filter(
             username__iexact=username,
             deleted_at__isnull=True,
@@ -724,6 +717,18 @@ class AdminUserWriteSerializer(
             )
         return phone
 
+    def validate_avatar_image(self, value):
+        extension = Path(value.name or "").suffix.lower().lstrip(".")
+        if extension not in AVATAR_ALLOWED_EXTENSIONS:
+            raise serializers.ValidationError(
+                "Upload a valid profile photo: JPG, JPEG, PNG, or WEBP."
+            )
+        if value.size > AVATAR_MAX_SIZE:
+            raise serializers.ValidationError(
+                "Profile photo must be 5 MB or smaller."
+            )
+        return value
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
         role = attrs.get("role", getattr(self.instance, "role", None))
@@ -736,27 +741,41 @@ class AdminUserWriteSerializer(
             self.instance is not None
             and self.instance.role == User.Role.REPRESENTATIVE
             and attrs.get("is_active") is False
-            and self.instance.assigned_orders.filter(status="ready").exists()
+            and active_assigned_orders_for_user(self.instance).exists()
         ):
             raise serializers.ValidationError(
                 {"is_active": "Reassign active orders before disabling this courier."}
+            )
+        password = attrs.get("password")
+        if self.instance is not None and password and self.instance.check_password(password):
+            raise serializers.ValidationError(
+                {
+                    "password": (
+                        "كلمة المرور الجديدة يجب أن تكون مختلفة عن كلمة المرور الحالية."
+                    )
+                }
             )
         return attrs
 
     def create(self, validated_data):
         profile_data = validated_data.pop("courier_profile", None)
+        avatar_image = validated_data.pop("avatar_image", None)
         password = validated_data.pop("password")
         user = User(**validated_data)
+        if avatar_image is not None:
+            user.avatar_image = avatar_image
         user.set_password(password)
         user.terms_accepted = True
         user.terms_accepted_at = timezone.now()
         user.save()
         if profile_data is not None:
+            profile_data["delivery_area"] = None
             CourierProfile.objects.create(user=user, **profile_data)
         return user
 
     def update(self, instance, validated_data):
         profile_data = validated_data.pop("courier_profile", None)
+        avatar_image = validated_data.pop("avatar_image", None)
         password = validated_data.pop("password", None)
         update_fields = list(validated_data.keys())
         if (
@@ -768,14 +787,26 @@ class AdminUserWriteSerializer(
 
         for field, value in validated_data.items():
             setattr(instance, field, value)
+        old_avatar = instance.avatar_image if avatar_image is not None else None
+        if avatar_image is not None:
+            instance.avatar_image = avatar_image
+            update_fields.append("avatar_image")
         if password is not None:
             instance.set_password(password)
             update_fields.append("password")
-        instance.save(update_fields=[*update_fields, "updated_at"])
+        if update_fields:
+            instance.save(update_fields=[*update_fields, "updated_at"])
+        if (
+            old_avatar
+            and old_avatar.name
+            and old_avatar.name != instance.avatar_image.name
+        ):
+            old_avatar.delete(save=False)
         if instance.role != User.Role.REPRESENTATIVE:
             CourierProfile.objects.filter(user=instance).delete()
             return instance
         if profile_data is not None:
+            profile_data["delivery_area"] = None
             profile, _ = CourierProfile.objects.get_or_create(
                 user=instance,
                 defaults=profile_data,

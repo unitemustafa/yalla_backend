@@ -6,6 +6,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from accounts.models import CourierProfile
 from markets.models import Market, MarketClassification
 from orders.models import Order
 
@@ -601,6 +602,65 @@ class LocationManagementAPITests(TestCase):
         )
         self.client.force_authenticate(self.admin)
 
+    def create_area(self, name="Delete Area"):
+        city = ServiceCity.objects.create(name=f"{name} City")
+        return DeliveryArea.objects.create(
+            service_city=city,
+            name=name,
+            delivery_price=Decimal("25.00"),
+        )
+
+    def create_market_for_area(self, area):
+        classification = MarketClassification.objects.create(
+            name=f"{area.name} Classification"
+        )
+        market = Market.objects.create(
+            classification=classification,
+            name=f"{area.name} Market",
+        )
+        market.service_cities.add(area.service_city)
+        market.delivery_areas.add(area)
+        return market
+
+    def create_address_for_area(self, area):
+        user = User.objects.create_user(
+            username=f"address_user_{area.id}",
+            email=f"address-user-{area.id}@example.com",
+            phone=f"+2010{area.id:08d}",
+            password="Passw0rd!",
+            role=User.Role.CLIENT,
+        )
+        return Address.objects.create(
+            user=user,
+            name="Home",
+            details="Street 1",
+            service_city=area.service_city,
+            delivery_area=area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+        )
+
+    def create_order_for_area(self, area, address=None):
+        user = address.user if address else User.objects.create_user(
+            username=f"order_user_{area.id}",
+            email=f"order-user-{area.id}@example.com",
+            phone=f"+2012{area.id:08d}",
+            password="Passw0rd!",
+            role=User.Role.CLIENT,
+        )
+        return Order.objects.create(
+            user=user,
+            delivery_address=address,
+            market=self.create_market_for_area(area),
+            service_city=area.service_city,
+            order_scope=Order.Scope.SERVICE_CITY,
+            delivery_area=area,
+            delivery_type=Order.DeliveryType.FIXED_AREA,
+            payment_method="cash_on_delivery",
+            delivery_price=area.delivery_price,
+            subtotal_price=Decimal("100.00"),
+            total_price=Decimal("125.00"),
+        )
+
     def test_admin_can_crud_service_cities(self):
         create_response = self.client.post(
             "/api/v1/locations/service-cities/",
@@ -679,6 +739,108 @@ class LocationManagementAPITests(TestCase):
         self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(DeliveryArea.objects.filter(pk=area_id).exists())
 
+    def test_delivery_area_without_relations_deletes(self):
+        area = self.create_area("Unused Area")
+
+        response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(DeliveryArea.objects.filter(pk=area.id).exists())
+
+    def test_delivery_area_delete_detaches_market_links(self):
+        area = self.create_area("Market Area")
+        market = self.create_market_for_area(area)
+
+        response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertTrue(Market.objects.filter(pk=market.id).exists())
+        self.assertFalse(market.delivery_areas.filter(pk=area.id).exists())
+
+    def test_delivery_area_delete_preserves_and_converts_saved_address(self):
+        area = self.create_area("Address Area")
+        address = self.create_address_for_area(area)
+
+        response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        address.refresh_from_db()
+        self.assertIsNone(address.delivery_area_id)
+        self.assertEqual(address.delivery_type, Address.DeliveryType.DELIVERY)
+        self.assertEqual(address.service_city_id, area.service_city_id)
+        self.assertEqual(address.manual_area, area.name)
+        self.assertTrue(Address.objects.filter(pk=address.id).exists())
+
+    def test_delivery_area_delete_cleans_market_and_address_together(self):
+        area = self.create_area("Mixed Area")
+        market = self.create_market_for_area(area)
+        address = self.create_address_for_area(area)
+
+        response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(DeliveryArea.objects.filter(pk=area.id).exists())
+        self.assertTrue(Market.objects.filter(pk=market.id).exists())
+        self.assertFalse(market.delivery_areas.filter(pk=area.id).exists())
+        address.refresh_from_db()
+        self.assertIsNone(address.delivery_area_id)
+        self.assertEqual(address.delivery_type, Address.DeliveryType.DELIVERY)
+
+    def test_delivery_area_delete_blocks_order_relation(self):
+        area = self.create_area("Order Area")
+        self.create_order_for_area(area)
+
+        response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "لا يمكن حذف منطقة التوصيل لوجود طلبات مرتبطة بها.",
+        )
+        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
+
+    def test_delivery_area_delete_blocks_courier_relation(self):
+        area = self.create_area("Courier Area")
+        courier = User.objects.create_user(
+            username="area_courier",
+            email="area-courier@example.com",
+            phone="+201000000099",
+            password="Passw0rd!",
+            role=User.Role.REPRESENTATIVE,
+        )
+        CourierProfile.objects.create(
+            user=courier,
+            vehicle_type="Bike",
+            plate_number="ABC123",
+            service_city=area.service_city,
+            delivery_area=area,
+        )
+
+        response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "لا يمكن حذف منطقة التوصيل لأنها مستخدمة بواسطة مندوبين.",
+        )
+        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
+
+    def test_delivery_area_delete_requires_admin_permission(self):
+        area = self.create_area("Permission Area")
+        client_user = User.objects.create_user(
+            username="area_delete_client",
+            email="area-delete-client@example.com",
+            phone="+201000000098",
+            password="Passw0rd!",
+            role=User.Role.CLIENT,
+        )
+        self.client.force_authenticate(client_user)
+
+        response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
+
     def test_delivery_area_validates_price_active_city_and_duplicate_active_name(self):
         city = ServiceCity.objects.create(name="Alexandria")
         inactive_city = ServiceCity.objects.create(name="Inactive", is_active=False)
@@ -727,6 +889,64 @@ class LocationManagementAPITests(TestCase):
         self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(duplicate_response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("name", duplicate_response.data)
+
+    def test_delivery_area_inactive_city_create_and_move_rules(self):
+        active_city = ServiceCity.objects.create(name="Active City")
+        inactive_city = ServiceCity.objects.create(
+            name="Inactive City",
+            is_active=False,
+        )
+        other_inactive_city = ServiceCity.objects.create(
+            name="Other Inactive City",
+            is_active=False,
+        )
+        area = DeliveryArea.objects.create(
+            service_city=inactive_city,
+            name="Legacy Inactive Area",
+            delivery_price=Decimal("25.00"),
+        )
+
+        create_response = self.client.post(
+            "/api/v1/locations/delivery-areas/",
+            {
+                "service_city_id": inactive_city.id,
+                "name": "New Inactive Area",
+                "delivery_price": "30.00",
+            },
+            format="json",
+        )
+        move_response = self.client.patch(
+            f"/api/v1/locations/delivery-areas/{area.id}/",
+            {"service_city_id": other_inactive_city.id},
+            format="json",
+        )
+        name_response = self.client.patch(
+            f"/api/v1/locations/delivery-areas/{area.id}/",
+            {"name": "Updated Legacy Area"},
+            format="json",
+        )
+        price_response = self.client.patch(
+            f"/api/v1/locations/delivery-areas/{area.id}/",
+            {"delivery_price": "35.00"},
+            format="json",
+        )
+        active_move_response = self.client.patch(
+            f"/api/v1/locations/delivery-areas/{area.id}/",
+            {"service_city_id": active_city.id},
+            format="json",
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("service_city_id", create_response.data)
+        self.assertEqual(move_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("service_city_id", move_response.data)
+        self.assertEqual(name_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(name_response.data["service_city_id"], inactive_city.id)
+        self.assertEqual(name_response.data["name"], "Updated Legacy Area")
+        self.assertEqual(price_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(price_response.data["delivery_price"], "35.00")
+        self.assertEqual(active_move_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(active_move_response.data["service_city_id"], active_city.id)
 
     def test_client_can_list_only_active_delivery_areas_for_service_city(self):
         city = ServiceCity.objects.create(name="Client City")
