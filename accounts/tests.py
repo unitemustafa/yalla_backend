@@ -2,6 +2,7 @@ import io
 import os
 import shutil
 import tempfile
+from decimal import Decimal
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -17,6 +18,8 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from locations.models import DeliveryArea, ServiceCity
+from markets.models import Market, MarketClassification
+from orders.models import Order
 
 from .models import CourierProfile, OTPCooldown, OneTimePassword
 from .services import issue_otp
@@ -96,6 +99,38 @@ class AuthenticationAPITests(APITestCase):
             is_active=True,
             role=role,
         )
+
+    def create_order_market(self):
+        classification, _ = MarketClassification.objects.get_or_create(
+            name="Account tests market",
+        )
+        return Market.objects.create(
+            classification=classification,
+            name="Account Test Market",
+            scope=Market.Scope.GENERAL,
+        )
+
+    def create_customer_order(
+        self,
+        user,
+        market,
+        status_value,
+        total,
+        created_at,
+    ):
+        order = Order.objects.create(
+            user=user,
+            market=market,
+            payment_method="cash",
+            status=status_value,
+            order_scope=Order.Scope.GENERAL,
+            delivery_type=Order.DeliveryType.DELIVERY,
+            subtotal_price=total,
+            total_price=total,
+        )
+        Order.objects.filter(pk=order.pk).update(created_at=created_at)
+        order.refresh_from_db()
+        return order
 
     def test_registration_requires_otp_before_login(self):
         response = self.client.post(f"{AUTH_BASE}/signup", self.registration_payload())
@@ -385,6 +420,236 @@ class AuthenticationAPITests(APITestCase):
             status.HTTP_404_NOT_FOUND,
         )
         self.assertIsNotNone(User.objects.get(pk=user_id).deleted_at)
+
+    def test_admin_detail_for_client_returns_customer_stats_and_recent_orders(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="detail_stats_admin",
+            email="detail-stats-admin@example.com",
+            phone="+213555000023",
+        )
+        client = self.create_active_user(
+            username="detail_stats_client",
+            email="detail-stats-client@example.com",
+            phone="+213555000024",
+        )
+        market = self.create_order_market()
+        base_time = timezone.now() - timedelta(days=20)
+        statuses = [
+            Order.Status.DELIVERED,
+            Order.Status.CANCELLED,
+            Order.Status.FAILED_DELIVERY,
+            Order.Status.PENDING,
+            Order.Status.DELIVERED,
+            Order.Status.CONFIRMED,
+            Order.Status.DELIVERED,
+            Order.Status.READY,
+            Order.Status.ON_THE_WAY,
+            Order.Status.DELIVERED,
+            Order.Status.UNDER_PREPARATION,
+            Order.Status.CANCELLED,
+        ]
+        orders = [
+            self.create_customer_order(
+                client,
+                market,
+                status_value,
+                Decimal(index + 1),
+                base_time + timedelta(hours=index),
+            )
+            for index, status_value in enumerate(statuses)
+        ]
+        newest = self.create_customer_order(
+            client,
+            market,
+            Order.Status.FAILED_DELIVERY,
+            Decimal("999.00"),
+            timezone.now(),
+        )
+        refresh = RefreshToken.for_user(admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get(f"{AUTH_BASE}/users/{client.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["customer_stats"]["orders_count"], 13)
+        self.assertEqual(response.data["customer_stats"]["completed_orders_count"], 4)
+        self.assertEqual(response.data["customer_stats"]["total_spent"], "23.00")
+        self.assertEqual(
+            response.data["customer_stats"]["last_order_at"],
+            newest.created_at,
+        )
+        self.assertEqual(len(response.data["recent_orders"]), 10)
+        self.assertEqual(response.data["recent_orders"][0]["id"], newest.id)
+        self.assertEqual(
+            response.data["recent_orders"][0]["number"],
+            f"YM-{newest.created_at:%Y%m%d}-{newest.id:06d}",
+        )
+        self.assertIsInstance(response.data["recent_orders"][0]["id"], int)
+        self.assertEqual(
+            [item["id"] for item in response.data["recent_orders"]],
+            [order.id for order in [newest, *reversed(orders[-9:])]],
+        )
+        self.assertNotIn("customer_stats", self.client.get(f"{AUTH_BASE}/users/").data[0])
+
+    def test_admin_patch_detail_for_client_keeps_customer_stats_and_recent_orders(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="patch_detail_admin",
+            email="patch-detail-admin@example.com",
+            phone="+213555000123",
+        )
+        client = self.create_active_user(
+            username="patch_detail_client",
+            email="patch-detail-client@example.com",
+            phone="+213555000124",
+        )
+        market = self.create_order_market()
+        order = self.create_customer_order(
+            client,
+            market,
+            Order.Status.DELIVERED,
+            Decimal("125.50"),
+            timezone.now() - timedelta(days=2),
+        )
+        refresh = RefreshToken.for_user(admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/users/{client.id}/",
+            {"is_active": False},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["is_active"])
+        self.assertEqual(response.data["customer_stats"]["orders_count"], 1)
+        self.assertEqual(response.data["customer_stats"]["completed_orders_count"], 1)
+        self.assertEqual(response.data["customer_stats"]["total_spent"], "125.50")
+        self.assertEqual(response.data["customer_stats"]["last_order_at"], order.created_at)
+        self.assertEqual(response.data["recent_orders"][0]["id"], order.id)
+        self.assertIsInstance(response.data["recent_orders"][0]["id"], int)
+        self.assertEqual(
+            response.data["recent_orders"][0]["number"],
+            f"YM-{order.created_at:%Y%m%d}-{order.id:06d}",
+        )
+
+    def test_admin_detail_for_client_without_orders_returns_empty_customer_data(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="no_order_admin",
+            email="no-order-admin@example.com",
+            phone="+213555000025",
+        )
+        client = self.create_active_user(
+            username="no_order_client",
+            email="no-order-client@example.com",
+            phone="+213555000026",
+        )
+        refresh = RefreshToken.for_user(admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get(f"{AUTH_BASE}/users/{client.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["customer_stats"],
+            {
+                "orders_count": 0,
+                "completed_orders_count": 0,
+                "total_spent": "0.00",
+                "last_order_at": None,
+            },
+        )
+        self.assertEqual(response.data["recent_orders"], [])
+
+    def test_admin_detail_for_non_client_returns_no_customer_stats(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="non_client_detail_admin",
+            email="non-client-detail-admin@example.com",
+            phone="+213555000027",
+        )
+        representative = self.create_active_user(
+            role=User.Role.REPRESENTATIVE,
+            username="non_client_detail_rep",
+            email="non-client-detail-rep@example.com",
+            phone="+213555000028",
+        )
+        refresh = RefreshToken.for_user(admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get(f"{AUTH_BASE}/users/{representative.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data["customer_stats"])
+        self.assertEqual(response.data["recent_orders"], [])
+
+    def test_successful_logins_update_last_login_but_failures_and_refresh_do_not(self):
+        client = self.create_active_user(
+            username="last_login_client",
+            email="last-login-client@example.com",
+            phone="+213555000029",
+        )
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="last_login_admin",
+            email="last-login-admin@example.com",
+            phone="+213555000030",
+        )
+
+        client_response = self.client.post(
+            f"{AUTH_BASE}/login/client/",
+            {"email": client.email, "password": self.password},
+        )
+        admin_response = self.client.post(
+            f"{AUTH_BASE}/login/admin/",
+            {"email": admin.email, "password": self.password},
+        )
+        client.refresh_from_db()
+        admin.refresh_from_db()
+
+        self.assertEqual(client_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(admin_response.status_code, status.HTTP_200_OK)
+        self.assertIsNotNone(client.last_login)
+        self.assertIsNotNone(admin.last_login)
+
+        client_login_time = client.last_login
+        admin_login_time = admin.last_login
+        failed_response = self.client.post(
+            f"{AUTH_BASE}/login/client/",
+            {"email": client.email, "password": "wrong"},
+        )
+        refresh = RefreshToken.for_user(admin)
+        refresh_response = self.client.post(
+            f"{AUTH_BASE}/refresh/",
+            {"refreshToken": str(refresh)},
+        )
+        client.refresh_from_db()
+        admin.refresh_from_db()
+
+        self.assertEqual(failed_response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(refresh_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(client.last_login, client_login_time)
+        self.assertEqual(admin.last_login, admin_login_time)
+
+    def test_disabled_account_receives_neutral_inactive_message(self):
+        client = self.create_active_user(
+            username="inactive_message_client",
+            email="inactive-message-client@example.com",
+            phone="+213555000033",
+        )
+        client.is_active = False
+        client.save(update_fields=["is_active"])
+
+        response = self.client.post(
+            f"{AUTH_BASE}/login/client/",
+            {"email": client.email, "password": self.password},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["non_field_errors"], ["Account is inactive."])
+        client.refresh_from_db()
+        self.assertIsNone(client.last_login)
 
     def test_admin_can_create_representative_without_courier_profile(self):
         admin = self.create_active_user(

@@ -6,6 +6,8 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Count, Max, Q, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
@@ -15,6 +17,7 @@ from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from locations.models import ServiceCity
+from orders.models import Order
 
 from .models import CourierProfile, OneTimePassword
 from .services import normalize_email, verify_otp
@@ -212,9 +215,75 @@ class AdminUserSerializer(UserSerializer):
             "is_active",
             "is_staff",
             "is_superuser",
+            "last_login",
             "created_at",
             "updated_at",
         )
+
+
+class AdminUserDetailSerializer(AdminUserSerializer):
+    customer_stats = serializers.SerializerMethodField()
+    recent_orders = serializers.SerializerMethodField()
+
+    class Meta(AdminUserSerializer.Meta):
+        fields = AdminUserSerializer.Meta.fields + (
+            "customer_stats",
+            "recent_orders",
+        )
+
+    def _order_number(self, order):
+        return f"YM-{order.created_at:%Y%m%d}-{order.id:06d}"
+
+    def get_customer_stats(self, obj):
+        if obj.role != User.Role.CLIENT:
+            return None
+
+        completed_statuses = [Order.Status.DELIVERED]
+        stats = obj.orders.aggregate(
+            orders_count=Count("id"),
+            completed_orders_count=Count(
+                "id",
+                filter=Q(status__in=completed_statuses),
+            ),
+            total_spent=Coalesce(
+                Sum(
+                    "total_price",
+                    filter=Q(status__in=completed_statuses),
+                ),
+                0,
+                output_field=Order._meta.get_field("total_price"),
+            ),
+            last_order_at=Max("created_at"),
+        )
+
+        return {
+            "orders_count": stats["orders_count"],
+            "completed_orders_count": stats["completed_orders_count"],
+            "total_spent": f"{stats['total_spent']:.2f}",
+            "last_order_at": stats["last_order_at"],
+        }
+
+    def get_recent_orders(self, obj):
+        if obj.role != User.Role.CLIENT:
+            return []
+
+        orders = obj.orders.only(
+            "id",
+            "status",
+            "total_price",
+            "created_at",
+        ).order_by("-created_at", "-id")[:10]
+
+        return [
+            {
+                "id": order.id,
+                "number": self._order_number(order),
+                "status": order.status,
+                "total": f"{order.total_price:.2f}",
+                "created_at": order.created_at,
+            }
+            for order in orders
+        ]
 
 
 class PasswordValidationMixin:
@@ -342,9 +411,7 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
         if user is None or not user.check_password(attrs["password"]):
             raise AuthenticationFailed("Invalid email or password.")
         if not user.is_active:
-            raise serializers.ValidationError(
-                "Account email has not been verified."
-            )
+            raise serializers.ValidationError("Account is inactive.")
         expected_role = self.context.get("expected_role")
         if expected_role and user.role != expected_role:
             role_label = User.Role(expected_role).label.lower()

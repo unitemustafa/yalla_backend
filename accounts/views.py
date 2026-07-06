@@ -17,6 +17,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from .models import OneTimePassword
 from .serializers import (
+    AdminUserDetailSerializer,
     AdminUserSerializer,
     AdminUserWriteSerializer,
     DeleteAccountSerializer,
@@ -75,6 +76,11 @@ def token_payload(user, request=None):
         "expiresIn": int(settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"].total_seconds()),
         "user": UserSerializer(user, context={"request": request}).data,
     }
+
+
+def update_successful_login(user):
+    user.last_login = timezone.now()
+    user.save(update_fields=["last_login"])
 
 
 def otp_cooldown_error_response(exc):
@@ -233,7 +239,9 @@ class LoginView(APIView):
             context={"expected_role": self.role},
         )
         serializer.is_valid(raise_exception=True)
-        return Response(token_payload(serializer.validated_data["user"], request=request))
+        user = serializer.validated_data["user"]
+        update_successful_login(user)
+        return Response(token_payload(user, request=request))
 
 
 class ClientLoginView(LoginView):
@@ -372,7 +380,7 @@ class AdminUserDetailView(APIView):
 
     def get(self, request, user_id):
         user = self.get_user(user_id)
-        return Response(AdminUserSerializer(user).data)
+        return Response(AdminUserDetailSerializer(user).data)
 
     @transaction.atomic
     def patch(self, request, user_id):
@@ -384,7 +392,7 @@ class AdminUserDetailView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        return Response(AdminUserSerializer(user).data)
+        return Response(AdminUserDetailSerializer(user).data)
 
     @transaction.atomic
     def delete(self, request, user_id):
