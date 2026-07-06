@@ -1,4 +1,6 @@
 from django.contrib.auth import get_user_model
+from decimal import Decimal
+
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import generics, status
@@ -15,6 +17,7 @@ from .serializers import (
     CourierOrderListSerializer,
     CourierOrderStatusSerializer,
     OrderAssignmentSerializer,
+    OrderDeliveryPriceSerializer,
     OrderPreviewSerializer,
     OrderReviewActionSerializer,
     OrderSerializer,
@@ -72,12 +75,16 @@ def order_queryset():
         )
         .prefetch_related(
             "items__variant__product",
+            "items__variant__attribute_values__attribute",
+            "items__variant__attribute_values__option",
             "items__section",
             "order_offers__offer",
             "order_offers__section",
             "market__service_cities",
             "market_sections__market",
             "market_sections__items__variant__product",
+            "market_sections__items__variant__attribute_values__attribute",
+            "market_sections__items__variant__attribute_values__option",
             "market_sections__offers__offer",
         )
         .order_by("-created_at", "-id")
@@ -235,6 +242,39 @@ class OrderStatusView(APIView):
             order.delivered_at = timezone.now()
         order.save()
         return Response(OrderSerializer(order, context={"request": request}).data)
+
+
+class OrderDeliveryPriceView(APIView):
+    permission_classes = (IsAuthenticated, IsAdminRole)
+
+    @transaction.atomic
+    def patch(self, request, order_id):
+        order = generics.get_object_or_404(
+            Order.objects.select_for_update(),
+            pk=order_id,
+        )
+        if order.status in (Order.Status.DELIVERED, Order.Status.CANCELLED):
+            return Response(
+                {
+                    "detail": (
+                        "Delivery price cannot be changed after delivery or cancellation."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = OrderDeliveryPriceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        delivery_price = serializer.validated_data["delivery_price"]
+        total = order.subtotal_price - order.discount + delivery_price
+        order.delivery_price = delivery_price
+        order.total_price = max(total, Decimal("0.00"))
+        order.save(update_fields=["delivery_price", "total_price", "updated_at"])
+
+        refreshed_order = order_queryset().get(pk=order.pk)
+        return Response(
+            OrderSerializer(refreshed_order, context={"request": request}).data
+        )
 
 
 class OrderAssignmentView(APIView):

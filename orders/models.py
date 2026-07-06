@@ -148,7 +148,6 @@ class Order(models.Model):
                     | (
                         models.Q(delivery_type="delivery")
                         & models.Q(delivery_area__isnull=True)
-                        & models.Q(delivery_price__isnull=True)
                     )
                 ),
                 name="orders_order_delivery_type_valid",

@@ -8,6 +8,10 @@ from .models import Address, DeliveryArea, ServiceCity
 
 
 class ServiceCitySerializer(serializers.ModelSerializer):
+    delivery_area_count = serializers.SerializerMethodField()
+    market_count = serializers.SerializerMethodField()
+    offer_count = serializers.SerializerMethodField()
+
     class Meta:
         model = ServiceCity
         fields = (
@@ -18,11 +22,40 @@ class ServiceCitySerializer(serializers.ModelSerializer):
             "radius_km",
             "delivery_price",
             "is_active",
+            "delivery_area_count",
+            "market_count",
+            "offer_count",
         )
-        read_only_fields = ("id",)
+        read_only_fields = (
+            "id",
+            "delivery_area_count",
+            "market_count",
+            "offer_count",
+        )
+
+    def get_delivery_area_count(self, instance):
+        count = getattr(instance, "delivery_area_count", None)
+        if count is not None:
+            return count
+        return instance.delivery_areas.count()
+
+    def get_market_count(self, instance):
+        count = getattr(instance, "market_count", None)
+        if count is not None:
+            return count
+        return instance.markets.distinct().count()
+
+    def get_offer_count(self, instance):
+        count = getattr(instance, "offer_count", None)
+        if count is not None:
+            return count
+        return instance.offers.distinct().count()
 
     def validate_name(self, value):
-        return value.strip()
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Name is required.")
+        return value
 
     def validate_center_latitude(self, value):
         if value is None:

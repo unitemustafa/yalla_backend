@@ -829,11 +829,35 @@ class OrderItemSerializer(serializers.ModelSerializer):
         source="variant",
     )
     section_id = serializers.IntegerField(read_only=True)
+    product_name = serializers.SerializerMethodField()
+    variant_name = serializers.SerializerMethodField()
 
     class Meta:
         model = OrderItem
-        fields = ("id", "section_id", "variant_id", "quantity", "unit_price")
-        read_only_fields = ("id",)
+        fields = (
+            "id",
+            "section_id",
+            "variant_id",
+            "product_name",
+            "variant_name",
+            "quantity",
+            "unit_price",
+        )
+        read_only_fields = ("id", "product_name", "variant_name")
+
+    def get_product_name(self, instance):
+        return instance.variant.product.name
+
+    def get_variant_name(self, instance):
+        values = []
+        for value in instance.variant.attribute_values.all():
+            attribute_name = getattr(value.attribute, "name", "")
+            option_value = getattr(value.option, "value", "")
+            if attribute_name and option_value:
+                values.append(f"{attribute_name}: {option_value}")
+            elif option_value:
+                values.append(option_value)
+        return " - ".join(values)
 
 
 class OrderOfferSerializer(serializers.ModelSerializer):
@@ -1782,6 +1806,14 @@ class AdminOrderCreateSerializer(OrderSerializer):
 
 class OrderStatusSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=Order.Status.choices)
+
+
+class OrderDeliveryPriceSerializer(serializers.Serializer):
+    delivery_price = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+    )
 
 
 class OrderAssignmentSerializer(serializers.Serializer):

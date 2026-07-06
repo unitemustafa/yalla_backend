@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Count
 from django.db.models.deletion import ProtectedError
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated, SAFE_METHODS
@@ -32,23 +33,64 @@ class ProtectedDeleteMixin:
             )
 
 
+def service_city_queryset():
+    return ServiceCity.objects.annotate(
+        delivery_area_count=Count("delivery_areas", distinct=True),
+        market_count=Count("markets", distinct=True),
+        offer_count=Count("offers", distinct=True),
+    ).order_by("name", "id")
+
+
+def service_city_relation_counts(city):
+    checks = {
+        "delivery_areas": city.delivery_areas.count(),
+        "markets": city.markets.distinct().count(),
+        "offers": city.offers.distinct().count(),
+        "couriers": CourierProfile.objects.filter(service_city=city).count(),
+        "addresses": Address.objects.filter(service_city=city).count(),
+        "orders": Order.objects.filter(service_city=city).count(),
+        "users": city.market_region_users.count(),
+    }
+    return {key: value for key, value in checks.items() if value}
+
+
 class ServiceCityListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
     serializer_class = ServiceCitySerializer
-    queryset = ServiceCity.objects.order_by("name", "id")
+
+    def get_queryset(self):
+        return service_city_queryset()
 
 
 class ServiceCityDetailView(
-    ProtectedDeleteMixin,
     generics.RetrieveUpdateDestroyAPIView,
 ):
     permission_classes = [IsAuthenticated, IsAdminRole]
     serializer_class = ServiceCitySerializer
-    queryset = ServiceCity.objects.all()
     lookup_url_kwarg = "city_id"
-    protected_error_message = (
-        "Service city cannot be deleted while its delivery areas are in use."
-    )
+
+    def get_queryset(self):
+        return service_city_queryset()
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        city = generics.get_object_or_404(
+            ServiceCity.objects.select_for_update(),
+            pk=kwargs[self.lookup_url_kwarg],
+        )
+        relations = service_city_relation_counts(city)
+        if relations:
+            return Response(
+                {
+                    "detail": "لا يمكن حذف المدينة لوجود بيانات مرتبطة بها.",
+                    "code": "service_city_in_use",
+                    "relations": relations,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        city.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class DeliveryAreaPermission(IsAuthenticated):

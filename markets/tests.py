@@ -25,6 +25,7 @@ from offers.models import Offer
 from orders.models import Order
 
 from .models import Market, MarketClassification
+from .region import visible_market_queryset
 
 User = get_user_model()
 HOME_BASE = "/api/v1/home"
@@ -267,6 +268,23 @@ class HomeAPITests(APITestCase):
     def test_home_requires_authentication(self):
         response = self.client.get(f"{HOME_BASE}/")
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_visible_markets_include_general_market_linked_to_service_city(self):
+        shared_market = Market.objects.create(
+            name="Shared Market",
+            branch="Shared",
+            scope=Market.Scope.GENERAL,
+            classification=self.local_classification,
+        )
+        shared_market.service_cities.add(self.service_city)
+
+        market_ids = set(
+            visible_market_queryset(self.user).values_list("id", flat=True)
+        )
+
+        self.assertIn(shared_market.id, market_ids)
+        self.assertIn(self.local_market.id, market_ids)
+        self.assertNotIn(self.remote_market.id, market_ids)
 
     def test_market_region_options_me_and_patch(self):
         self.authenticate()

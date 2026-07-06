@@ -170,9 +170,9 @@ def visible_market_queryset(user):
 
     service_city_id = selection["service_city"]["id"]
     return markets.filter(
-        scope=Market.Scope.SERVICE_CITY,
         service_cities__id=service_city_id,
         service_cities__is_active=True,
+        scope__in=[Market.Scope.GENERAL, Market.Scope.SERVICE_CITY],
     ).distinct()
 
 
@@ -214,7 +214,7 @@ def market_matches_region(market, selection):
     if selection["mode"] == User.MarketRegionMode.GENERAL:
         return market.scope == Market.Scope.GENERAL
     return (
-        market.scope == Market.Scope.SERVICE_CITY
+        market.scope in [Market.Scope.GENERAL, Market.Scope.SERVICE_CITY]
         and market.service_cities.filter(
             pk=selection["service_city"]["id"],
             is_active=True,
@@ -288,12 +288,7 @@ def order_region_validation_error(user, variants, offers):
                 break
         return errors or None
 
-    if any(
-        variant.product.market.scope == Market.Scope.GENERAL
-        for variant in variants
-    ):
-        errors["items"] = MIXED_MARKET_SCOPE_MESSAGE
-    elif any(not product_matches_region(variant.product, selection) for variant in variants):
+    if any(not product_matches_region(variant.product, selection) for variant in variants):
         errors["items"] = MIXED_SERVICE_CITY_MARKETS_MESSAGE
 
     for offer in offers:

@@ -9,10 +9,13 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models import CourierProfile
 from catalog.models import (
+    CategoryAttribute,
     CategoryClassification,
+    CategoryOption,
     Product,
     ProductCategory,
     ProductVariant,
+    VariantAttributeValue,
 )
 from locations.models import Address, DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
@@ -115,6 +118,14 @@ class OrderAPITests(APITestCase):
             classification=category_classification,
             name="Main Meals",
         )
+        size_attribute = CategoryAttribute.objects.create(
+            category=category,
+            name="Size",
+        )
+        large_option = CategoryOption.objects.create(
+            attribute=size_attribute,
+            value="Large",
+        )
         self.product = Product.objects.create(
             market=self.market,
             category=category,
@@ -124,6 +135,11 @@ class OrderAPITests(APITestCase):
             product=self.product,
             price=Decimal("500.00"),
             sku="BURGER-1",
+        )
+        VariantAttributeValue.objects.create(
+            variant=self.variant,
+            attribute=size_attribute,
+            option=large_option,
         )
         self.second_product = Product.objects.create(
             market=self.second_market,
@@ -266,9 +282,60 @@ class OrderAPITests(APITestCase):
         self.assertEqual(detail_response.data["discount"], "100.00")
         self.assertEqual(detail_response.data["delivery_price"], "120.00")
         self.assertEqual(detail_response.data["total_price"], "1020.00")
+        self.assertEqual(detail_response.data["items"][0]["product_name"], "Burger")
+        self.assertEqual(detail_response.data["items"][0]["variant_name"], "Size: Large")
+        self.assertEqual(
+            detail_response.data["market_sections"][0]["items"][0]["product_name"],
+            "Burger",
+        )
+        self.assertEqual(
+            detail_response.data["market_sections"][0]["items"][0]["variant_name"],
+            "Size: Large",
+        )
         self.assertEqual(detail_response.data["description"], "Call on arrival")
         self.assertEqual(detail_response.data["delivery_note"], "Leave at reception")
         self.assertEqual(update_response.data["description"], "Updated description")
+
+    def test_admin_can_update_manual_delivery_price_and_total(self):
+        other_address = Address.objects.create(
+            user=self.customer,
+            name="Other Area",
+            service_city=self.service_city,
+            delivery_type=Address.DeliveryType.DELIVERY,
+        )
+        payload = self.payload()
+        payload["delivery_address_id"] = other_address.id
+        payload.pop("service_city_id")
+        payload["offers"] = []
+        create_response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+        self.assertIsNone(create_response.data["delivery_price"])
+        self.assertEqual(create_response.data["total_price"], "1000.00")
+
+        response = self.client.patch(
+            f"{ORDERS_BASE}/{create_response.data['id']}/delivery-price/",
+            {"delivery_price": "75.50"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["delivery_price"], "75.50")
+        self.assertEqual(response.data["total_price"], "1075.50")
+        order = Order.objects.get(pk=create_response.data["id"])
+        self.assertEqual(order.delivery_price, Decimal("75.50"))
+        self.assertEqual(order.total_price, Decimal("1075.50"))
+
+    def test_admin_delivery_price_update_rejects_terminal_orders(self):
+        order_id = self.create_order().data["id"]
+        Order.objects.filter(pk=order_id).update(status=Order.Status.CANCELLED)
+
+        response = self.client.patch(
+            f"{ORDERS_BASE}/{order_id}/delivery-price/",
+            {"delivery_price": "75.50"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_admin_order_create_rejects_unsafe_system_fields(self):
         unsafe_payload = self.payload()

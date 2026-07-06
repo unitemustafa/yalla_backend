@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -8,6 +9,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import CourierProfile
 from markets.models import Market, MarketClassification
+from offers.models import Offer
 from orders.models import Order
 
 from .models import Address, DeliveryArea, ServiceCity
@@ -661,7 +663,69 @@ class LocationManagementAPITests(TestCase):
             total_price=Decimal("125.00"),
         )
 
-    def test_admin_can_crud_service_cities(self):
+    def create_market_for_city(self, city, name="City Market"):
+        classification = MarketClassification.objects.create(
+            name=f"{name} Classification"
+        )
+        market = Market.objects.create(
+            classification=classification,
+            name=name,
+        )
+        market.service_cities.add(city)
+        return market
+
+    def create_offer_for_city(self, city):
+        now = timezone.now()
+        return Offer.objects.create(
+            market=self.create_market_for_city(city, "Offer Market"),
+            scope=Offer.Scope.SERVICE_CITY,
+            service_city=city,
+            title="City Offer",
+            discount=Decimal("10.00"),
+            start_time=now,
+            end_time=now + timedelta(days=1),
+            status=Offer.Status.ACTIVE,
+        )
+
+    def create_client_user(self, username, city=None):
+        return User.objects.create_user(
+            username=username,
+            email=f"{username}@example.com",
+            phone=f"+2015{User.objects.count():08d}",
+            password="Passw0rd!",
+            role=User.Role.CLIENT,
+            market_region_mode=(
+                User.MarketRegionMode.SERVICE_CITY if city is not None else None
+            ),
+            market_region_service_city=city,
+            market_region_updated_at=timezone.now() if city is not None else None,
+        )
+
+    def test_service_city_list_returns_real_counts(self):
+        city = ServiceCity.objects.create(name="Count City")
+        DeliveryArea.objects.create(
+            service_city=city,
+            name="Area One",
+            delivery_price=Decimal("20.00"),
+        )
+        DeliveryArea.objects.create(
+            service_city=city,
+            name="Area Two",
+            delivery_price=Decimal("25.00"),
+        )
+        market = self.create_market_for_city(city)
+        market.service_cities.add(city)
+        self.create_offer_for_city(city)
+
+        response = self.client.get("/api/v1/locations/service-cities/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        item = next(city_data for city_data in response.data if city_data["id"] == city.id)
+        self.assertEqual(item["delivery_area_count"], 2)
+        self.assertEqual(item["market_count"], 2)
+        self.assertEqual(item["offer_count"], 1)
+
+    def test_admin_can_create_service_city(self):
         create_response = self.client.post(
             "/api/v1/locations/service-cities/",
             {
@@ -675,28 +739,182 @@ class LocationManagementAPITests(TestCase):
         )
 
         self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
-        city_id = create_response.data["id"]
         self.assertEqual(create_response.data["name"], "Algiers")
+        self.assertEqual(create_response.data["center_latitude"], "36.7525000")
+        self.assertEqual(create_response.data["center_longitude"], "3.0420000")
+        self.assertEqual(create_response.data["radius_km"], "25.00")
+        self.assertTrue(create_response.data["is_active"])
+        self.assertEqual(create_response.data["delivery_area_count"], 0)
+        self.assertEqual(create_response.data["market_count"], 0)
+        self.assertEqual(create_response.data["offer_count"], 0)
 
-        list_response = self.client.get("/api/v1/locations/service-cities/")
-        detail_response = self.client.get(
-            f"/api/v1/locations/service-cities/{city_id}/"
+    def test_admin_can_update_service_city_coordinates_radius_and_status(self):
+        city = ServiceCity.objects.create(
+            name="Update City",
+            center_latitude=Decimal("30.0000000"),
+            center_longitude=Decimal("31.0000000"),
+            radius_km=Decimal("10.00"),
+            delivery_price=Decimal("45.00"),
         )
-        update_response = self.client.patch(
-            f"/api/v1/locations/service-cities/{city_id}/",
-            {"radius_km": "30.00", "is_active": False},
+
+        response = self.client.patch(
+            f"/api/v1/locations/service-cities/{city.id}/",
+            {
+                "center_latitude": "29.9000000",
+                "center_longitude": "30.9000000",
+                "radius_km": "30.00",
+                "is_active": False,
+            },
             format="json",
         )
-        delete_response = self.client.delete(
-            f"/api/v1/locations/service-cities/{city_id}/"
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["center_latitude"], "29.9000000")
+        self.assertEqual(response.data["center_longitude"], "30.9000000")
+        self.assertEqual(response.data["radius_km"], "30.00")
+        self.assertFalse(response.data["is_active"])
+        city.refresh_from_db()
+        self.assertEqual(city.delivery_price, Decimal("45.00"))
+
+    def test_service_city_rejects_invalid_latitude_longitude_and_radius(self):
+        invalid_latitude = self.client.post(
+            "/api/v1/locations/service-cities/",
+            {
+                "name": "Invalid Latitude",
+                "center_latitude": "91.0000000",
+                "center_longitude": "31.0000000",
+                "radius_km": "10.00",
+            },
+            format="json",
+        )
+        invalid_longitude = self.client.post(
+            "/api/v1/locations/service-cities/",
+            {
+                "name": "Invalid Longitude",
+                "center_latitude": "30.0000000",
+                "center_longitude": "181.0000000",
+                "radius_km": "10.00",
+            },
+            format="json",
+        )
+        zero_radius = self.client.post(
+            "/api/v1/locations/service-cities/",
+            {
+                "name": "Zero Radius",
+                "center_latitude": "30.0000000",
+                "center_longitude": "31.0000000",
+                "radius_km": "0.00",
+            },
+            format="json",
         )
 
-        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(update_response.data["radius_km"], "30.00")
-        self.assertFalse(update_response.data["is_active"])
-        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(ServiceCity.objects.filter(pk=city_id).exists())
+        self.assertEqual(invalid_latitude.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("center_latitude", invalid_latitude.data)
+        self.assertEqual(invalid_longitude.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("center_longitude", invalid_longitude.data)
+        self.assertEqual(zero_radius.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("radius_km", zero_radius.data)
+
+    def test_empty_service_city_deletes_successfully(self):
+        city = ServiceCity.objects.create(name="Empty City")
+
+        response = self.client.delete(f"/api/v1/locations/service-cities/{city.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(ServiceCity.objects.filter(pk=city.id).exists())
+
+    def assert_service_city_delete_blocked(self, city, expected_relation):
+        response = self.client.delete(f"/api/v1/locations/service-cities/{city.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "service_city_in_use")
+        self.assertIn(expected_relation, response.data["relations"])
+        self.assertGreater(response.data["relations"][expected_relation], 0)
+        self.assertTrue(ServiceCity.objects.filter(pk=city.id).exists())
+        return response
+
+    def test_service_city_with_delivery_areas_is_not_deleted(self):
+        city = ServiceCity.objects.create(name="Area City")
+        DeliveryArea.objects.create(
+            service_city=city,
+            name="Area",
+            delivery_price=Decimal("20.00"),
+        )
+
+        self.assert_service_city_delete_blocked(city, "delivery_areas")
+
+    def test_service_city_with_markets_is_not_deleted(self):
+        city = ServiceCity.objects.create(name="Market City")
+        self.create_market_for_city(city)
+
+        self.assert_service_city_delete_blocked(city, "markets")
+
+    def test_service_city_with_offers_is_not_deleted(self):
+        city = ServiceCity.objects.create(name="Offer City")
+        self.create_offer_for_city(city)
+
+        self.assert_service_city_delete_blocked(city, "offers")
+
+    def test_service_city_with_couriers_is_not_deleted(self):
+        city = ServiceCity.objects.create(name="Courier City")
+        courier = User.objects.create_user(
+            username="city_courier",
+            email="city-courier@example.com",
+            phone="+201000000088",
+            password="Passw0rd!",
+            role=User.Role.REPRESENTATIVE,
+        )
+        CourierProfile.objects.create(
+            user=courier,
+            vehicle_type="Bike",
+            plate_number="CITY123",
+            service_city=city,
+        )
+
+        self.assert_service_city_delete_blocked(city, "couriers")
+
+    def test_service_city_with_addresses_is_not_deleted(self):
+        city = ServiceCity.objects.create(name="Address City")
+        Address.objects.create(
+            user=self.create_client_user("city_address_user"),
+            name="Home",
+            details="Street 1",
+            service_city=city,
+            delivery_type=Address.DeliveryType.DELIVERY,
+        )
+
+        self.assert_service_city_delete_blocked(city, "addresses")
+
+    def test_service_city_with_orders_is_not_deleted(self):
+        city = ServiceCity.objects.create(name="Order City")
+        user = self.create_client_user("city_order_user")
+        market = self.create_market_for_city(city, "Order Market")
+        Order.objects.create(
+            user=user,
+            market=market,
+            service_city=city,
+            order_scope=Order.Scope.SERVICE_CITY,
+            delivery_type=Order.DeliveryType.DELIVERY,
+            payment_method="cash_on_delivery",
+            subtotal_price=Decimal("100.00"),
+            total_price=Decimal("100.00"),
+        )
+
+        self.assert_service_city_delete_blocked(city, "orders")
+
+    def test_service_city_with_region_users_is_not_deleted_and_counts_returned(self):
+        city = ServiceCity.objects.create(name="Region City")
+        self.create_client_user("city_region_user", city)
+        DeliveryArea.objects.create(
+            service_city=city,
+            name="Region Area",
+            delivery_price=Decimal("20.00"),
+        )
+
+        response = self.assert_service_city_delete_blocked(city, "users")
+
+        self.assertEqual(response.data["relations"]["delivery_areas"], 1)
+        self.assertEqual(response.data["relations"]["users"], 1)
 
     def test_admin_can_crud_and_filter_delivery_areas(self):
         city = ServiceCity.objects.create(
