@@ -14,5 +14,6 @@ htmlcov/
 db.sqlite3
 media/
 staticfiles/
-API_REPORT.md
-Yalla System APIs.postman_collection.json
+additions/
+docs/API_REPORT.md
+docs/Yalla System APIs.postman_collection.json

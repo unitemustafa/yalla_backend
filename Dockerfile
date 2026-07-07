@@ -20,6 +20,8 @@ RUN python -m pip install --upgrade pip \
 
 COPY --chown=app:app . .
 
+RUN python manage.py collectstatic --noinput
+
 USER app
 
 EXPOSE 8000

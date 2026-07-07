@@ -1,6 +1,27 @@
+# Python
 __pycache__/
-*.py[cod].venv/
-.serena/
+*.py[cod]
+
+# Virtual environments
 .venv/
-media/
+venv/
+
+# Test and coverage output
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local configuration and databases
 .env
+*.sqlite3
+db.sqlite3
+
+# Generated/runtime artifacts
+staticfiles/
+media/
+additions/
+
+# Local tool state
+.serena/
