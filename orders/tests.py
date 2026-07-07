@@ -22,7 +22,7 @@ from markets.models import Market, MarketClassification
 from offers.models import Offer
 from notifications.models import Notification
 
-from .models import Order, OrderItem, OrderMarketSection, OrderOffer
+from .models import Order, OrderEvent, OrderItem, OrderMarketSection, OrderOffer
 
 User = get_user_model()
 ORDERS_BASE = "/api/v1/orders"
@@ -294,7 +294,90 @@ class OrderAPITests(APITestCase):
         )
         self.assertEqual(detail_response.data["description"], "Call on arrival")
         self.assertEqual(detail_response.data["delivery_note"], "Leave at reception")
+        self.assertEqual(
+            detail_response.data["history"][0]["event_type"],
+            OrderEvent.EventType.ORDER_CREATED,
+        )
+        self.assertEqual(detail_response.data["history"][0]["actor"]["id"], self.admin.id)
+        self.assertEqual(detail_response.data["allowed_statuses"], [Order.Status.CANCELLED])
         self.assertEqual(update_response.data["description"], "Updated description")
+
+    def test_admin_create_sets_selected_client_as_order_user(self):
+        response = self.client.post(f"{ORDERS_BASE}/", self.payload(), format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        order = Order.objects.get(id=response.data["id"])
+        self.assertEqual(order.user_id, self.customer.id)
+        self.assertEqual(response.data["user_id"], self.customer.id)
+
+    def test_admin_create_without_user_id_is_rejected(self):
+        payload = self.payload()
+        payload.pop("user_id")
+
+        response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("user_id", response.data)
+        self.assertFalse(Order.objects.exists())
+
+    def test_admin_create_with_invalid_or_non_client_user_id_is_rejected(self):
+        inactive_client = User.objects.create_user(
+            username="inactive-create-client",
+            email="inactive-create-client@example.com",
+            phone="+213555700205",
+            password="Password1!",
+            role=User.Role.CLIENT,
+            is_active=False,
+        )
+        deleted_client = User.objects.create_user(
+            username="deleted-create-client",
+            email="deleted-create-client@example.com",
+            phone="+213555700206",
+            password="Password1!",
+            role=User.Role.CLIENT,
+        )
+        deleted_client.deleted_at = timezone.now()
+        deleted_client.save(update_fields=["deleted_at"])
+
+        for user_id in (
+            999999,
+            self.admin.id,
+            self.representative.id,
+            inactive_client.id,
+            deleted_client.id,
+        ):
+            with self.subTest(user_id=user_id):
+                payload = self.payload()
+                payload["user_id"] = user_id
+                response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
+
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertIn("user_id", response.data)
+        self.assertFalse(Order.objects.exists())
+
+    def test_representative_remains_forbidden_for_admin_create(self):
+        token = RefreshToken.for_user(self.representative).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.post(f"{ORDERS_BASE}/", self.payload(), format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(Order.objects.exists())
+
+    def test_client_cannot_create_another_user_order_with_user_id(self):
+        self.authenticate_customer()
+        payload = {
+            "user_id": self.other_customer.id,
+            "address_id": self.address.id,
+            "payment_method": "cash_on_delivery",
+            "items": [{"variant_id": self.variant.id, "quantity": 1}],
+        }
+
+        response = self.client.post(f"{ORDERS_BASE}/create/", payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("user_id", response.data)
+        self.assertFalse(Order.objects.exists())
 
     def test_admin_can_update_manual_delivery_price_and_total(self):
         other_address = Address.objects.create(
@@ -321,6 +404,14 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         self.assertEqual(response.data["delivery_price"], "75.50")
         self.assertEqual(response.data["total_price"], "1075.50")
+        self.assertEqual(
+            response.data["history"][-1]["event_type"],
+            OrderEvent.EventType.DELIVERY_PRICE_CHANGED,
+        )
+        self.assertEqual(
+            response.data["history"][-1]["metadata"]["to_delivery_price"],
+            "75.50",
+        )
         order = Order.objects.get(pk=create_response.data["id"])
         self.assertEqual(order.delivery_price, Decimal("75.50"))
         self.assertEqual(order.total_price, Decimal("1075.50"))
@@ -444,6 +535,97 @@ class OrderAPITests(APITestCase):
             {self.market.id, self.second_market.id},
         )
 
+    def test_admin_preview_and_create_totals_match_for_fixed_area_delivery(self):
+        payload = {
+            "user_id": self.customer.id,
+            "address_id": self.address.id,
+            "payment_method": "cash_on_delivery",
+            "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            "offers": [],
+        }
+
+        preview_response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            payload,
+            format="json",
+        )
+        create_response = self.client.post(
+            f"{ORDERS_BASE}/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(preview_response.status_code, status.HTTP_200_OK, preview_response.data)
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+        order = Order.objects.get(id=create_response.data["id"])
+        self.assertEqual(preview_response.data["summary"]["subtotal"], f"{order.subtotal_price:.2f}")
+        self.assertEqual(preview_response.data["summary"]["discount_total"], f"{order.discount:.2f}")
+        self.assertEqual(preview_response.data["summary"]["delivery_total"], f"{order.delivery_price:.2f}")
+        self.assertEqual(preview_response.data["summary"]["grand_total"], f"{order.total_price:.2f}")
+
+    def test_fixed_area_delivery_is_included_once_in_preview_and_admin_create(self):
+        self.variant.price = Decimal("157.50")
+        self.variant.save(update_fields=["price"])
+        self.delivery_area.delivery_price = Decimal("40.00")
+        self.delivery_area.save(update_fields=["delivery_price"])
+
+        payload = {
+            "user_id": self.customer.id,
+            "address_id": self.address.id,
+            "payment_method": "cash_on_delivery",
+            "items": [{"variant_id": self.variant.id, "quantity": 1}],
+        }
+
+        preview_response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            payload,
+            format="json",
+        )
+        create_response = self.client.post(
+            f"{ORDERS_BASE}/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(preview_response.status_code, status.HTTP_200_OK, preview_response.data)
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+        order = Order.objects.get(id=create_response.data["id"])
+        self.assertEqual(preview_response.data["summary"]["subtotal"], "157.50")
+        self.assertEqual(preview_response.data["summary"]["delivery_total"], "40.00")
+        self.assertEqual(preview_response.data["summary"]["grand_total"], "197.50")
+        self.assertEqual(order.subtotal_price, Decimal("157.50"))
+        self.assertEqual(order.delivery_price, Decimal("40.00"))
+        self.assertEqual(order.total_price, Decimal("197.50"))
+
+    def test_admin_create_writes_initial_order_event_with_admin_actor(self):
+        response = self.client.post(f"{ORDERS_BASE}/", self.payload(), format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        event = OrderEvent.objects.get(order_id=response.data["id"])
+        self.assertEqual(event.event_type, OrderEvent.EventType.ORDER_CREATED)
+        self.assertEqual(event.actor_id, self.admin.id)
+        self.assertEqual(event.order.user_id, self.customer.id)
+
+    def test_failed_admin_create_does_not_leave_partial_rows(self):
+        other_address = Address.objects.create(
+            user=self.other_customer,
+            name="Other User Home",
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+        )
+        payload = self.payload()
+        payload["delivery_address_id"] = other_address.id
+
+        response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(Order.objects.exists())
+        self.assertFalse(OrderMarketSection.objects.exists())
+        self.assertFalse(OrderItem.objects.exists())
+        self.assertFalse(OrderOffer.objects.exists())
+        self.assertFalse(OrderEvent.objects.exists())
+
     def test_admin_create_rejects_address_for_another_user(self):
         other_address = Address.objects.create(
             user=self.other_customer,
@@ -458,7 +640,7 @@ class OrderAPITests(APITestCase):
         response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("delivery_address_id", response.data)
+        self.assertIn("address_id", response.data)
 
     def test_admin_create_rejects_service_city_mismatch(self):
         other_city = ServiceCity.objects.create(
@@ -502,17 +684,112 @@ class OrderAPITests(APITestCase):
             ).exists()
         )
 
-    def test_status_api_changes_status(self):
+    def test_admin_order_list_and_detail_include_assigned_representative_summary(self):
+        order_id = self.create_order().data["id"]
+        self.client.post(f"/api/v1/admin/orders/{order_id}/approve/", format="json")
+        assign_response = self.client.patch(
+            f"{ORDERS_BASE}/{order_id}/assignment/",
+            {"representative_id": self.representative.id},
+            format="json",
+        )
+        self.assertEqual(assign_response.status_code, status.HTTP_200_OK)
+
+        list_response = self.client.get(f"{ORDERS_BASE}/")
+        detail_response = self.client.get(f"{ORDERS_BASE}/{order_id}/")
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        list_order = list_response.data[0]
+        self.assertEqual(
+            list_order["assigned_representative"]["id"],
+            self.representative.id,
+        )
+        self.assertEqual(
+            list_order["assigned_representative"]["phone"],
+            self.representative.phone,
+        )
+        self.assertEqual(
+            detail_response.data["assigned_representative"]["service_city"]["id"],
+            self.service_city.id,
+        )
+        self.assertEqual(
+            detail_response.data["assigned_representative"]["vehicle_type"],
+            "Motorcycle",
+        )
+        self.assertNotIn("history", list_order)
+        self.assertIn("history", detail_response.data)
+        self.assertIn("allowed_statuses", detail_response.data)
+
+    def test_unassigned_order_serializes_null_representative_summary(self):
         order_id = self.create_order().data["id"]
 
+        list_response = self.client.get(f"{ORDERS_BASE}/")
+        detail_response = self.client.get(f"{ORDERS_BASE}/{order_id}/")
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(list_response.data[0]["assigned_representative"])
+        self.assertIsNone(detail_response.data["assigned_representative"])
+
+    def test_assignment_and_unassignment_create_history_events(self):
+        order_id = self.create_order().data["id"]
+        self.client.post(f"/api/v1/admin/orders/{order_id}/approve/", format="json")
+        self.client.patch(
+            f"{ORDERS_BASE}/{order_id}/assignment/",
+            {"representative_id": self.representative.id},
+            format="json",
+        )
+
         response = self.client.patch(
-            f"{ORDERS_BASE}/{order_id}/status/",
-            {"status": Order.Status.UNDER_PREPARATION},
+            f"{ORDERS_BASE}/{order_id}/assignment/",
+            {"representative_id": None},
             format="json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data["assigned_representative"])
         self.assertEqual(response.data["status"], Order.Status.UNDER_PREPARATION)
+        event_types = [event["event_type"] for event in response.data["history"]]
+        self.assertIn(OrderEvent.EventType.ASSIGNED, event_types)
+        self.assertIn(OrderEvent.EventType.UNASSIGNED, event_types)
+
+    def test_status_api_changes_status(self):
+        order_id = self.create_order().data["id"]
+        approve_response = self.client.post(
+            f"/api/v1/admin/orders/{order_id}/approve/",
+            format="json",
+        )
+        self.assertEqual(approve_response.status_code, status.HTTP_200_OK)
+
+        response = self.client.patch(
+            f"{ORDERS_BASE}/{order_id}/status/",
+            {"status": Order.Status.CANCELLED},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], Order.Status.CANCELLED)
+        self.assertEqual(
+            response.data["history"][-1]["event_type"],
+            OrderEvent.EventType.CANCELLED,
+        )
+
+    def test_status_api_rejects_terminal_and_failed_delivery_transitions(self):
+        order_id = self.create_order().data["id"]
+        self.client.post(f"/api/v1/admin/orders/{order_id}/approve/", format="json")
+        order = Order.objects.get(pk=order_id)
+        order.status = Order.Status.FAILED_DELIVERY
+        order.save(update_fields=["status", "updated_at"])
+
+        response = self.client.patch(
+            f"{ORDERS_BASE}/{order_id}/status/",
+            {"status": Order.Status.DELIVERED},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        detail_response = self.client.get(f"{ORDERS_BASE}/{order_id}/")
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_response.data["allowed_statuses"], [])
 
     def test_delete_cancels_order_without_removing_it(self):
         order_id = self.create_order().data["id"]
@@ -521,6 +798,10 @@ class OrderAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], Order.Status.CANCELLED)
+        self.assertEqual(
+            response.data["history"][-1]["event_type"],
+            OrderEvent.EventType.CANCELLED,
+        )
         self.assertTrue(Order.objects.filter(pk=order_id).exists())
 
     def test_order_detail_serializes_inactive_delivery_address(self):
@@ -765,6 +1046,211 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.data["summary"]["discount_total"], "240.00")
         self.assertEqual(response.data["summary"]["delivery_total"], "120.00")
         self.assertEqual(response.data["summary"]["grand_total"], "1580.00")
+
+    def test_client_can_preview_their_own_order(self):
+        self.authenticate_customer()
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "user_id": self.customer.id,
+                "address_id": self.address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["selected_address"]["id"], self.address.id)
+        self.assertEqual(response.data["summary"]["grand_total"], "620.00")
+
+    def test_client_cannot_preview_another_user_by_sending_user_id(self):
+        self.authenticate_customer()
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "user_id": self.other_customer.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("user_id", response.data)
+
+    def test_admin_can_preview_for_selected_active_client(self):
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "user_id": self.customer.id,
+                "delivery_address_id": self.address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["selected_address"]["id"], self.address.id)
+        self.assertEqual(response.data["summary"]["grand_total"], "620.00")
+
+    def test_admin_preview_without_user_id_is_rejected(self):
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {"items": [{"variant_id": self.variant.id, "quantity": 1}]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("user_id", response.data)
+
+    def test_admin_preview_with_invalid_user_id_is_rejected(self):
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "user_id": 999999,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("user_id", response.data)
+
+    def test_admin_preview_with_representative_or_admin_user_id_is_rejected(self):
+        for user in (self.representative, self.admin):
+            with self.subTest(user=user.username):
+                response = self.client.post(
+                    f"{ORDERS_BASE}/preview/",
+                    {
+                        "user_id": user.id,
+                        "items": [{"variant_id": self.variant.id, "quantity": 1}],
+                    },
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertIn("user_id", response.data)
+
+    def test_admin_preview_with_inactive_or_deleted_client_is_rejected(self):
+        inactive_client = User.objects.create_user(
+            username="inactive-preview-client",
+            email="inactive-preview-client@example.com",
+            phone="+213555700105",
+            password="Password1!",
+            role=User.Role.CLIENT,
+            is_active=False,
+        )
+        deleted_client = User.objects.create_user(
+            username="deleted-preview-client",
+            email="deleted-preview-client@example.com",
+            phone="+213555700106",
+            password="Password1!",
+            role=User.Role.CLIENT,
+        )
+        deleted_client.deleted_at = timezone.now()
+        deleted_client.save(update_fields=["deleted_at"])
+
+        for user in (inactive_client, deleted_client):
+            with self.subTest(user=user.username):
+                response = self.client.post(
+                    f"{ORDERS_BASE}/preview/",
+                    {
+                        "user_id": user.id,
+                        "items": [{"variant_id": self.variant.id, "quantity": 1}],
+                    },
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertIn("user_id", response.data)
+
+    def test_representative_remains_forbidden_for_preview(self):
+        token = RefreshToken.for_user(self.representative).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "user_id": self.customer.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_preview_uses_selected_clients_address_and_saved_region(self):
+        self.other_customer.market_region_mode = User.MarketRegionMode.SERVICE_CITY
+        self.other_customer.market_region_service_city = self.service_city
+        self.other_customer.market_region_updated_at = timezone.now()
+        self.other_customer.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+        other_address = Address.objects.create(
+            user=self.other_customer,
+            name="Other Customer Home",
+            latitude=Decimal("36.7525000"),
+            longitude=Decimal("3.0420000"),
+            service_city=self.service_city,
+            delivery_area=self.delivery_area,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+            is_default=True,
+        )
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "user_id": self.other_customer.id,
+                "address_id": other_address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["selected_address"]["id"], other_address.id)
+        self.assertEqual(response.data["addresses"][0]["id"], other_address.id)
+        self.assertNotIn(self.address.id, [item["id"] for item in response.data["addresses"]])
+        self.assertEqual(response.data["service_city"]["id"], self.service_city.id)
+
+    def test_preview_totals_match_normal_create_order_calculation(self):
+        preview_response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {
+                "user_id": self.customer.id,
+                "address_id": self.address.id,
+                "items": [{"variant_id": self.variant.id, "quantity": 2}],
+                "offers": [{"offer_id": self.offer.id}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(preview_response.status_code, status.HTTP_200_OK, preview_response.data)
+        self.assertFalse(Order.objects.exists())
+
+        self.authenticate_customer()
+        create_response = self.client.post(
+            f"{ORDERS_BASE}/create/",
+            {
+                "address_id": self.address.id,
+                "payment_method": "cash_on_delivery",
+                "items": [{"variant_id": self.variant.id, "quantity": 2}],
+                "offers": [{"offer_id": self.offer.id}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+        order = Order.objects.get(id=create_response.data[0]["id"])
+        self.assertEqual(preview_response.data["summary"]["subtotal"], f"{order.subtotal_price:.2f}")
+        self.assertEqual(preview_response.data["summary"]["discount_total"], f"{order.discount:.2f}")
+        self.assertEqual(preview_response.data["summary"]["delivery_total"], f"{order.delivery_price:.2f}")
+        self.assertEqual(preview_response.data["summary"]["grand_total"], f"{order.total_price:.2f}")
 
     def test_client_preview_other_delivery_has_null_delivery_price(self):
         other_address = Address.objects.create(

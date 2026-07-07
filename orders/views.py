@@ -2,14 +2,15 @@ from django.contrib.auth import get_user_model
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Prefetch
 from django.utils import timezone
-from rest_framework import generics, status
+from rest_framework import generics, serializers, status
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import CourierProfile
-from .models import Order, OrderMarketSection
+from .models import Order, OrderEvent, OrderMarketSection
 from .serializers import (
     AdminOrderCreateSerializer,
     ClientOrderCreateSerializer,
@@ -18,11 +19,17 @@ from .serializers import (
     CourierOrderStatusSerializer,
     OrderAssignmentSerializer,
     OrderDeliveryPriceSerializer,
+    OrderListSerializer,
     OrderPreviewSerializer,
     OrderReviewActionSerializer,
     OrderSerializer,
     OrderStatusSerializer,
     RepresentativeSummarySerializer,
+)
+from .services import (
+    allowed_statuses_for_order,
+    record_order_event,
+    resolve_order_target_user,
 )
 from notifications.services import (
     create_order_assigned_notification,
@@ -33,11 +40,78 @@ from notifications.services import (
 User = get_user_model()
 
 
+CREATE_SYSTEM_CONTROLLED_FIELDS = {
+    "assigned_representative_id",
+    "assigned_at",
+    "delivered_at",
+    "delivery_area_id",
+    "delivery_type",
+    "delivery_price",
+    "order_scope",
+    "discount",
+    "subtotal_price",
+    "total_price",
+    "image",
+    "delivery_proof",
+    "status",
+    "review_status",
+    "approved_by",
+    "approved_at",
+    "rejected_by",
+    "rejected_at",
+    "rejection_reason",
+}
+
+
+def normalized_order_request_data(data, *, include_create_fields=False):
+    if include_create_fields:
+        errors = {
+            field: "This field is controlled by the system on create."
+            for field in sorted(CREATE_SYSTEM_CONTROLLED_FIELDS)
+            if field in data
+        }
+        if errors:
+            raise serializers.ValidationError(errors)
+
+    normalized = {
+        "items": [
+            {
+                "variant_id": item.get("variant_id"),
+                "quantity": item.get("quantity"),
+            }
+            for item in data.get("items", [])
+        ],
+        "offers": [
+            {
+                "offer_id": item.get("offer_id"),
+            }
+            for item in data.get("offers", [])
+        ],
+    }
+
+    address_id = data.get("address_id", data.get("delivery_address_id"))
+    service_city_id = data.get("service_city_id")
+    if address_id not in (None, ""):
+        normalized["address_id"] = address_id
+    if service_city_id not in (None, ""):
+        normalized["service_city_id"] = service_city_id
+
+    if include_create_fields:
+        for field in ("payment_method", "description", "delivery_note"):
+            value = data.get(field)
+            if value not in (None, ""):
+                normalized[field] = value
+
+    return normalized
+
+
 class IsAdminRole(BasePermission):
     message = "Only admin users can manage orders."
 
     def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.role == User.Role.ADMIN
+        return request.user.is_authenticated and (
+            request.user.role == User.Role.ADMIN or request.user.is_staff
+        )
 
 
 class IsClientRole(BasePermission):
@@ -66,6 +140,8 @@ def order_queryset():
             "delivery_address__delivery_area",
             "delivery_address__delivery_area__service_city",
             "assigned_representative",
+            "assigned_representative__courier_profile",
+            "assigned_representative__courier_profile__service_city",
             "market",
             "service_city",
             "delivery_area",
@@ -86,6 +162,13 @@ def order_queryset():
             "market_sections__items__variant__attribute_values__attribute",
             "market_sections__items__variant__attribute_values__option",
             "market_sections__offers__offer",
+            Prefetch(
+                "history_events",
+                queryset=OrderEvent.objects.select_related("actor").order_by(
+                    "created_at",
+                    "id",
+                ),
+            ),
         )
         .order_by("-created_at", "-id")
     )
@@ -132,7 +215,7 @@ class OrderListCreateView(generics.ListCreateAPIView):
     def get_serializer_class(self):
         if self.request.method == "POST":
             return AdminOrderCreateSerializer
-        return OrderSerializer
+        return OrderListSerializer
 
     def get_queryset(self):
         queryset = order_queryset()
@@ -142,8 +225,26 @@ class OrderListCreateView(generics.ListCreateAPIView):
         return queryset
 
     @transaction.atomic
-    def perform_create(self, serializer):
-        serializer.save()
+    def create(self, request, *args, **kwargs):
+        target_user = resolve_order_target_user(request, action="create")
+        data = normalized_order_request_data(request.data, include_create_fields=True)
+        serializer = ClientOrderCreateSerializer(
+            data=data,
+            context={"request": request, "preview_user": target_user},
+        )
+        serializer.is_valid(raise_exception=True)
+        orders = serializer.create_orders()
+        order = orders[0]
+        record_order_event(
+            order,
+            OrderEvent.EventType.ORDER_CREATED,
+            actor=self.request.user,
+            to_status=order.status,
+        )
+        return Response(
+            OrderSerializer(order, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class ClientOrderListView(generics.ListAPIView):
@@ -159,12 +260,14 @@ class ClientOrderListView(generics.ListAPIView):
 
 
 class OrderPreviewView(APIView):
-    permission_classes = (IsAuthenticated, IsClientRole)
+    permission_classes = (IsAuthenticated,)
 
     def post(self, request):
+        preview_user = resolve_order_target_user(request, action="preview")
+        data = normalized_order_request_data(request.data)
         serializer = OrderPreviewSerializer(
-            data=request.data,
-            context={"request": request},
+            data=data,
+            context={"request": request, "preview_user": preview_user},
         )
         serializer.is_valid(raise_exception=True)
         return Response(serializer.preview_data())
@@ -175,12 +278,21 @@ class ClientOrderCreateView(APIView):
 
     @transaction.atomic
     def post(self, request):
+        target_user = resolve_order_target_user(request, action="create")
+        data = normalized_order_request_data(request.data, include_create_fields=True)
         serializer = ClientOrderCreateSerializer(
-            data=request.data,
-            context={"request": request},
+            data=data,
+            context={"request": request, "preview_user": target_user},
         )
         serializer.is_valid(raise_exception=True)
         orders = serializer.create_orders()
+        for order in orders:
+            record_order_event(
+                order,
+                OrderEvent.EventType.ORDER_CREATED,
+                actor=request.user,
+                to_status=order.status,
+            )
         return Response(
             OrderSerializer(
                 orders,
@@ -206,6 +318,7 @@ class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         order = self.get_object()
+        old_status = order.status
         order.status = Order.Status.CANCELLED
         order.assigned_representative = None
         order.assigned_at = None
@@ -217,9 +330,16 @@ class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
                 "updated_at",
             ]
         )
+        record_order_event(
+            order,
+            OrderEvent.EventType.CANCELLED,
+            actor=request.user,
+            from_status=old_status,
+            to_status=order.status,
+        )
         resolve_order_review_notifications(order)
         return Response(
-            self.get_serializer(order).data,
+            self.get_serializer(order_queryset().get(pk=order.pk)).data,
             status=status.HTTP_200_OK,
         )
 
@@ -229,10 +349,20 @@ class OrderStatusView(APIView):
 
     @transaction.atomic
     def patch(self, request, order_id):
-        order = generics.get_object_or_404(Order, pk=order_id)
+        order = generics.get_object_or_404(
+            Order.objects.select_for_update(),
+            pk=order_id,
+        )
         serializer = OrderStatusSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        order.status = serializer.validated_data["status"]
+        new_status = serializer.validated_data["status"]
+        if new_status not in allowed_statuses_for_order(order):
+            return Response(
+                {"status": "Invalid status transition."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        old_status = order.status
+        order.status = new_status
         if order.status != Order.Status.READY:
             order.assigned_representative = None
             order.assigned_at = None
@@ -241,7 +371,23 @@ class OrderStatusView(APIView):
         elif order.delivered_at is None:
             order.delivered_at = timezone.now()
         order.save()
-        return Response(OrderSerializer(order, context={"request": request}).data)
+        record_order_event(
+            order,
+            (
+                OrderEvent.EventType.CANCELLED
+                if new_status == Order.Status.CANCELLED
+                else OrderEvent.EventType.STATUS_CHANGED
+            ),
+            actor=request.user,
+            from_status=old_status,
+            to_status=new_status,
+        )
+        return Response(
+            OrderSerializer(
+                order_queryset().get(pk=order.pk),
+                context={"request": request},
+            ).data
+        )
 
 
 class OrderDeliveryPriceView(APIView):
@@ -265,11 +411,27 @@ class OrderDeliveryPriceView(APIView):
 
         serializer = OrderDeliveryPriceSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        old_delivery_price = order.delivery_price
         delivery_price = serializer.validated_data["delivery_price"]
         total = order.subtotal_price - order.discount + delivery_price
         order.delivery_price = delivery_price
         order.total_price = max(total, Decimal("0.00"))
         order.save(update_fields=["delivery_price", "total_price", "updated_at"])
+        record_order_event(
+            order,
+            OrderEvent.EventType.DELIVERY_PRICE_CHANGED,
+            actor=request.user,
+            from_status=order.status,
+            to_status=order.status,
+            metadata={
+                "from_delivery_price": (
+                    f"{old_delivery_price:.2f}"
+                    if old_delivery_price is not None
+                    else None
+                ),
+                "to_delivery_price": f"{delivery_price:.2f}",
+            },
+        )
 
         refreshed_order = order_queryset().get(pk=order.pk)
         return Response(
@@ -289,6 +451,43 @@ class OrderAssignmentView(APIView):
         serializer = OrderAssignmentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         representative = serializer.validated_data["representative"]
+        if representative is None:
+            if not order.assigned_representative_id:
+                refreshed_order = order_queryset().get(pk=order.pk)
+                return Response(
+                    OrderSerializer(
+                        refreshed_order,
+                        context={"request": request},
+                    ).data
+                )
+            old_status = order.status
+            old_representative_id = order.assigned_representative_id
+            order.assigned_representative = None
+            order.assigned_at = None
+            if order.status == Order.Status.READY:
+                order.status = Order.Status.UNDER_PREPARATION
+            order.save(
+                update_fields=[
+                    "assigned_representative",
+                    "assigned_at",
+                    "status",
+                    "updated_at",
+                ]
+            )
+            record_order_event(
+                order,
+                OrderEvent.EventType.UNASSIGNED,
+                actor=request.user,
+                from_status=old_status,
+                to_status=order.status,
+                metadata={"representative_id": old_representative_id},
+            )
+            return Response(
+                OrderSerializer(
+                    order_queryset().get(pk=order.pk),
+                    context={"request": request},
+                ).data
+            )
         if order.review_status != Order.ReviewStatus.APPROVED:
             return Response(
                 {"detail": "Order must be approved before assignment."},
@@ -317,6 +516,7 @@ class OrderAssignmentView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        old_status = order.status
         order.assigned_representative = representative
         order.assigned_at = timezone.now()
         order.status = Order.Status.READY
@@ -327,6 +527,14 @@ class OrderAssignmentView(APIView):
                 "status",
                 "updated_at",
             ]
+        )
+        record_order_event(
+            order,
+            OrderEvent.EventType.ASSIGNED,
+            actor=request.user,
+            from_status=old_status,
+            to_status=order.status,
+            metadata={"representative_id": representative.id},
         )
         create_order_assigned_notification(order, representative)
         return Response(
@@ -379,6 +587,7 @@ class AdminOrderApproveView(APIView):
                 {"detail": "Order must be pending review."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        old_status = order.status
         order.review_status = Order.ReviewStatus.APPROVED
         order.approved_by = request.user
         order.approved_at = timezone.now()
@@ -397,6 +606,14 @@ class AdminOrderApproveView(APIView):
                 "status",
                 "updated_at",
             ]
+        )
+        record_order_event(
+            order,
+            OrderEvent.EventType.REVIEW_APPROVED,
+            actor=request.user,
+            from_status=old_status,
+            to_status=order.status,
+            metadata={"review_status": order.review_status},
         )
         resolve_order_review_notifications(order)
         representatives = eligible_representatives_for_order(order)
@@ -447,6 +664,7 @@ class AdminOrderRejectView(APIView):
                 {"detail": "Assigned or delivered orders cannot be rejected."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        old_status = order.status
         order.review_status = Order.ReviewStatus.REJECTED
         order.status = Order.Status.CANCELLED
         order.rejected_by = request.user
@@ -464,6 +682,15 @@ class AdminOrderRejectView(APIView):
                 "rejection_reason",
                 "updated_at",
             ]
+        )
+        record_order_event(
+            order,
+            OrderEvent.EventType.REVIEW_REJECTED,
+            actor=request.user,
+            from_status=old_status,
+            to_status=order.status,
+            note=order.rejection_reason,
+            metadata={"review_status": order.review_status},
         )
         resolve_order_review_notifications(order)
         create_order_rejected_notification(order)
@@ -591,6 +818,7 @@ class CourierOrderStatusView(APIView):
                 {"status": "Invalid status transition."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        old_status = order.status
         order.status = new_status
         update_fields = ["status", "updated_at"]
         if new_status == Order.Status.PICKED_UP:
@@ -602,6 +830,13 @@ class CourierOrderStatusView(APIView):
             order.delivered_at = timezone.now()
             update_fields.append("delivered_at")
         order.save(update_fields=update_fields)
+        record_order_event(
+            order,
+            OrderEvent.EventType.STATUS_CHANGED,
+            actor=request.user,
+            from_status=old_status,
+            to_status=new_status,
+        )
         return Response(
             CourierOrderDetailSerializer(
                 order_queryset().get(pk=order.pk),

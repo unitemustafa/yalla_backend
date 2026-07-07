@@ -264,3 +264,54 @@ class OrderOffer(models.Model):
 
     class Meta:
         unique_together = ("order", "offer")
+
+
+class OrderEvent(models.Model):
+    class EventType(models.TextChoices):
+        ORDER_CREATED = "order_created", "Order created"
+        REVIEW_APPROVED = "review_approved", "Review approved"
+        REVIEW_REJECTED = "review_rejected", "Review rejected"
+        STATUS_CHANGED = "status_changed", "Status changed"
+        ASSIGNED = "assigned", "Assigned"
+        UNASSIGNED = "unassigned", "Unassigned"
+        DELIVERY_PRICE_CHANGED = (
+            "delivery_price_changed",
+            "Delivery price changed",
+        )
+        CANCELLED = "cancelled", "Cancelled"
+
+    order = models.ForeignKey(
+        Order,
+        on_delete=models.CASCADE,
+        related_name="history_events",
+    )
+    event_type = models.CharField(max_length=40, choices=EventType.choices)
+    from_status = models.CharField(
+        max_length=20,
+        choices=Order.Status.choices,
+        blank=True,
+        null=True,
+    )
+    to_status = models.CharField(
+        max_length=20,
+        choices=Order.Status.choices,
+        blank=True,
+        null=True,
+    )
+    actor = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        related_name="order_events",
+        blank=True,
+        null=True,
+    )
+    note = models.TextField(blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "id")
+        indexes = [
+            models.Index(fields=["order", "created_at", "id"]),
+            models.Index(fields=["event_type"]),
+        ]

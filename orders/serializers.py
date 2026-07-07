@@ -18,7 +18,8 @@ from markets.region import (
 )
 from offers.models import Offer
 
-from .models import Order, OrderItem, OrderMarketSection, OrderOffer
+from .models import Order, OrderEvent, OrderItem, OrderMarketSection, OrderOffer
+from .services import allowed_statuses_for_order
 
 User = get_user_model()
 
@@ -131,7 +132,7 @@ class OrderPreviewSerializer(serializers.Serializer):
     offers = OrderPreviewOfferSerializer(many=True, required=False)
 
     def validate(self, attrs):
-        user = self.context["request"].user
+        user = self.context.get("preview_user") or self.context["request"].user
         has_explicit_address = "delivery_address" in attrs
         items = attrs.get("items", [])
         offers = attrs.get("offers", [])
@@ -946,8 +947,90 @@ def user_summary(user):
     return {
         "id": user.id,
         "name": full_name or user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
         "phone": user.phone,
     }
+
+
+class AssignedRepresentativeSummarySerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
+    avatar = serializers.SerializerMethodField()
+    avatar_url = serializers.SerializerMethodField()
+    service_city = serializers.SerializerMethodField()
+    service_city_id = serializers.IntegerField(
+        source="courier_profile.service_city_id",
+        read_only=True,
+    )
+    is_available = serializers.BooleanField(
+        source="courier_profile.is_available",
+        read_only=True,
+    )
+    vehicle_type = serializers.CharField(
+        source="courier_profile.vehicle_type",
+        read_only=True,
+    )
+    plate_number = serializers.CharField(
+        source="courier_profile.plate_number",
+        read_only=True,
+    )
+
+    class Meta:
+        model = User
+        fields = (
+            "id",
+            "name",
+            "first_name",
+            "last_name",
+            "phone",
+            "avatar",
+            "avatar_url",
+            "service_city_id",
+            "service_city",
+            "is_available",
+            "vehicle_type",
+            "plate_number",
+        )
+
+    def get_name(self, instance):
+        return user_summary(instance)["name"]
+
+    def get_avatar(self, instance):
+        return self.get_avatar_url(instance)
+
+    def get_avatar_url(self, instance):
+        if instance.avatar_image:
+            request = self.context.get("request")
+            url = instance.avatar_image.url
+            return request.build_absolute_uri(url) if request is not None else url
+        return instance.avatar_url
+
+    def get_service_city(self, instance):
+        profile = getattr(instance, "courier_profile", None)
+        service_city = getattr(profile, "service_city", None)
+        if service_city is None:
+            return None
+        return ServiceCitySummarySerializer(service_city).data
+
+
+class OrderEventSerializer(serializers.ModelSerializer):
+    actor = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrderEvent
+        fields = (
+            "id",
+            "event_type",
+            "from_status",
+            "to_status",
+            "actor",
+            "note",
+            "metadata",
+            "created_at",
+        )
+
+    def get_actor(self, instance):
+        return user_summary(instance.actor) if instance.actor_id else None
 
 
 class OrderSerializer(serializers.ModelSerializer):
@@ -993,6 +1076,7 @@ class OrderSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     customer = serializers.SerializerMethodField()
+    assigned_representative = AssignedRepresentativeSummarySerializer(read_only=True)
     market = MarketSummarySerializer(read_only=True)
     service_city = ServiceCitySummarySerializer(read_only=True)
     delivery_area = DeliveryAreaSummarySerializer(read_only=True)
@@ -1004,6 +1088,12 @@ class OrderSerializer(serializers.ModelSerializer):
     grouped_items = serializers.SerializerMethodField()
     grouped_offers = serializers.SerializerMethodField()
     pickup_stops = serializers.SerializerMethodField()
+    history = OrderEventSerializer(
+        source="history_events",
+        many=True,
+        read_only=True,
+    )
+    allowed_statuses = serializers.SerializerMethodField()
     items = OrderItemSerializer(many=True, required=False)
     offers = OrderOfferSerializer(
         source="order_offers",
@@ -1020,6 +1110,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "delivery_address_id",
             "delivery_address",
             "assigned_representative_id",
+            "assigned_representative",
             "market_id",
             "market",
             "order_scope",
@@ -1053,6 +1144,8 @@ class OrderSerializer(serializers.ModelSerializer):
             "grouped_items",
             "grouped_offers",
             "pickup_stops",
+            "history",
+            "allowed_statuses",
             "items",
             "offers",
             "created_at",
@@ -1159,6 +1252,9 @@ class OrderSerializer(serializers.ModelSerializer):
             }
             for section in self._market_sections(instance)
         ]
+
+    def get_allowed_statuses(self, instance):
+        return allowed_statuses_for_order(instance)
 
     def _market_sections(self, instance):
         cache_name = "_order_serializer_market_sections"
@@ -1646,6 +1742,53 @@ class OrderSerializer(serializers.ModelSerializer):
             )
 
 
+class OrderListSerializer(serializers.ModelSerializer):
+    customer = serializers.SerializerMethodField()
+    market = MarketSummarySerializer(read_only=True)
+    assigned_representative = AssignedRepresentativeSummarySerializer(read_only=True)
+    delivery_address = serializers.SerializerMethodField()
+    market_count = serializers.SerializerMethodField()
+    market_names_summary = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = (
+            "id",
+            "customer",
+            "status",
+            "review_status",
+            "order_scope",
+            "market",
+            "market_count",
+            "market_names_summary",
+            "delivery_address",
+            "delivery_type",
+            "delivery_price",
+            "subtotal_price",
+            "discount",
+            "total_price",
+            "assigned_representative_id",
+            "assigned_representative",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_customer(self, instance):
+        return user_summary(instance.user)
+
+    def get_delivery_address(self, instance):
+        return OrderSerializer(context=self.context).get_delivery_address(instance)
+
+    def get_market_count(self, instance):
+        return instance.market_sections.count()
+
+    def get_market_names_summary(self, instance):
+        sections = list(instance.market_sections.all())
+        if sections:
+            return ", ".join(section.market.name for section in sections)
+        return instance.market.name if instance.market_id else ""
+
+
 class AdminOrderCreateSerializer(OrderSerializer):
     SYSTEM_CONTROLLED_CREATE_FIELDS = {
         "assigned_representative_id",
@@ -1830,6 +1973,7 @@ class OrderAssignmentSerializer(serializers.Serializer):
             deleted_at__isnull=True,
         ),
         source="representative",
+        allow_null=True,
     )
 
 
