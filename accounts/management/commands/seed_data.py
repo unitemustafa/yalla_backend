@@ -692,7 +692,7 @@ class Command(BaseCommand):
                 "marker": "SEED-ORDER-002",
                 "user": users["seed.karim@yalla.test"],
                 "market": markets["مطبخ النيل العائلي"],
-                "status": Order.Status.UNDER_PREPARATION,
+                "status": Order.Status.CONFIRMED,
                 "payment_method": "card",
                 "items": [
                     (variants["كشري بالدجاج"][0], 1),
@@ -728,7 +728,7 @@ class Command(BaseCommand):
                 "marker": "SEED-ORDER-005",
                 "user": users["seed.sara@yalla.test"],
                 "market": markets["حلويات البحر"],
-                "status": Order.Status.READY,
+                "status": Order.Status.ASSIGNED,
                 "payment_method": "card",
                 "items": [(variants["بقلاوة"][1], 2), (variants["بسبوسة بالعسل"][0], 1)],
                 "offer": offers["حلويات البحر"],
@@ -834,7 +834,13 @@ class Command(BaseCommand):
                     ),
                     "assigned_at": (
                         now - timedelta(hours=2)
-                        if definition["status"] not in (Order.Status.PENDING, Order.Status.CANCELLED)
+                        if definition["status"]
+                        in (
+                            Order.Status.ASSIGNED,
+                            Order.Status.PICKED_UP,
+                            Order.Status.DELIVERED,
+                            Order.Status.FAILED_DELIVERY,
+                        )
                         else None
                     ),
                     "delivered_at": (
@@ -858,7 +864,6 @@ class Command(BaseCommand):
                     if definition["status"]
                     in (
                         Order.Status.PICKED_UP,
-                        Order.Status.ON_THE_WAY,
                         Order.Status.DELIVERED,
                         Order.Status.FAILED_DELIVERY,
                     )
@@ -869,7 +874,6 @@ class Command(BaseCommand):
                     if definition["status"]
                     in (
                         Order.Status.PICKED_UP,
-                        Order.Status.ON_THE_WAY,
                         Order.Status.DELIVERED,
                         Order.Status.FAILED_DELIVERY,
                     )
@@ -892,11 +896,15 @@ class Command(BaseCommand):
             )
 
     def _representative_for_order(self, users, status):
-        if status in (Order.Status.PENDING, Order.Status.CANCELLED):
+        if status in (
+            Order.Status.PENDING,
+            Order.Status.CONFIRMED,
+            Order.Status.CANCELLED,
+        ):
             return None
         email = (
             "seed.courier2@yalla.test"
-            if status in (Order.Status.READY, Order.Status.DELIVERED)
+            if status in (Order.Status.ASSIGNED, Order.Status.DELIVERED)
             else "seed.courier@yalla.test"
         )
         return users[email]

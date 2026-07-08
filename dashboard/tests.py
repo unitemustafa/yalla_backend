@@ -543,10 +543,10 @@ class DashboardOverviewAPITests(APITestCase):
             total=Decimal("40.00"),
             created_at=self.at("2026-05-12T10:00:00"),
         )
-        on_the_way = self.create_order(
+        assigned = self.create_order(
             user=self.client_user,
             market=self.main_market,
-            order_status=Order.Status.ON_THE_WAY,
+            order_status=Order.Status.ASSIGNED,
             total=Decimal("50.00"),
             created_at=self.at("2026-05-12T11:00:00"),
         )
@@ -568,13 +568,13 @@ class DashboardOverviewAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         active_ids = {item["id"] for item in response.data["active_orders"]}
-        self.assertEqual(active_ids, {picked_up.id, on_the_way.id})
+        self.assertEqual(active_ids, {picked_up.id, assigned.id})
 
     def test_active_orders_return_real_number_and_multi_market_fields(self):
         order = self.create_section_order(
             user=self.client_user,
             market=self.main_market,
-            order_status=Order.Status.ON_THE_WAY,
+            order_status=Order.Status.PICKED_UP,
             total=Decimal("120.00"),
             created_at=self.at("2026-05-14T09:00:00"),
             sections=(

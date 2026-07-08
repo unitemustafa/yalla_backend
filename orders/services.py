@@ -8,19 +8,9 @@ User = get_user_model()
 
 
 ADMIN_STATUS_TRANSITIONS = {
-    Order.Status.PENDING: (Order.Status.CONFIRMED, Order.Status.CANCELLED),
-    Order.Status.CONFIRMED: (
-        Order.Status.UNDER_PREPARATION,
-        Order.Status.CANCELLED,
-    ),
-    Order.Status.UNDER_PREPARATION: (Order.Status.CANCELLED,),
-    Order.Status.READY: (Order.Status.PICKED_UP, Order.Status.CANCELLED),
-    Order.Status.PICKED_UP: (Order.Status.ON_THE_WAY, Order.Status.CANCELLED),
-    Order.Status.ON_THE_WAY: (
-        Order.Status.DELIVERED,
-        Order.Status.FAILED_DELIVERY,
-        Order.Status.CANCELLED,
-    ),
+    Order.Status.CONFIRMED: (Order.Status.CANCELLED,),
+    Order.Status.ASSIGNED: (Order.Status.CANCELLED,),
+    Order.Status.PICKED_UP: (Order.Status.CANCELLED,),
 }
 
 
@@ -34,13 +24,7 @@ def allowed_statuses_for_order(order):
     if order.review_status != Order.ReviewStatus.APPROVED:
         return [Order.Status.CANCELLED] if order.status != Order.Status.CANCELLED else []
 
-    allowed = list(ADMIN_STATUS_TRANSITIONS.get(order.status, ()))
-    if (
-        order.status == Order.Status.UNDER_PREPARATION
-        and order.assigned_representative_id
-    ):
-        allowed.insert(0, Order.Status.READY)
-    return allowed
+    return list(ADMIN_STATUS_TRANSITIONS.get(order.status, ()))
 
 
 def record_order_event(

@@ -42,7 +42,7 @@
 | `market_region.mode` | `general`, `service_city`, أو `null` لمسح الاختيار |
 | `market.scope` / `offer.scope` / `order_scope` | `general`, `service_city` |
 | `delivery_type` | `delivery`, `fixed_area` |
-| `order.status` | `pending`, `confirmed`, `under_preparation`, `ready`, `picked_up`, `on_the_way`, `delivered`, `failed_delivery`, `cancelled` |
+| `order.status` | `pending`, `confirmed`, `assigned`, `picked_up`, `delivered`, `failed_delivery`, `cancelled` |
 | `review_status` | `pending_review`, `approved`, `rejected` |
 | `offer.type` | `package`, `flash`, `discount`, `announcement`, `delivery` |
 | `offer.status` | `active`, `inactive`, `expired` |
@@ -1244,7 +1244,7 @@ Response example:
     "service_city_id": 1,
     "delivery_area_id": null,
     "delivery_type": "delivery",
-    "status": "under_preparation",
+    "status": "confirmed",
     "review_status": "approved",
     "assigned_representative_id": null
   },
@@ -1305,7 +1305,7 @@ Response example:
   "message": "Order assigned successfully.",
   "order": {
     "id": 27,
-    "status": "ready",
+    "status": "assigned",
     "review_status": "approved",
     "assigned_representative_id": 5
   },
@@ -1320,7 +1320,7 @@ Response example:
 }
 ```
 
-بعد الإسناد يصبح `status="ready"` ويُملأ `assigned_at`.
+بعد الإسناد يصبح `status="assigned"` ويُملأ `assigned_at`.
 
 ### Admin create order
 
@@ -1361,7 +1361,7 @@ Response example:
 [
   {
     "id": 27,
-    "status": "ready",
+    "status": "assigned",
     "order_scope": "service_city",
     "service_city": {
       "id": 1,
@@ -1412,9 +1412,8 @@ Allowed transitions:
 
 | الحالي | التالي المسموح |
 |---|---|
-| `ready` | `picked_up` |
-| `picked_up` | `on_the_way` |
-| `on_the_way` | `delivered`, `failed_delivery` |
+| `assigned` | `picked_up` |
+| `picked_up` | `delivered` |
 
 Request:
 
@@ -1521,7 +1520,7 @@ Response shape:
         "name": "أمينة حسن"
       },
       "total": "180.00",
-      "status": "ready",
+      "status": "assigned",
       "created_at": "2026-07-05T15:42:43.566728Z"
     },
     {

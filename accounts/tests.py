@@ -453,10 +453,10 @@ class AuthenticationAPITests(APITestCase):
             Order.Status.DELIVERED,
             Order.Status.CONFIRMED,
             Order.Status.DELIVERED,
-            Order.Status.READY,
-            Order.Status.ON_THE_WAY,
+            Order.Status.ASSIGNED,
+            Order.Status.PICKED_UP,
             Order.Status.DELIVERED,
-            Order.Status.UNDER_PREPARATION,
+            Order.Status.CONFIRMED,
             Order.Status.CANCELLED,
         ]
         orders = [
@@ -996,11 +996,8 @@ class AuthenticationAPITests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
         for index, order_status in enumerate((
-            Order.Status.CONFIRMED,
-            Order.Status.UNDER_PREPARATION,
-            Order.Status.READY,
+            Order.Status.ASSIGNED,
             Order.Status.PICKED_UP,
-            Order.Status.ON_THE_WAY,
         ), start=1):
             representative = self.create_active_user(
                 role=User.Role.REPRESENTATIVE,

@@ -364,13 +364,9 @@ class OrderStatusView(APIView):
             )
         old_status = order.status
         order.status = new_status
-        if order.status != Order.Status.READY:
+        if order.status in (Order.Status.CANCELLED, Order.Status.FAILED_DELIVERY):
             order.assigned_representative = None
             order.assigned_at = None
-        if order.status != Order.Status.DELIVERED:
-            order.delivered_at = None
-        elif order.delivered_at is None:
-            order.delivered_at = timezone.now()
         order.save()
         record_order_event(
             order,
@@ -400,11 +396,15 @@ class OrderDeliveryPriceView(APIView):
             Order.objects.select_for_update(),
             pk=order_id,
         )
-        if order.status in (Order.Status.DELIVERED, Order.Status.CANCELLED):
+        if order.status in (
+            Order.Status.DELIVERED,
+            Order.Status.FAILED_DELIVERY,
+            Order.Status.CANCELLED,
+        ):
             return Response(
                 {
                     "detail": (
-                        "Delivery price cannot be changed after delivery or cancellation."
+                        "Delivery price cannot be changed after delivery, failed delivery, or cancellation."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -452,7 +452,17 @@ class OrderAssignmentView(APIView):
         serializer = OrderAssignmentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         representative = serializer.validated_data["representative"]
+        terminal_statuses = (
+            Order.Status.DELIVERED,
+            Order.Status.FAILED_DELIVERY,
+            Order.Status.CANCELLED,
+        )
         if representative is None:
+            if order.status in terminal_statuses or order.status == Order.Status.PICKED_UP:
+                return Response(
+                    {"detail": "Order cannot be unassigned after pickup or terminal status."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             if not order.assigned_representative_id:
                 refreshed_order = order_queryset().get(pk=order.pk)
                 return Response(
@@ -465,8 +475,8 @@ class OrderAssignmentView(APIView):
             old_representative_id = order.assigned_representative_id
             order.assigned_representative = None
             order.assigned_at = None
-            if order.status == Order.Status.READY:
-                order.status = Order.Status.UNDER_PREPARATION
+            if order.status == Order.Status.ASSIGNED:
+                order.status = Order.Status.CONFIRMED
             order.save(
                 update_fields=[
                     "assigned_representative",
@@ -492,6 +502,11 @@ class OrderAssignmentView(APIView):
         if order.review_status != Order.ReviewStatus.APPROVED:
             return Response(
                 {"detail": "Order must be approved before assignment."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if order.status not in (Order.Status.CONFIRMED, Order.Status.ASSIGNED):
+            return Response(
+                {"detail": "Only confirmed or assigned orders can be assigned."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         profile = (
@@ -520,7 +535,7 @@ class OrderAssignmentView(APIView):
         old_status = order.status
         order.assigned_representative = representative
         order.assigned_at = timezone.now()
-        order.status = Order.Status.READY
+        order.status = Order.Status.ASSIGNED
         order.save(
             update_fields=[
                 "assigned_representative",
@@ -595,7 +610,7 @@ class AdminOrderApproveView(APIView):
         order.rejected_by = None
         order.rejected_at = None
         order.rejection_reason = ""
-        order.status = Order.Status.UNDER_PREPARATION
+        order.status = Order.Status.CONFIRMED
         order.save(
             update_fields=[
                 "review_status",
@@ -742,22 +757,16 @@ class AdminOrderServiceCityRepresentativesView(APIView):
 COURIER_STATUSES = {
     Order.Status.PENDING,
     Order.Status.CONFIRMED,
-    Order.Status.UNDER_PREPARATION,
-    Order.Status.READY,
+    Order.Status.ASSIGNED,
     Order.Status.PICKED_UP,
-    Order.Status.ON_THE_WAY,
     Order.Status.DELIVERED,
     Order.Status.FAILED_DELIVERY,
     Order.Status.CANCELLED,
 }
 
 COURIER_TRANSITIONS = {
-    Order.Status.READY: {Order.Status.PICKED_UP},
-    Order.Status.PICKED_UP: {Order.Status.ON_THE_WAY},
-    Order.Status.ON_THE_WAY: {
-        Order.Status.DELIVERED,
-        Order.Status.FAILED_DELIVERY,
-    },
+    Order.Status.ASSIGNED: {Order.Status.PICKED_UP},
+    Order.Status.PICKED_UP: {Order.Status.DELIVERED},
 }
 
 
@@ -872,6 +881,12 @@ class CourierOrderStatusView(APIView):
         if new_status == Order.Status.DELIVERED:
             order.delivered_at = timezone.now()
             update_fields.append("delivered_at")
+            if "delivery_note" in serializer.validated_data:
+                order.delivery_note = serializer.validated_data["delivery_note"].strip()
+                update_fields.append("delivery_note")
+            if "delivery_proof" in serializer.validated_data:
+                order.delivery_proof = serializer.validated_data["delivery_proof"]
+                update_fields.append("delivery_proof")
         order.save(update_fields=update_fields)
         record_order_event(
             order,

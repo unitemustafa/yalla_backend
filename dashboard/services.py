@@ -15,10 +15,8 @@ SUCCESSFUL_STATUSES = (Order.Status.DELIVERED,)
 ACTIVE_STATUSES = (
     Order.Status.PENDING,
     Order.Status.CONFIRMED,
-    Order.Status.UNDER_PREPARATION,
-    Order.Status.READY,
+    Order.Status.ASSIGNED,
     Order.Status.PICKED_UP,
-    Order.Status.ON_THE_WAY,
 )
 
 

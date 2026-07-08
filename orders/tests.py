@@ -655,7 +655,7 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("service_city_id", response.data)
 
-    def test_assignment_sets_order_status_to_ready(self):
+    def test_assignment_sets_order_status_to_assigned(self):
         order_id = self.create_order().data["id"]
         approve_response = self.client.post(
             f"/api/v1/admin/orders/{order_id}/approve/",
@@ -670,7 +670,7 @@ class OrderAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["order"]["status"], Order.Status.READY)
+        self.assertEqual(response.data["order"]["status"], Order.Status.ASSIGNED)
         self.assertEqual(
             response.data["order"]["assigned_representative_id"],
             self.representative.id,
@@ -747,7 +747,7 @@ class OrderAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIsNone(response.data["assigned_representative"])
-        self.assertEqual(response.data["status"], Order.Status.UNDER_PREPARATION)
+        self.assertEqual(response.data["status"], Order.Status.CONFIRMED)
         event_types = [event["event_type"] for event in response.data["history"]]
         self.assertIn(OrderEvent.EventType.ASSIGNED, event_types)
         self.assertIn(OrderEvent.EventType.UNASSIGNED, event_types)
@@ -2081,7 +2081,7 @@ class OrderAPITests(APITestCase):
             format="json",
         )
         self.assertEqual(assign_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(assign_response.data["order"]["status"], Order.Status.READY)
+        self.assertEqual(assign_response.data["order"]["status"], Order.Status.ASSIGNED)
 
         courier_token = RefreshToken.for_user(self.representative).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {courier_token}")
@@ -2100,7 +2100,6 @@ class OrderAPITests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {courier_token}")
         for next_status in (
             Order.Status.PICKED_UP,
-            Order.Status.ON_THE_WAY,
             Order.Status.DELIVERED,
         ):
             status_response = self.client.patch(

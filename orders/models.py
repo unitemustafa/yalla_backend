@@ -13,10 +13,8 @@ class Order(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         CONFIRMED = "confirmed", "Confirmed"
-        UNDER_PREPARATION = "under_preparation" , "Under Preparation"
-        READY = "ready" , "Ready"
+        ASSIGNED = "assigned", "Assigned"
         PICKED_UP = "picked_up", "Picked Up"
-        ON_THE_WAY = "on_the_way", "On The Way"
         DELIVERED = "delivered", "Delivered"
         FAILED_DELIVERY = "failed_delivery", "Failed Delivery"
         CANCELLED = "cancelled", "Cancelled"

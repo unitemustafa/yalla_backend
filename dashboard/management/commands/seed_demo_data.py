@@ -1128,14 +1128,14 @@ class Command(BaseCommand):
             ("sara", "sara_home", "مخبز إسكندرية الذهبي", [("فينو", 1), ("كرواسون بالشوكولاتة", 2)], ["مخبوزات الصباح"], Order.Status.PENDING, Order.ReviewStatus.PENDING_REVIEW, None, 1),
             ("karim", "karim_general", "سوق يلا العام", [("قفة رمضان", 1)], ["عرض الجمعة العام"], Order.Status.PENDING, Order.ReviewStatus.PENDING_REVIEW, None, 0),
             ("amina", "amina_home", "مطبخ النيل العائلي", [("كشري مخصوص", 3)], [], Order.Status.CONFIRMED, Order.ReviewStatus.APPROVED, None, 1),
-            ("amina", "amina_home", "سوق يلا الطازج", [("طماطم", 2), ("بطاطس", 2)], ["خصم الخضار"], Order.Status.UNDER_PREPARATION, Order.ReviewStatus.APPROVED, None, 1),
-            ("sara", "sara_home", "مخبز إسكندرية الذهبي", [("عيش بلدي", 5), ("بريوش", 1)], [], Order.Status.UNDER_PREPARATION, Order.ReviewStatus.APPROVED, None, 2),
-            ("karim", "karim_general", "متجر العروض العامة", [("كرتونة رمضان", 1)], ["باقة البيت العامة"], Order.Status.UNDER_PREPARATION, Order.ReviewStatus.APPROVED, None, 3),
-            ("sara", "sara_other", "مخبز إسكندرية الذهبي", [("كعك إسكندراني", 1)], ["إعلان افتتاح فرع سموحة"], Order.Status.UNDER_PREPARATION, Order.ReviewStatus.APPROVED, None, 5),
-            ("amina", "amina_home", "مطبخ النيل العائلي", [("بيتزا عائلية", 1)], ["خصم البيتزا"], Order.Status.READY, Order.ReviewStatus.APPROVED, "courier1", 0),
-            ("amina", "amina_home", "سوق يلا الطازج", [("عصير برتقال", 3)], [], Order.Status.READY, Order.ReviewStatus.APPROVED, "courier2", 0),
+            ("amina", "amina_home", "سوق يلا الطازج", [("طماطم", 2), ("بطاطس", 2)], ["خصم الخضار"], Order.Status.CONFIRMED, Order.ReviewStatus.APPROVED, None, 1),
+            ("sara", "sara_home", "مخبز إسكندرية الذهبي", [("عيش بلدي", 5), ("بريوش", 1)], [], Order.Status.CONFIRMED, Order.ReviewStatus.APPROVED, None, 2),
+            ("karim", "karim_general", "متجر العروض العامة", [("كرتونة رمضان", 1)], ["باقة البيت العامة"], Order.Status.CONFIRMED, Order.ReviewStatus.APPROVED, None, 3),
+            ("sara", "sara_other", "مخبز إسكندرية الذهبي", [("كعك إسكندراني", 1)], ["إعلان افتتاح فرع سموحة"], Order.Status.CONFIRMED, Order.ReviewStatus.APPROVED, None, 5),
+            ("amina", "amina_home", "مطبخ النيل العائلي", [("بيتزا عائلية", 1)], ["خصم البيتزا"], Order.Status.ASSIGNED, Order.ReviewStatus.APPROVED, "courier1", 0),
+            ("amina", "amina_home", "سوق يلا الطازج", [("عصير برتقال", 3)], [], Order.Status.ASSIGNED, Order.ReviewStatus.APPROVED, "courier2", 0),
             ("amina", "amina_home", "مطبخ النيل العائلي", [("شاورما دجاج", 2)], [], Order.Status.PICKED_UP, Order.ReviewStatus.APPROVED, "courier2", 0),
-            ("amina", "amina_home", "مطبخ النيل العائلي", [("برغر لحم", 2)], [], Order.Status.ON_THE_WAY, Order.ReviewStatus.APPROVED, "courier2", 0),
+            ("amina", "amina_home", "مطبخ النيل العائلي", [("برغر لحم", 2)], [], Order.Status.PICKED_UP, Order.ReviewStatus.APPROVED, "courier2", 0),
             ("amina", "amina_home", "سوق يلا الطازج", [("موز", 2), ("خيار", 1)], [], Order.Status.DELIVERED, Order.ReviewStatus.APPROVED, "courier1", 0),
             ("sara", "sara_home", "مخبز إسكندرية الذهبي", [("باغيت", 2)], ["عرض مخبز منتهي"], Order.Status.DELIVERED, Order.ReviewStatus.APPROVED, "courier3", 2),
             ("karim", "karim_general", "سوق يلا العام", [("مياه معدنية", 2), ("أرز مصري", 1)], [], Order.Status.DELIVERED, Order.ReviewStatus.APPROVED, None, 4),
@@ -1184,7 +1184,7 @@ class Command(BaseCommand):
                     ("مطبخ النيل العائلي", [("دجاج مشوي", 1)], ["باقة العائلة"]),
                     ("سوق يلا الطازج", [("تفاح أحمر", 2)], ["خصم الخضار"]),
                 ],
-                Order.Status.UNDER_PREPARATION,
+                Order.Status.CONFIRMED,
                 Order.ReviewStatus.APPROVED,
                 None,
                 1,
@@ -1355,7 +1355,6 @@ class Command(BaseCommand):
         )
         section_picked_up = status in {
             Order.Status.PICKED_UP,
-            Order.Status.ON_THE_WAY,
             Order.Status.DELIVERED,
             Order.Status.FAILED_DELIVERY,
         }
@@ -1524,7 +1523,6 @@ class Command(BaseCommand):
         )
         section_picked_up = status in {
             Order.Status.PICKED_UP,
-            Order.Status.ON_THE_WAY,
             Order.Status.DELIVERED,
             Order.Status.FAILED_DELIVERY,
         }
@@ -1726,8 +1724,8 @@ class Command(BaseCommand):
             "pending_review_orders": Order.objects.filter(
                 review_status=Order.ReviewStatus.PENDING_REVIEW
             ).count(),
-            "ready_courier_orders": Order.objects.filter(
-                status=Order.Status.READY,
+            "assigned_courier_orders": Order.objects.filter(
+                status=Order.Status.ASSIGNED,
                 assigned_representative__isnull=False,
             ).count(),
             "fixed_area_orders": Order.objects.filter(
@@ -1809,8 +1807,8 @@ class Command(BaseCommand):
                 assertions["pending_review_orders"] >= 3,
             ),
             (
-                "at least 1 ready courier order",
-                assertions["ready_courier_orders"] >= 1,
+                "at least 1 assigned courier order",
+                assertions["assigned_courier_orders"] >= 1,
             ),
             (
                 "general orders do not use fixed-area delivery",
@@ -1893,7 +1891,7 @@ class Command(BaseCommand):
         )
         self.stdout.write(
             "  courier_flow_data: yes "
-            f"({assertions['ready_courier_orders']} ready assigned)"
+            f"({assertions['assigned_courier_orders']} assigned)"
         )
         self.stdout.write(
             f"  product_and_offer_images: {'no (--no-media)' if self.no_media else 'yes'}"

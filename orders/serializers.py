@@ -1049,14 +1049,8 @@ class OrderSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     assigned_representative_id = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.filter(
-            role=User.Role.REPRESENTATIVE,
-            is_active=True,
-            deleted_at__isnull=True,
-        ),
         source="assigned_representative",
-        required=False,
-        allow_null=True,
+        read_only=True,
     )
     market_id = serializers.PrimaryKeyRelatedField(
         queryset=Market.objects.prefetch_related("service_cities").all(),
@@ -1153,7 +1147,11 @@ class OrderSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             "id",
+            "status",
             "review_status",
+            "assigned_representative_id",
+            "assigned_at",
+            "delivered_at",
             "approved_by",
             "approved_at",
             "rejected_by",
@@ -1499,13 +1497,13 @@ class OrderSerializer(serializers.ModelSerializer):
                             )
                         }
                     )
-                attrs["status"] = Order.Status.READY
+                attrs["status"] = Order.Status.ASSIGNED
                 if not attrs.get("assigned_at"):
                     attrs["assigned_at"] = timezone.now()
             else:
                 attrs["assigned_at"] = None
                 if self.instance and self.instance.assigned_representative_id:
-                    attrs["status"] = Order.Status.PENDING
+                    attrs["status"] = Order.Status.CONFIRMED
         return attrs
 
     def _normalize_delivery_fields(self, attrs, address, service_city, order_scope):
@@ -2192,8 +2190,8 @@ class CourierOrderStatusSerializer(serializers.Serializer):
     status = serializers.ChoiceField(
         choices=(
             (Order.Status.PICKED_UP, Order.Status.PICKED_UP.label),
-            (Order.Status.ON_THE_WAY, Order.Status.ON_THE_WAY.label),
             (Order.Status.DELIVERED, Order.Status.DELIVERED.label),
-            (Order.Status.FAILED_DELIVERY, Order.Status.FAILED_DELIVERY.label),
         )
     )
+    delivery_note = serializers.CharField(required=False, allow_blank=True)
+    delivery_proof = serializers.ImageField(required=False, allow_null=True)
