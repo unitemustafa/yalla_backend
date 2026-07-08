@@ -2012,10 +2012,30 @@ class OrderReviewActionSerializer(serializers.Serializer):
 class CourierOrderItemSerializer(serializers.ModelSerializer):
     product = serializers.SerializerMethodField()
     variant = serializers.SerializerMethodField()
+    display_name = serializers.SerializerMethodField()
+    item_subtotal = serializers.SerializerMethodField()
 
     class Meta:
         model = OrderItem
-        fields = ("id", "quantity", "unit_price", "product", "variant")
+        fields = (
+            "id",
+            "display_name",
+            "quantity",
+            "unit_price",
+            "item_subtotal",
+            "product",
+            "variant",
+        )
+
+    def get_display_name(self, instance):
+        product_name = instance.variant.product.name
+        variant_name = OrderItemSerializer(context=self.context).get_variant_name(
+            instance
+        )
+        return f"{product_name} - {variant_name}" if variant_name else product_name
+
+    def get_item_subtotal(self, instance):
+        return f"{instance.unit_price * instance.quantity:.2f}"
 
     def get_product(self, instance):
         product = instance.variant.product
@@ -2066,6 +2086,8 @@ class CourierOrderListSerializer(serializers.ModelSerializer):
     customer = serializers.SerializerMethodField()
     delivery_address = serializers.SerializerMethodField()
     market_count = serializers.SerializerMethodField()
+    market_names_summary = serializers.SerializerMethodField()
+    items_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -2078,6 +2100,8 @@ class CourierOrderListSerializer(serializers.ModelSerializer):
             "delivery_type",
             "market",
             "market_count",
+            "market_names_summary",
+            "items_count",
             "customer",
             "delivery_address",
             "total_price",
@@ -2090,7 +2114,28 @@ class CourierOrderListSerializer(serializers.ModelSerializer):
         return user_summary(instance.user)
 
     def get_market_count(self, instance):
+        annotated_count = getattr(instance, "sections_count", None)
+        if annotated_count is not None:
+            return annotated_count
         return instance.market_sections.count()
+
+    def get_market_names_summary(self, instance):
+        prefetched = getattr(instance, "_prefetched_objects_cache", {})
+        sections = prefetched.get("market_sections")
+        if sections is not None:
+            return ", ".join(section.market.name for section in sections)
+        annotated_count = getattr(instance, "sections_count", None)
+        if annotated_count is not None and annotated_count > 1:
+            return ""
+        if instance.market_id:
+            return instance.market.name
+        return ""
+
+    def get_items_count(self, instance):
+        annotated_count = getattr(instance, "items_count", None)
+        if annotated_count is not None:
+            return annotated_count
+        return sum(item.quantity for item in instance.items.all())
 
     def get_delivery_address(self, instance):
         if instance.delivery_address is None:
@@ -2099,8 +2144,17 @@ class CourierOrderListSerializer(serializers.ModelSerializer):
             "id": instance.delivery_address.id,
             "name": instance.delivery_address.name,
             "details": instance.delivery_address.details,
+            "latitude": instance.delivery_address.latitude,
+            "longitude": instance.delivery_address.longitude,
             "manual_city": instance.delivery_address.manual_city,
             "manual_area": instance.delivery_address.manual_area,
+            "service_city": (
+                ServiceCitySummarySerializer(
+                    instance.delivery_address.service_city
+                ).data
+                if instance.delivery_address.service_city_id
+                else None
+            ),
             "delivery_area": (
                 DeliveryAreaSummarySerializer(
                     instance.delivery_address.delivery_area

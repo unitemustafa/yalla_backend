@@ -2,7 +2,8 @@ from django.contrib.auth import get_user_model
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Count, IntegerField, OuterRef, Prefetch, Subquery, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import generics, serializers, status
 from rest_framework.permissions import BasePermission, IsAuthenticated
@@ -10,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import CourierProfile
-from .models import Order, OrderEvent, OrderMarketSection
+from .models import Order, OrderEvent, OrderItem, OrderMarketSection
 from .serializers import (
     AdminOrderCreateSerializer,
     ClientOrderCreateSerializer,
@@ -739,11 +740,15 @@ class AdminOrderServiceCityRepresentativesView(APIView):
 
 
 COURIER_STATUSES = {
+    Order.Status.PENDING,
+    Order.Status.CONFIRMED,
+    Order.Status.UNDER_PREPARATION,
     Order.Status.READY,
     Order.Status.PICKED_UP,
     Order.Status.ON_THE_WAY,
     Order.Status.DELIVERED,
     Order.Status.FAILED_DELIVERY,
+    Order.Status.CANCELLED,
 }
 
 COURIER_TRANSITIONS = {
@@ -760,11 +765,49 @@ def courier_orders_for_user(user):
     return order_queryset().filter(assigned_representative=user)
 
 
+def courier_order_list_queryset(user):
+    items_count = (
+        OrderItem.objects.filter(order=OuterRef("pk"))
+        .values("order")
+        .annotate(total=Coalesce(Sum("quantity"), 0))
+        .values("total")[:1]
+    )
+    sections_count = (
+        OrderMarketSection.objects.filter(order=OuterRef("pk"))
+        .values("order")
+        .annotate(total=Count("pk"))
+        .values("total")[:1]
+    )
+    return (
+        Order.objects.filter(assigned_representative=user)
+        .select_related(
+            "user",
+            "delivery_address",
+            "delivery_address__service_city",
+            "delivery_address__delivery_area",
+            "market",
+            "service_city",
+            "delivery_area",
+        )
+        .annotate(
+            items_count=Coalesce(
+                Subquery(items_count, output_field=IntegerField()),
+                0,
+            ),
+            sections_count=Coalesce(
+                Subquery(sections_count, output_field=IntegerField()),
+                0,
+            ),
+        )
+        .order_by("-created_at", "-id")
+    )
+
+
 class CourierOrderListView(APIView):
     permission_classes = (IsAuthenticated, IsCourierRole)
 
     def get(self, request):
-        queryset = courier_orders_for_user(request.user)
+        queryset = courier_order_list_queryset(request.user)
         order_status = request.query_params.get("status")
         if order_status:
             if order_status not in COURIER_STATUSES:
