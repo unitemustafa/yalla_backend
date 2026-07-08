@@ -231,6 +231,8 @@ class OrderListCreateView(generics.ListCreateAPIView):
     def create(self, request, *args, **kwargs):
         target_user = resolve_order_target_user(request, action="create")
         data = request.data.copy()
+        if "delivery_address_id" not in data and "address_id" in data:
+            data["delivery_address_id"] = data["address_id"]
         data["user_id"] = target_user.id
         serializer = AdminOrderCreateSerializer(
             data=data,

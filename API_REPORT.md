@@ -893,11 +893,7 @@ Verified current behavior:
 - Admin create uses `POST /api/v1/orders/`.
 - Dashboard admin create must not use `/api/v1/orders/create/`.
 - Dashboard admin create must not use `/api/v1/orders/preview/`.
-
-Important implementation mismatch:
-
-- `OrderListCreateView.get_serializer_class()` says POST uses `AdminOrderCreateSerializer`, but `OrderListCreateView.create()` actually normalizes request data and uses `ClientOrderCreateSerializer`.
-- Therefore the live admin create contract is the normalized client-create contract plus required admin `user_id`, not the full unused `AdminOrderCreateSerializer` contract.
+- Admin create uses `AdminOrderCreateSerializer`; it does not run client checkout preview/create selected-region validation.
 
 ### Admin Order Endpoints
 
@@ -919,23 +915,22 @@ Admin create live request fields:
 
 - Required by current view/serializer:
   - `user_id` for admin users
+  - `delivery_address_id`
   - `payment_method`
   - at least one valid `items[]` or `offers[]`
-  - an address must be resolvable: explicit `delivery_address_id`/`address_id` or default matching address for target user
 - Accepted and used:
-  - `delivery_address_id` or `address_id`
-  - `service_city_id`, but must match selected region/address when provided
+  - `delivery_address_id`; `address_id` is accepted only as a legacy alias and dashboard should not send it
+  - `service_city_id`, but must match the selected address/service-city order when provided
   - `description`
   - `delivery_note`
   - `items[].variant_id`
   - `items[].quantity`
   - `offers[].offer_id`
-- Accepted but ignored by live admin create normalization:
-  - `market_id`
-  - `items[].unit_price`
-  - `offers[].discount_amount`
+- Compatibility fields:
+  - `market_id` is accepted as first-market compatibility only; backend infers real grouping from variants/offers.
+  - Legacy `items[].unit_price` and `offers[].discount_amount` are ignored if sent; backend uses current server prices/discounts.
 - Rejected system-controlled create fields:
-  - `assigned_representative_id`, `assigned_at`, `delivered_at`, `delivery_area_id`, `delivery_type`, `delivery_price`, `order_scope`, `discount`, `subtotal_price`, `total_price`, `image`, `delivery_proof`, `status`, `review_status`, `approved_by`, `approved_at`, `rejected_by`, `rejected_at`, `rejection_reason`
+  - `assigned_representative_id`, `assigned_at`, `delivered_at`, `delivery_area_id`, `delivery_type`, `delivery_price`, `order_scope`, `discount`, `subtotal_price`, `total_price`, `image`, `delivery_proof`, `market_sections`, `status`, `review_status`, `approved_by`, `approved_at`, `rejected_by`, `rejected_at`, `rejection_reason`
 
 Captured admin single-market create:
 
@@ -949,8 +944,8 @@ Captured admin single-market create:
     "payment_method": "cash",
     "description": "Admin description",
     "delivery_note": "Admin delivery note",
-    "items": [{"variant_id": 1, "quantity": 2, "unit_price": "999.00"}],
-    "offers": [{"offer_id": 1, "discount_amount": "10.00"}]
+    "items": [{"variant_id": 1, "quantity": 2}],
+    "offers": [{"offer_id": 1}]
   },
   "response": {
     "id": 1,
@@ -972,7 +967,7 @@ Captured admin single-market create:
 }
 ```
 
-Note: request `unit_price` was `"999.00"` but response `unit_price` was `"600.00"` from the current variant price. Request `discount_amount` was `"10.00"` but response discount was computed by backend from offer percent.
+Note: request pricing fields are intentionally omitted. Backend calculates `unit_price` from the current variant price and `discount_amount` from current offer data.
 
 Captured admin multi-market create:
 
@@ -985,8 +980,8 @@ Captured admin multi-market create:
     "service_city_id": 1,
     "payment_method": "cash",
     "items": [
-      {"variant_id": 1, "quantity": 1, "unit_price": "1.00"},
-      {"variant_id": 2, "quantity": 1, "unit_price": "1.00"}
+      {"variant_id": 1, "quantity": 1},
+      {"variant_id": 2, "quantity": 1}
     ],
     "offers": []
   },
@@ -1014,17 +1009,18 @@ Captured admin multi-market create:
 Admin create verification results:
 
 - `payment_method`: required. Missing error: `{"payment_method": ["This field is required."]}`.
-- `delivery_address_id`: not strictly required if the target user has a matching default address. Without any matching address, error:
+- `delivery_address_id`: required for admin create. `address_id` is accepted only as a legacy alias. Missing address error:
 
 ```json
 {
-  "requires_address_selection": ["True"],
-  "address_id": ["Choose an address for the currently selected market region."]
+  "delivery_address_id": ["Delivery address is required."]
 }
 ```
 
 - `market_id`: not required by live create; omitted request succeeded.
 - `unit_price`: not required by live create; omitted request succeeded. If present, backend ignores it and uses current `variant.price`.
+- `discount_amount`: not required by live create; omitted request succeeded. If present, backend ignores it and calculates offer discounts.
+- Admin create does not require the target user or admin to have a selected market browsing region.
 - Offer-only admin orders are currently allowed if the offer has products with variants; backend adds the first variant for offer products.
 - Multiple markets are inferred from variant/offer product markets.
 

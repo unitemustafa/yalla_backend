@@ -678,7 +678,7 @@ class OrderAPITests(APITestCase):
         response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("address_id", response.data)
+        self.assertIn("delivery_address_id", response.data)
 
     def test_admin_create_rejects_service_city_mismatch(self):
         other_city = ServiceCity.objects.create(
