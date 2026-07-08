@@ -400,6 +400,8 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             raise serializers.ValidationError("Account is inactive.")
         expected_role = self.context.get("expected_role")
         if expected_role and user.role != expected_role:
+            if expected_role == User.Role.REPRESENTATIVE:
+                raise PermissionDenied(self._representative_wrong_role_error(user))
             role_label = User.Role(expected_role).label.lower()
             raise PermissionDenied(
                 f"This login is only for {role_label} accounts."
@@ -425,6 +427,22 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             return None
 
         return base_queryset.filter(phone__in=candidates).first()
+
+    def _representative_wrong_role_error(self, user):
+        if user.role == User.Role.ADMIN:
+            return {
+                "code": "admin_account_not_allowed",
+                "detail": "This account belongs to an admin.",
+            }
+        if user.role == User.Role.CLIENT:
+            return {
+                "code": "client_account_not_allowed",
+                "detail": "This account belongs to a client.",
+            }
+        return {
+            "code": "representative_account_required",
+            "detail": "This login is only for representative accounts.",
+        }
 
 
 class ForgotPasswordSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
