@@ -911,15 +911,10 @@ class AdminOrderItemCreateSerializer(serializers.ModelSerializer):
         source="variant",
     )
     quantity = serializers.IntegerField(min_value=1)
-    unit_price = serializers.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        min_value=Decimal("0.00"),
-    )
 
     class Meta:
         model = OrderItem
-        fields = ("id", "variant_id", "quantity", "unit_price")
+        fields = ("id", "variant_id", "quantity")
         read_only_fields = ("id",)
 
 
@@ -928,17 +923,10 @@ class AdminOrderOfferCreateSerializer(serializers.ModelSerializer):
         queryset=Offer.objects.all(),
         source="offer",
     )
-    discount_amount = serializers.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        min_value=Decimal("0.00"),
-        required=False,
-        default=Decimal("0.00"),
-    )
 
     class Meta:
         model = OrderOffer
-        fields = ("id", "offer_id", "discount_amount", "created_at")
+        fields = ("id", "offer_id", "created_at")
         read_only_fields = ("id", "created_at")
 
 
@@ -1801,6 +1789,7 @@ class AdminOrderCreateSerializer(OrderSerializer):
         "total_price",
         "image",
         "delivery_proof",
+        "market_sections",
         "status",
         "review_status",
         "approved_by",
@@ -1810,7 +1799,7 @@ class AdminOrderCreateSerializer(OrderSerializer):
         "rejection_reason",
     }
 
-    items = AdminOrderItemCreateSerializer(many=True, required=True)
+    items = AdminOrderItemCreateSerializer(many=True, required=False)
     offers = AdminOrderOfferCreateSerializer(
         source="order_offers",
         many=True,
@@ -1842,10 +1831,16 @@ class AdminOrderCreateSerializer(OrderSerializer):
         if errors:
             raise serializers.ValidationError(errors)
 
+        items = attrs.get("items", [])
+        offers = attrs.get("order_offers", [])
+        first_market = self._first_market_from_lines(items, offers)
+        if first_market is not None:
+            attrs["market"] = first_market
+
         attrs = super().validate(attrs)
-        if not attrs.get("items"):
+        if not attrs.get("items") and not attrs.get("order_offers"):
             raise serializers.ValidationError(
-                {"items": "Choose at least one product variant."}
+                {"items": "Choose at least one product variant or offer."}
             )
         return attrs
 

@@ -35,6 +35,7 @@ from .services import (
 from notifications.services import (
     create_order_assigned_notification,
     create_order_rejected_notification,
+    create_new_order_review_notification,
     resolve_order_review_notifications,
 )
 
@@ -54,6 +55,7 @@ CREATE_SYSTEM_CONTROLLED_FIELDS = {
     "total_price",
     "image",
     "delivery_proof",
+    "market_sections",
     "status",
     "review_status",
     "approved_by",
@@ -228,20 +230,22 @@ class OrderListCreateView(generics.ListCreateAPIView):
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         target_user = resolve_order_target_user(request, action="create")
-        data = normalized_order_request_data(request.data, include_create_fields=True)
-        serializer = ClientOrderCreateSerializer(
+        data = request.data.copy()
+        data["user_id"] = target_user.id
+        serializer = AdminOrderCreateSerializer(
             data=data,
-            context={"request": request, "preview_user": target_user},
+            context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
-        orders = serializer.create_orders()
-        order = orders[0]
+        order = serializer.save()
         record_order_event(
             order,
             OrderEvent.EventType.ORDER_CREATED,
             actor=self.request.user,
             to_status=order.status,
         )
+        create_new_order_review_notification(order)
+        order = order_queryset().get(pk=order.pk)
         return Response(
             OrderSerializer(order, context={"request": request}).data,
             status=status.HTTP_201_CREATED,

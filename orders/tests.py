@@ -310,6 +310,39 @@ class OrderAPITests(APITestCase):
         self.assertEqual(order.user_id, self.customer.id)
         self.assertEqual(response.data["user_id"], self.customer.id)
 
+    def test_admin_create_accepts_contract_without_client_prices(self):
+        payload = self.payload()
+        for item in payload["items"]:
+            item.pop("unit_price", None)
+        for offer in payload["offers"]:
+            offer.pop("discount_amount", None)
+
+        response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(response.data["items"][0]["unit_price"], "500.00")
+        self.assertEqual(response.data["offers"][0]["discount_amount"], "100.00")
+        self.assertEqual(response.data["subtotal_price"], "1000.00")
+        self.assertEqual(response.data["discount"], "100.00")
+
+    def test_admin_create_does_not_require_selected_market_region(self):
+        self.customer.market_region_mode = None
+        self.customer.market_region_service_city = None
+        self.customer.market_region_updated_at = None
+        self.customer.save(
+            update_fields=[
+                "market_region_mode",
+                "market_region_service_city",
+                "market_region_updated_at",
+            ]
+        )
+
+        response = self.client.post(f"{ORDERS_BASE}/", self.payload(), format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertNotIn("requires_region_selection", response.data)
+        self.assertEqual(Order.objects.count(), 1)
+
     def test_admin_create_without_user_id_is_rejected(self):
         payload = self.payload()
         payload.pop("user_id")
@@ -534,6 +567,11 @@ class OrderAPITests(APITestCase):
             set(order.market_sections.values_list("market_id", flat=True)),
             {self.market.id, self.second_market.id},
         )
+        self.assertEqual(Order.objects.count(), 1)
+        self.assertTrue(response.data["is_multi_market"])
+        self.assertEqual(response.data["market_count"], 2)
+        self.assertEqual(len(response.data["market_sections"]), 2)
+        self.assertEqual(len(response.data["pickup_stops"]), 2)
 
     def test_admin_preview_and_create_totals_match_for_fixed_area_delivery(self):
         payload = {
