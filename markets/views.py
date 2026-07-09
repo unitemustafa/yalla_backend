@@ -233,10 +233,12 @@ class HomeView(APIView):
 
         products = (
             Product.objects.filter(market_id__in=market_ids)
-            .select_related("category__classification", "market__classification")
+            .filter(is_available=True, is_popular=True)
+            .select_related("market__classification")
             .prefetch_related(
                 "market__service_cities",
                 "market__delivery_areas",
+                "attributes__options",
                 Prefetch(
                     "variants",
                     queryset=ProductVariant.objects.order_by("price", "id"),
@@ -257,11 +259,11 @@ class HomeView(APIView):
                         market_id__in=market_ids,
                     )
                     .select_related(
-                        "category__classification",
                         "market__classification",
                     )
                     .prefetch_related(
                         "variants",
+                        "attributes__options",
                         "market__service_cities",
                         "market__delivery_areas",
                     ),
@@ -381,7 +383,7 @@ class MarketClassificationSummaryView(APIView):
                     market_id=market_id,
                     market__status=Market.Status.ACTIVE,
                 )
-                .select_related("category__classification")
+                .select_related("market__classification")
                 .order_by("-created_at", "-id")
             )
             for market_id in market_ids_for_response
@@ -460,7 +462,7 @@ class MarketClassificationMarketsView(APIView):
         products_by_market = {
             market.id: list(
                 Product.objects.filter(market=market)
-                .select_related("category__classification")
+                .select_related("market__classification")
                 .order_by("-created_at", "-id")[:3]
             )
             for market in markets
@@ -501,20 +503,18 @@ class ProductSearchView(APIView):
         if search_query:
             products = products.filter(
                 Q(name__icontains=search_query)
-                | Q(category__name__icontains=search_query)
-                | Q(category__classification__name__icontains=search_query)
                 | Q(market__name__icontains=search_query)
                 | Q(market__classification__name__icontains=search_query)
             )
 
         products = (
             products.select_related(
-                "category__classification",
                 "market__classification",
             )
             .prefetch_related(
                 "market__service_cities",
                 "market__delivery_areas",
+                "attributes__options",
                 Prefetch(
                     "variants",
                     queryset=ProductVariant.objects.order_by("price", "id"),
@@ -584,12 +584,12 @@ class AddressProductListView(APIView):
                 is_available=True,
             )
             .select_related(
-                "category__classification",
                 "market__classification",
             )
             .prefetch_related(
                 "market__service_cities",
                 "market__delivery_areas",
+                "attributes__options",
                 Prefetch(
                     "variants",
                     queryset=ProductVariant.objects.order_by("price", "id"),
@@ -623,17 +623,19 @@ class ProductDetailView(APIView):
                 market__status=Market.Status.ACTIVE,
             )
             .select_related(
-                "category__classification",
                 "market__classification",
             )
             .prefetch_related(
                 "market__service_cities",
                 "market__delivery_areas",
+                "attributes__options",
                 Prefetch(
                     "variants",
                     queryset=ProductVariant.objects.prefetch_related(
                         "attribute_values__attribute",
                         "attribute_values__option",
+                        "attribute_values__product_attribute",
+                        "attribute_values__product_attribute_option",
                     ).order_by("price", "id"),
                 ),
                 "attribute_values__attribute",

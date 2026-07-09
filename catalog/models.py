@@ -36,6 +36,11 @@ class CategoryOption(models.Model):
 
 
 class Product(models.Model):
+    class Theme(models.TextChoices):
+        CLOTHING = "clothing", "Clothing"
+        CONSUMER = "consumer", "Consumer"
+        OTHER = "other", "Other"
+
     market = models.ForeignKey(
         "markets.Market",
         on_delete=models.CASCADE,
@@ -45,7 +50,15 @@ class Product(models.Model):
         ProductCategory,
         on_delete=models.PROTECT,
         related_name="products",
+        blank=True,
+        null=True,
     )
+    theme = models.CharField(
+        max_length=20,
+        choices=Theme.choices,
+        default=Theme.OTHER,
+    )
+    is_popular = models.BooleanField(default=False)
     is_available = models.BooleanField(
         default=True,
         help_text="True if the product is available for sale."
@@ -73,6 +86,32 @@ class ProductAttributeValue(models.Model):
     option = models.ForeignKey(CategoryOption, on_delete=models.PROTECT)
 
 
+class ProductAttribute(models.Model):
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="attributes",
+    )
+    name = models.CharField(max_length=100)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ("sort_order", "id")
+
+
+class ProductAttributeOption(models.Model):
+    attribute = models.ForeignKey(
+        ProductAttribute,
+        on_delete=models.CASCADE,
+        related_name="options",
+    )
+    value = models.CharField(max_length=100)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ("sort_order", "id")
+
+
 class ProductVariant(models.Model):
     product = models.ForeignKey(
         Product,
@@ -89,8 +128,32 @@ class VariantAttributeValue(models.Model):
         on_delete=models.CASCADE,
         related_name="attribute_values",
     )
-    attribute = models.ForeignKey(CategoryAttribute, on_delete=models.PROTECT)
-    option = models.ForeignKey(CategoryOption, on_delete=models.PROTECT)
+    attribute = models.ForeignKey(
+        CategoryAttribute,
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+    )
+    option = models.ForeignKey(
+        CategoryOption,
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+    )
+    product_attribute = models.ForeignKey(
+        ProductAttribute,
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+        related_name="variant_values",
+    )
+    product_attribute_option = models.ForeignKey(
+        ProductAttributeOption,
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+        related_name="variant_values",
+    )
 
 
 class AdditionClassification(models.Model):

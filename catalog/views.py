@@ -60,10 +60,13 @@ def product_queryset():
         )
         .prefetch_related(
             "category__attributes__options",
+            "attributes__options",
             "attribute_values__attribute__options",
             "attribute_values__option",
             "variants__attribute_values__attribute__options",
             "variants__attribute_values__option",
+            "variants__attribute_values__product_attribute__options",
+            "variants__attribute_values__product_attribute_option",
             "additions",
         )
     )

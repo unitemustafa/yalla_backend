@@ -174,13 +174,16 @@ class AdditionClassificationAPITests(APITestCase):
         self.assertEqual([product["id"] for product in response.data], [self.product.id])
         product = response.data[0]
         self.assertIn("market", product)
-        self.assertIn("category", product)
+        self.assertNotIn("category", product)
+        self.assertEqual(product["theme"], Product.Theme.OTHER)
+        self.assertFalse(product["is_popular"])
         self.assertIn("variants", product)
         self.assertNotIn("attribute_values", product)
         self.assertNotIn("additions", product)
         self.assertNotIn("created_at", product)
         self.assertNotIn("updated_at", product)
         self.assertNotIn("attribute_values", product["variants"][0])
+        self.assertNotIn("sku", product["variants"][0])
 
     def test_product_like_requires_client_role(self):
         self.authenticate(self.admin)

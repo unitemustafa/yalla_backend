@@ -3,6 +3,8 @@ from rest_framework import serializers
 from catalog.models import (
     Product,
     ProductAddition,
+    ProductAttribute,
+    ProductAttributeOption,
     ProductAttributeValue,
     ProductCategory,
     ProductVariant,
@@ -257,7 +259,21 @@ class HomeCategorySerializer(serializers.ModelSerializer):
 class HomeVariantSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductVariant
-        fields = ("id", "price", "sku")
+        fields = ("id", "price")
+
+
+class HomeProductAttributeOptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductAttributeOption
+        fields = ("id", "value", "sort_order")
+
+
+class HomeProductAttributeSerializer(serializers.ModelSerializer):
+    options = HomeProductAttributeOptionSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ProductAttribute
+        fields = ("id", "name", "sort_order", "options")
 
 
 class ProductAttributeValueSerializer(serializers.ModelSerializer):
@@ -278,10 +294,10 @@ class ProductAttributeValueSerializer(serializers.ModelSerializer):
 
 
 class VariantAttributeValueSerializer(serializers.ModelSerializer):
-    attribute_id = serializers.IntegerField(read_only=True)
-    attribute_name = serializers.CharField(source="attribute.name", read_only=True)
-    option_id = serializers.IntegerField(read_only=True)
-    option_value = serializers.CharField(source="option.value", read_only=True)
+    attribute_id = serializers.SerializerMethodField()
+    attribute_name = serializers.SerializerMethodField()
+    option_id = serializers.SerializerMethodField()
+    option_value = serializers.SerializerMethodField()
 
     class Meta:
         model = VariantAttributeValue
@@ -292,6 +308,26 @@ class VariantAttributeValueSerializer(serializers.ModelSerializer):
             "option_id",
             "option_value",
         )
+
+    def get_attribute_id(self, value):
+        return value.product_attribute_id or value.attribute_id
+
+    def get_attribute_name(self, value):
+        if value.product_attribute_id:
+            return value.product_attribute.name
+        if value.attribute_id:
+            return value.attribute.name
+        return ""
+
+    def get_option_id(self, value):
+        return value.product_attribute_option_id or value.option_id
+
+    def get_option_value(self, value):
+        if value.product_attribute_option_id:
+            return value.product_attribute_option.value
+        if value.option_id:
+            return value.option.value
+        return ""
 
 
 class ProductDetailVariantSerializer(HomeVariantSerializer):
@@ -323,9 +359,9 @@ class ProductAdditionSerializer(serializers.ModelSerializer):
 
 
 class HomeProductSerializer(serializers.ModelSerializer):
-    category = HomeCategorySerializer(read_only=True)
     market = HomeMarketSerializer(read_only=True)
     variants = HomeVariantSerializer(many=True, read_only=True)
+    attributes = HomeProductAttributeSerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
@@ -335,8 +371,11 @@ class HomeProductSerializer(serializers.ModelSerializer):
             "description",
             "image",
             "discount",
-            "category",
+            "theme",
+            "is_popular",
+            "is_available",
             "market",
+            "attributes",
             "variants",
         )
 
@@ -356,8 +395,6 @@ class ProductDetailSerializer(HomeProductSerializer):
 
 
 class MarketClassificationProductSerializer(serializers.ModelSerializer):
-    category = HomeCategorySerializer(read_only=True)
-
     class Meta:
         model = Product
         fields = (
@@ -366,7 +403,8 @@ class MarketClassificationProductSerializer(serializers.ModelSerializer):
             "description",
             "image",
             "discount",
-            "category",
+            "theme",
+            "is_popular",
         )
 
 

@@ -730,12 +730,8 @@ class HomeAPITests(APITestCase):
                 ]
             },
         )
-        self.assertTrue(
-            all(
-                product["category"]["id"] == self.category.id
-                for product in response.data["products"]
-            )
-        )
+        self.assertTrue(all(product["is_popular"] for product in response.data["products"]))
+        self.assertTrue(all("category" not in product for product in response.data["products"]))
 
     def test_home_returns_general_region_content_only(self):
         general_classification = MarketClassification.objects.create(
@@ -753,6 +749,8 @@ class HomeAPITests(APITestCase):
             general_market,
             1000,
         )
+        general_product.is_popular = True
+        general_product.save(update_fields=["is_popular"])
         general_offer = Offer.objects.create(
             market=general_market,
             show_in_general=True,
@@ -1662,10 +1660,12 @@ class HomeAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["id"], product.id)
         self.assertEqual(response.data["market"]["id"], self.local_market.id)
-        self.assertEqual(response.data["category"]["id"], self.category.id)
+        self.assertNotIn("category", response.data)
+        self.assertEqual(response.data["theme"], Product.Theme.OTHER)
         self.assertEqual(response.data["attribute_values"][0]["attribute_name"], "Size")
         self.assertEqual(response.data["attribute_values"][0]["option_value"], "Large")
         self.assertEqual(response.data["variants"][0]["id"], variant.id)
+        self.assertNotIn("sku", response.data["variants"][0])
         self.assertEqual(
             response.data["variants"][0]["attribute_values"][0]["option_value"],
             "Large",
@@ -1699,6 +1699,7 @@ class HomeAPITests(APITestCase):
         product = Product.objects.create(
             market=market,
             category=self.category,
+            is_popular=True,
             name=name,
             description=f"Description for {name}",
         )

@@ -15,6 +15,8 @@ from catalog.models import (
     CategoryOption,
     Product,
     ProductAddition,
+    ProductAttribute,
+    ProductAttributeOption,
     ProductAttributeValue,
     ProductCategory,
     ProductVariant,
@@ -533,6 +535,21 @@ class Command(BaseCommand):
                 attribute=attribute,
                 defaults={"option": first_option},
             )
+            product_attribute, _ = ProductAttribute.objects.update_or_create(
+                product=product,
+                name=attribute.name,
+                defaults={"sort_order": 0},
+            )
+            product_options = []
+            for option_index, legacy_option in enumerate(
+                (first_option, second_option),
+            ):
+                product_option, _ = ProductAttributeOption.objects.update_or_create(
+                    attribute=product_attribute,
+                    value=legacy_option.value,
+                    defaults={"sort_order": option_index},
+                )
+                product_options.append(product_option)
 
             product_variants = []
             for variant_index, option in enumerate(
@@ -550,7 +567,11 @@ class Command(BaseCommand):
                 VariantAttributeValue.objects.update_or_create(
                     variant=variant,
                     attribute=attribute,
-                    defaults={"option": option},
+                    defaults={
+                        "option": option,
+                        "product_attribute": product_attribute,
+                        "product_attribute_option": product_options[variant_index - 1],
+                    },
                 )
                 product_variants.append(variant)
             variants[name] = product_variants
