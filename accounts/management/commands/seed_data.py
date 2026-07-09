@@ -23,7 +23,14 @@ from catalog.models import (
 from locations.models import Address, DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
 from offers.models import Offer
-from orders.models import Order, OrderItem, OrderMarketSection, OrderOffer
+from orders.models import (
+    Order,
+    OrderEvent,
+    OrderItem,
+    OrderMarketSection,
+    OrderOffer,
+)
+from orders.services import record_order_event
 
 User = get_user_model()
 
@@ -893,6 +900,98 @@ class Command(BaseCommand):
                 section=section,
                 offer=definition["offer"],
                 discount_amount=discount,
+            )
+            self._sync_order_history(order, users)
+
+    def _sync_order_history(self, order, users):
+        order.history_events.all().delete()
+
+        admin = users["seed.admin@yalla.test"]
+        representative = order.assigned_representative
+
+        record_order_event(
+            order,
+            OrderEvent.EventType.ORDER_CREATED,
+            actor=order.user,
+            to_status=Order.Status.PENDING,
+            metadata={"seed": True},
+        )
+
+        if order.status == Order.Status.PENDING:
+            return
+
+        record_order_event(
+            order,
+            OrderEvent.EventType.REVIEW_APPROVED,
+            actor=admin,
+            from_status=Order.Status.PENDING,
+            to_status=Order.Status.CONFIRMED,
+            metadata={
+                "seed": True,
+                "review_status": Order.ReviewStatus.APPROVED,
+            },
+        )
+
+        if order.status == Order.Status.CONFIRMED:
+            return
+
+        if order.status == Order.Status.CANCELLED:
+            record_order_event(
+                order,
+                OrderEvent.EventType.CANCELLED,
+                actor=admin,
+                from_status=Order.Status.CONFIRMED,
+                to_status=Order.Status.CANCELLED,
+                metadata={"seed": True},
+            )
+            return
+
+        if representative is None:
+            return
+
+        record_order_event(
+            order,
+            OrderEvent.EventType.ASSIGNED,
+            actor=admin,
+            from_status=Order.Status.CONFIRMED,
+            to_status=Order.Status.ASSIGNED,
+            metadata={
+                "seed": True,
+                "representative_id": representative.id,
+            },
+        )
+
+        if order.status == Order.Status.ASSIGNED:
+            return
+
+        if order.status in (
+            Order.Status.PICKED_UP,
+            Order.Status.DELIVERED,
+            Order.Status.FAILED_DELIVERY,
+        ):
+            record_order_event(
+                order,
+                OrderEvent.EventType.STATUS_CHANGED,
+                actor=representative,
+                from_status=Order.Status.ASSIGNED,
+                to_status=Order.Status.PICKED_UP,
+                metadata={"seed": True},
+            )
+
+        if order.status == Order.Status.PICKED_UP:
+            return
+
+        if order.status in (
+            Order.Status.DELIVERED,
+            Order.Status.FAILED_DELIVERY,
+        ):
+            record_order_event(
+                order,
+                OrderEvent.EventType.STATUS_CHANGED,
+                actor=representative,
+                from_status=Order.Status.PICKED_UP,
+                to_status=order.status,
+                metadata={"seed": True},
             )
 
     def _representative_for_order(self, users, status):
