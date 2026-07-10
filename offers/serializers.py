@@ -1,5 +1,6 @@
 import json
 
+from django.utils import timezone
 from rest_framework import serializers
 
 from catalog.models import Product
@@ -171,6 +172,18 @@ class AdminOfferSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"end_time": "End time must be after start time."}
             )
+
+        # An expired offer is allowed to become active again when an admin
+        # extends its schedule.  Keep an explicitly supplied status intact so
+        # a deliberate pause still wins over this automatic recovery.
+        if (
+            self.instance is not None
+            and self.instance.status == Offer.Status.EXPIRED
+            and "status" not in attrs
+            and "end_time" in attrs
+            and end_time > timezone.now()
+        ):
+            attrs["status"] = Offer.Status.ACTIVE
 
         products_to_check = products
         if products_to_check is None and self.instance is not None and market:

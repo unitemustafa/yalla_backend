@@ -13,6 +13,7 @@ class MarketClassification(models.Model):
         choices=ClassificationType.choices,
         default=ClassificationType.NORMAL,
     )
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         constraints = [
@@ -47,6 +48,8 @@ class Market(models.Model):
         related_name="markets",
     )
     name = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    image = models.ImageField(upload_to="markets/", blank=True, null=True)
     branch = models.CharField(max_length=255, blank=True)
     scope = models.CharField(
         max_length=20,

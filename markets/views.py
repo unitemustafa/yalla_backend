@@ -293,6 +293,7 @@ class HomeView(APIView):
         classifications = (
             MarketClassification.objects.filter(
                 markets__id__in=market_ids,
+                is_active=True,
             )
             .distinct()
             .order_by("name")
@@ -345,7 +346,10 @@ class MarketClassificationSummaryView(APIView):
         market_ids = list(
             visible_market_queryset(request.user).values_list("id", flat=True)
         )
-        classification_filters = {"markets__id__in": market_ids}
+        classification_filters = {
+            "markets__id__in": market_ids,
+            "is_active": True,
+        }
         if self.classification_type is not None:
             classification_filters["classification_type"] = self.classification_type
 
@@ -465,6 +469,7 @@ class MarketClassificationMarketsView(APIView):
         classification = get_object_or_404(
             MarketClassification,
             id=classification_id,
+            is_active=True,
         )
         market_ids = list(
             visible_market_queryset(request.user).values_list("id", flat=True)

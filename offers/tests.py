@@ -304,6 +304,22 @@ class OfferAPITests(APITestCase):
         self.assertEqual(update_response.data["service_city_ids"], [self.city.id])
         self.assertIn(offer_id, [item["id"] for item in list_response.data])
 
+    def test_admin_can_reactivate_expired_offer_by_extending_its_end_time(self):
+        self.authenticate(self.admin)
+        offer = self.create_offer(cities=[self.city])
+        offer.status = Offer.Status.EXPIRED
+        offer.end_time = self.now - timedelta(minutes=1)
+        offer.save(update_fields=["status", "end_time"])
+
+        response = self.client.patch(
+            f"{OFFERS_BASE}/{offer.id}/",
+            {"end_time": (self.now + timedelta(days=2)).isoformat()},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["status"], Offer.Status.ACTIVE)
+
     def test_admin_can_create_each_valid_target_combination(self):
         self.authenticate(self.admin)
         combinations = [

@@ -419,6 +419,8 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
         if expected_role and user.role != expected_role:
             if expected_role == User.Role.REPRESENTATIVE:
                 raise PermissionDenied(self._representative_wrong_role_error(user))
+            if expected_role == User.Role.ADMIN:
+                raise PermissionDenied("تسجيل الدخول هذا مخصص لحسابات المدير فقط.")
             role_label = User.Role(expected_role).label.lower()
             raise PermissionDenied(
                 f"This login is only for {role_label} accounts."
@@ -560,6 +562,7 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
         required=False,
         allow_null=False,
     )
+    remove_avatar = serializers.BooleanField(write_only=True, required=False)
 
     def validate_email(self, value):
         email = normalize_email(value)
@@ -653,7 +656,8 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
 
     def update(self, instance, validated_data):
         avatar = validated_data.pop("avatar", None)
-        old_avatar = instance.avatar_image if avatar is not None else None
+        remove_avatar = validated_data.pop("remove_avatar", False)
+        old_avatar = instance.avatar_image if avatar is not None or remove_avatar else None
         update_fields = []
         if (
             "username" in validated_data
@@ -670,6 +674,10 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
         if avatar is not None:
             instance.avatar_image = avatar
             update_fields.append("avatar_image")
+        elif remove_avatar:
+            instance.avatar_image = None
+            instance.avatar_url = None
+            update_fields.extend(["avatar_image", "avatar_url"])
         if update_fields:
             instance.save(update_fields=[*update_fields, "updated_at"])
         if (
@@ -697,6 +705,7 @@ class AdminUserWriteSerializer(
         write_only=True,
         allow_null=False,
     )
+    remove_avatar = serializers.BooleanField(write_only=True, required=False)
 
     class Meta:
         model = User
@@ -711,6 +720,7 @@ class AdminUserWriteSerializer(
             "birth_date",
             "avatar_url",
             "avatar_image",
+            "remove_avatar",
             "role",
             "is_active",
             "is_staff",
@@ -821,6 +831,7 @@ class AdminUserWriteSerializer(
     def create(self, validated_data):
         profile_data = validated_data.pop("courier_profile", None)
         avatar_image = validated_data.pop("avatar_image", None)
+        validated_data.pop("remove_avatar", None)
         password = validated_data.pop("password")
         user = User(**validated_data)
         if avatar_image is not None:
@@ -841,6 +852,7 @@ class AdminUserWriteSerializer(
         )
         profile_data = validated_data.pop("courier_profile", None)
         avatar_image = validated_data.pop("avatar_image", None)
+        remove_avatar = validated_data.pop("remove_avatar", False)
         password = validated_data.pop("password", None)
         update_fields = list(validated_data.keys())
         if (
@@ -852,10 +864,14 @@ class AdminUserWriteSerializer(
 
         for field, value in validated_data.items():
             setattr(instance, field, value)
-        old_avatar = instance.avatar_image if avatar_image is not None else None
+        old_avatar = instance.avatar_image if avatar_image is not None or remove_avatar else None
         if avatar_image is not None:
             instance.avatar_image = avatar_image
             update_fields.append("avatar_image")
+        elif remove_avatar:
+            instance.avatar_image = None
+            instance.avatar_url = None
+            update_fields.extend(["avatar_image", "avatar_url"])
         if password is not None:
             instance.set_password(password)
             update_fields.append("password")

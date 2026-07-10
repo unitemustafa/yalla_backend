@@ -14,6 +14,7 @@ HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 class DashboardSettingsSerializer(serializers.ModelSerializer):
     logo = serializers.ImageField(write_only=True, required=False, allow_null=False)
+    remove_logo = serializers.BooleanField(write_only=True, required=False)
     logo_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -26,6 +27,7 @@ class DashboardSettingsSerializer(serializers.ModelSerializer):
             "brand_name",
             "brand_tagline",
             "logo",
+            "remove_logo",
             "logo_url",
             "updated_at",
         )
@@ -90,11 +92,14 @@ class DashboardSettingsSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         logo = validated_data.pop("logo", None)
-        old_logo = instance.logo if logo is not None else None
+        remove_logo = validated_data.pop("remove_logo", False)
+        old_logo = instance.logo if logo is not None or remove_logo else None
         for field, value in validated_data.items():
             setattr(instance, field, value)
         if logo is not None:
             instance.logo = logo
+        elif remove_logo:
+            instance.logo = None
         instance.save()
         if old_logo and old_logo.name and old_logo.name != instance.logo.name:
             old_logo.delete(save=False)

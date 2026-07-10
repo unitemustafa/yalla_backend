@@ -320,7 +320,7 @@ class AuthenticationAPITests(APITestCase):
         )
         self.assertEqual(
             wrong_role_response.data["detail"],
-            "This login is only for admin accounts.",
+            "تسجيل الدخول هذا مخصص لحسابات المدير فقط.",
         )
 
     def test_admin_login_remember_true_refresh_exp_is_about_7_days(self):

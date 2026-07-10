@@ -20,7 +20,7 @@ from .models import Market, MarketClassification
 class AdminMarketClassificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = MarketClassification
-        fields = ("id", "name", "classification_type")
+        fields = ("id", "name", "classification_type", "is_active")
 
     def validate_name(self, value):
         name = value.strip()
@@ -82,6 +82,8 @@ class HomeMarketSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "name",
+            "description",
+            "image",
             "branch",
             "scope",
             "status",
@@ -146,6 +148,8 @@ class AdminMarketSerializer(serializers.ModelSerializer):
             "classification",
             "classification_id",
             "name",
+            "description",
+            "image",
             "branch",
             "scope",
             "status",
