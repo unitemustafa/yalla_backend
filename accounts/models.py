@@ -30,6 +30,7 @@ class User(AbstractUser):
     deleted_original_username = models.CharField(max_length=150, null=True, blank=True)
     deleted_original_phone = models.CharField(max_length=30, null=True, blank=True)
     deleted_original_is_active = models.BooleanField(null=True, blank=True)
+    auth_token_version = models.PositiveIntegerField(default=0)
     market_region_mode = models.CharField(
         max_length=20,
         choices=MarketRegionMode.choices,

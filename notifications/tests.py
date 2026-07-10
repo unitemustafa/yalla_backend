@@ -11,7 +11,7 @@ from locations.models import Address, DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
 from orders.models import Order
 
-from .models import Notification
+from .models import ClientDevice, Notification
 from .services import create_new_order_review_notification
 
 User = get_user_model()
@@ -125,6 +125,32 @@ class NotificationAPITests(APITestCase):
     def authenticate(self, user):
         token = RefreshToken.for_user(user).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    def test_client_device_registration_refresh_and_unregister_are_idempotent(self):
+        self.authenticate(self.customer)
+        payload = {"token": "fcm-token-1", "platform": "android"}
+
+        first = self.client.post(
+            "/api/v1/notifications/devices/register/",
+            payload,
+            format="json",
+        )
+        second = self.client.post(
+            "/api/v1/notifications/devices/register/",
+            payload,
+            format="json",
+        )
+        removed = self.client.delete(
+            "/api/v1/notifications/devices/unregister/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(removed.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(ClientDevice.objects.filter(token="fcm-token-1").count(), 1)
+        self.assertFalse(ClientDevice.objects.get(token="fcm-token-1").is_active)
 
     def create_client_order_requiring_review(self):
         self.authenticate(self.customer)
@@ -260,11 +286,12 @@ class NotificationAPITests(APITestCase):
         )
         self.authenticate(self.admin)
 
-        reject_response = self.client.post(
-            f"/api/v1/admin/orders/{order.id}/reject/",
-            {"rejection_reason": "Out of stock"},
-            format="json",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            reject_response = self.client.post(
+                f"/api/v1/admin/orders/{order.id}/reject/",
+                {"rejection_reason": "Out of stock"},
+                format="json",
+            )
 
         self.assertEqual(reject_response.status_code, status.HTTP_200_OK)
         order.refresh_from_db()

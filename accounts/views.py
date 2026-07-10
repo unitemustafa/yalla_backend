@@ -16,6 +16,7 @@ from rest_framework_simplejwt.token_blacklist.models import (
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .courier_rules import active_assigned_orders_for_user
+from .deactivation import handle_client_deactivation
 from .models import OneTimePassword
 from .serializers import (
     AdminUserDetailSerializer,
@@ -70,6 +71,7 @@ class IsClientRole(BasePermission):
 
 def token_payload(user, request=None, admin_session_lifetime=None, remember=False):
     refresh = RefreshToken.for_user(user)
+    refresh["auth_token_version"] = user.auth_token_version
     if admin_session_lifetime is not None:
         admin_session_exp = int(
             (timezone.now() + admin_session_lifetime).timestamp()
@@ -110,7 +112,8 @@ def otp_cooldown_error_response(exc):
     )
 
 
-def soft_delete_user(user):
+def soft_delete_user(user, *, notify_disabled=False):
+    was_active = user.is_active
     deleted_at = timezone.now()
     deleted_marker = f"deleted-{user.pk}-{int(deleted_at.timestamp())}"
     user.deleted_original_email = user.email
@@ -135,6 +138,11 @@ def soft_delete_user(user):
             "deleted_original_is_active",
             "updated_at",
         ]
+    )
+    handle_client_deactivation(
+        user,
+        was_active=was_active,
+        notify_disabled=notify_disabled,
     )
 
 
@@ -352,7 +360,7 @@ class MeView(APIView):
             ],
             ignore_conflicts=True,
         )
-        soft_delete_user(user)
+        soft_delete_user(user, notify_disabled=False)
         return Response({"detail": "Account deleted."}, status=status.HTTP_200_OK)
 
 
@@ -426,9 +434,12 @@ class AdminUserDetailView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
     parser_classes = [JSONParser, FormParser, MultiPartParser]
 
-    def get_user(self, user_id):
+    def get_user(self, user_id, *, for_update=False):
+        queryset = User.objects.filter(deleted_at__isnull=True)
+        if for_update:
+            queryset = queryset.select_for_update()
         return get_object_or_404(
-            User.objects.filter(deleted_at__isnull=True).select_related(
+            queryset.select_related(
                 "market_region_service_city"
             ),
             id=user_id,
@@ -440,7 +451,7 @@ class AdminUserDetailView(APIView):
 
     @transaction.atomic
     def patch(self, request, user_id):
-        user = self.get_user(user_id)
+        user = self.get_user(user_id, for_update=True)
         serializer = AdminUserWriteSerializer(
             user,
             data=request.data,
@@ -452,13 +463,13 @@ class AdminUserDetailView(APIView):
 
     @transaction.atomic
     def delete(self, request, user_id):
-        user = self.get_user(user_id)
+        user = self.get_user(user_id, for_update=True)
         if user.role == User.Role.REPRESENTATIVE and active_assigned_orders_for_user(user).exists():
             return Response(
                 {"detail": "Reassign active orders before deleting this courier."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        soft_delete_user(user)
+        soft_delete_user(user, notify_disabled=True)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

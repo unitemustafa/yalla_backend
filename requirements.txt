@@ -8,6 +8,7 @@ django-cloudinary-storage==0.3.0
 django-cors-headers==4.9.0
 djangorestframework==3.17.1
 djangorestframework_simplejwt==5.5.1
+firebase-admin==7.5.0
 gunicorn==26.0.0
 idna==3.18
 packaging==26.2

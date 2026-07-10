@@ -1,6 +1,7 @@
 from datetime import timedelta
 from decimal import Decimal
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -14,6 +15,7 @@ from catalog.models import CategoryClassification, Product, ProductCategory
 from locations.models import ServiceCity
 from markets.models import Market, MarketClassification
 from orders.models import Order, OrderOffer
+from notifications.models import Notification
 
 from .models import Offer
 
@@ -162,6 +164,110 @@ class OfferAPITests(APITestCase):
         offer.products.set([product or self.product])
         offer.service_cities.set(cities or [])
         return offer
+
+    @patch("notifications.offer_services.send_notification_push")
+    def test_city_offer_notifies_only_active_clients_in_selected_city(self, send_push):
+        other_city_client = User.objects.create_user(
+            username="other_offer_city",
+            email="other-offer-city@example.com",
+            phone="+213555500020",
+            password=self.password,
+            role=User.Role.CLIENT,
+            market_region_mode=User.MarketRegionMode.SERVICE_CITY,
+            market_region_service_city=self.second_city,
+        )
+        inactive_client = User.objects.create_user(
+            username="inactive_offer_city",
+            email="inactive-offer-city@example.com",
+            phone="+213555500021",
+            password=self.password,
+            role=User.Role.CLIENT,
+            is_active=False,
+            market_region_mode=User.MarketRegionMode.SERVICE_CITY,
+            market_region_service_city=self.city,
+        )
+        self.authenticate(self.admin)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"{OFFERS_BASE}/",
+                self.offer_payload(),
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        notifications = Notification.objects.filter(
+            offer_id=response.data["id"],
+            type=Notification.Type.OFFER_CREATED,
+        )
+        self.assertEqual(list(notifications.values_list("recipient_id", flat=True)), [self.client_user.id])
+        notification = notifications.get()
+        self.assertEqual(notification.data["region_name"], self.city.name)
+        self.assertEqual(notification.data["price_text"], "خصم 50%")
+        self.assertNotIn(other_city_client.id, notifications.values_list("recipient_id", flat=True))
+        self.assertNotIn(inactive_client.id, notifications.values_list("recipient_id", flat=True))
+        send_push.assert_called_once_with(notification.id)
+
+    @patch("notifications.offer_services.send_notification_push")
+    def test_general_offer_notifies_only_general_selected_clients(self, send_push):
+        self.set_client_region(None)
+        city_client = User.objects.create_user(
+            username="city_only_offer",
+            email="city-only-offer@example.com",
+            phone="+213555500022",
+            password=self.password,
+            role=User.Role.CLIENT,
+            market_region_mode=User.MarketRegionMode.SERVICE_CITY,
+            market_region_service_city=self.city,
+        )
+        self.authenticate(self.admin)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"{OFFERS_BASE}/",
+                self.offer_payload(
+                    market_id=self.general_market.id,
+                    product_ids=[self.general_product.id],
+                    show_in_general=True,
+                    service_city_ids=[self.city.id],
+                ),
+                format="json",
+            )
+
+        notifications = Notification.objects.filter(
+            offer_id=response.data["id"],
+            type=Notification.Type.OFFER_CREATED,
+        )
+        self.assertEqual(list(notifications.values_list("recipient_id", flat=True)), [self.client_user.id])
+        self.assertNotIn(city_client.id, notifications.values_list("recipient_id", flat=True))
+        self.assertEqual(notifications.get().data["region_name"], "السوق العام")
+        send_push.assert_called_once()
+
+    def test_inactive_and_future_offers_create_no_immediate_notification(self):
+        self.authenticate(self.admin)
+        with self.captureOnCommitCallbacks(execute=True):
+            inactive = self.client.post(
+                f"{OFFERS_BASE}/",
+                self.offer_payload(status=Offer.Status.INACTIVE),
+                format="json",
+            )
+            future = self.client.post(
+                f"{OFFERS_BASE}/",
+                self.offer_payload(
+                    title="Future",
+                    start_time=(self.now + timedelta(hours=1)).isoformat(),
+                    end_time=(self.now + timedelta(hours=2)).isoformat(),
+                ),
+                format="json",
+            )
+        self.assertEqual(inactive.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(future.status_code, status.HTTP_201_CREATED)
+        self.assertFalse(
+            Notification.objects.filter(
+                offer_id__in=[inactive.data["id"], future.data["id"]],
+                type=Notification.Type.OFFER_CREATED,
+            ).exists()
+        )
 
     def test_admin_can_create_update_list_offer_with_city_targets(self):
         self.authenticate(self.admin)

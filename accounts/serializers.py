@@ -22,7 +22,9 @@ from locations.models import ServiceCity
 from orders.models import Order
 
 from .courier_rules import active_assigned_orders_for_user
+from .exceptions import AccountInactive
 from .models import CourierProfile, OneTimePassword
+from .token_security import validate_client_token_state
 from .services import normalize_email, verify_otp
 
 User = get_user_model()
@@ -187,6 +189,7 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
             "avatar_url",
             "username_changed_at",
             "role",
+            "is_active",
             "market_region_mode",
             "market_region_service_city_name",
             "has_password",
@@ -211,7 +214,6 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
 class AdminUserSerializer(UserSerializer):
     class Meta(UserSerializer.Meta):
         fields = UserSerializer.Meta.fields + (
-            "is_active",
             "is_staff",
             "is_superuser",
             "last_login",
@@ -409,9 +411,11 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
 
         if user is None or not user.check_password(attrs["password"]):
             raise AuthenticationFailed("Invalid email or password.")
-        if not user.is_active:
-            raise serializers.ValidationError("Account is inactive.")
         expected_role = self.context.get("expected_role")
+        if not user.is_active:
+            if user.role == User.Role.CLIENT or expected_role == User.Role.CLIENT:
+                raise AccountInactive()
+            raise serializers.ValidationError("Account is inactive.")
         if expected_role and user.role != expected_role:
             if expected_role == User.Role.REPRESENTATIVE:
                 raise PermissionDenied(self._representative_wrong_role_error(user))
@@ -831,6 +835,7 @@ class AdminUserWriteSerializer(
         return user
 
     def update(self, instance, validated_data):
+        was_active = instance.is_active
         profile_data = validated_data.pop("courier_profile", None)
         avatar_image = validated_data.pop("avatar_image", None)
         password = validated_data.pop("password", None)
@@ -861,6 +866,9 @@ class AdminUserWriteSerializer(
             old_avatar.delete(save=False)
         if instance.role != User.Role.REPRESENTATIVE:
             CourierProfile.objects.filter(user=instance).delete()
+            from .deactivation import handle_client_deactivation
+
+            handle_client_deactivation(instance, was_active=was_active)
             return instance
         if profile_data is not None:
             profile_data["delivery_area"] = None
@@ -872,6 +880,9 @@ class AdminUserWriteSerializer(
                 setattr(profile, field, value)
             profile.save()
             instance._state.fields_cache.pop("courier_profile", None)
+        from .deactivation import handle_client_deactivation
+
+        handle_client_deactivation(instance, was_active=was_active)
         return instance
 
 
@@ -911,6 +922,7 @@ class EmailTokenRefreshSerializer(
             if payload.get("admin_session_exp") is not None:
                 raise AuthenticationFailed("Session expired. Please login again.")
             raise
+        validate_client_token_state(token)
         admin_session_exp = token.get("admin_session_exp")
         if admin_session_exp is not None:
             try:

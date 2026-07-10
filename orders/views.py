@@ -34,10 +34,10 @@ from .services import (
 )
 from notifications.services import (
     create_order_assigned_notification,
-    create_order_rejected_notification,
     create_new_order_review_notification,
     resolve_order_review_notifications,
 )
+from notifications.order_services import schedule_order_lifecycle_notification
 
 User = get_user_model()
 
@@ -229,7 +229,7 @@ class OrderListCreateView(generics.ListCreateAPIView):
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
-        target_user = resolve_order_target_user(request, action="create")
+        target_user = resolve_order_target_user(request, action="create", lock=True)
         data = request.data.copy()
         if "delivery_address_id" not in data and "address_id" in data:
             data["delivery_address_id"] = data["address_id"]
@@ -285,7 +285,7 @@ class ClientOrderCreateView(APIView):
 
     @transaction.atomic
     def post(self, request):
-        target_user = resolve_order_target_user(request, action="create")
+        target_user = resolve_order_target_user(request, action="create", lock=True)
         data = normalized_order_request_data(request.data, include_create_fields=True)
         serializer = ClientOrderCreateSerializer(
             data=data,
@@ -294,11 +294,17 @@ class ClientOrderCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         orders = serializer.create_orders()
         for order in orders:
-            record_order_event(
+            event = record_order_event(
                 order,
                 OrderEvent.EventType.ORDER_CREATED,
                 actor=request.user,
                 to_status=order.status,
+            )
+            schedule_order_lifecycle_notification(
+                order,
+                event,
+                "order_created",
+                new_status=order.status,
             )
         return Response(
             OrderSerializer(
@@ -337,12 +343,19 @@ class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
                 "updated_at",
             ]
         )
-        record_order_event(
+        event = record_order_event(
             order,
             OrderEvent.EventType.CANCELLED,
             actor=request.user,
             from_status=old_status,
             to_status=order.status,
+        )
+        schedule_order_lifecycle_notification(
+            order,
+            event,
+            "order_cancelled",
+            old_status=old_status,
+            new_status=order.status,
         )
         resolve_order_review_notifications(order)
         return Response(
@@ -374,7 +387,7 @@ class OrderStatusView(APIView):
             order.assigned_representative = None
             order.assigned_at = None
         order.save()
-        record_order_event(
+        event = record_order_event(
             order,
             (
                 OrderEvent.EventType.CANCELLED
@@ -384,6 +397,19 @@ class OrderStatusView(APIView):
             actor=request.user,
             from_status=old_status,
             to_status=new_status,
+        )
+        schedule_order_lifecycle_notification(
+            order,
+            event,
+            (
+                "order_cancelled"
+                if new_status == Order.Status.CANCELLED
+                else "order_failed_delivery"
+                if new_status == Order.Status.FAILED_DELIVERY
+                else "order_status_changed"
+            ),
+            old_status=old_status,
+            new_status=new_status,
         )
         return Response(
             OrderSerializer(
@@ -491,13 +517,20 @@ class OrderAssignmentView(APIView):
                     "updated_at",
                 ]
             )
-            record_order_event(
+            event = record_order_event(
                 order,
                 OrderEvent.EventType.UNASSIGNED,
                 actor=request.user,
                 from_status=old_status,
                 to_status=order.status,
                 metadata={"representative_id": old_representative_id},
+            )
+            schedule_order_lifecycle_notification(
+                order,
+                event,
+                "order_status_changed",
+                old_status=old_status,
+                new_status=order.status,
             )
             return Response(
                 OrderSerializer(
@@ -550,13 +583,20 @@ class OrderAssignmentView(APIView):
                 "updated_at",
             ]
         )
-        record_order_event(
+        event = record_order_event(
             order,
             OrderEvent.EventType.ASSIGNED,
             actor=request.user,
             from_status=old_status,
             to_status=order.status,
             metadata={"representative_id": representative.id},
+        )
+        schedule_order_lifecycle_notification(
+            order,
+            event,
+            "order_status_changed",
+            old_status=old_status,
+            new_status=order.status,
         )
         create_order_assigned_notification(order, representative)
         return Response(
@@ -629,13 +669,20 @@ class AdminOrderApproveView(APIView):
                 "updated_at",
             ]
         )
-        record_order_event(
+        event = record_order_event(
             order,
             OrderEvent.EventType.REVIEW_APPROVED,
             actor=request.user,
             from_status=old_status,
             to_status=order.status,
             metadata={"review_status": order.review_status},
+        )
+        schedule_order_lifecycle_notification(
+            order,
+            event,
+            "order_review_approved",
+            old_status=old_status,
+            new_status=order.status,
         )
         resolve_order_review_notifications(order)
         representatives = eligible_representatives_for_order(order)
@@ -705,7 +752,7 @@ class AdminOrderRejectView(APIView):
                 "updated_at",
             ]
         )
-        record_order_event(
+        event = record_order_event(
             order,
             OrderEvent.EventType.REVIEW_REJECTED,
             actor=request.user,
@@ -715,7 +762,13 @@ class AdminOrderRejectView(APIView):
             metadata={"review_status": order.review_status},
         )
         resolve_order_review_notifications(order)
-        create_order_rejected_notification(order)
+        schedule_order_lifecycle_notification(
+            order,
+            event,
+            "order_review_rejected",
+            old_status=old_status,
+            new_status=order.status,
+        )
         return Response(
             {
                 "message": "Order rejected successfully.",
@@ -772,7 +825,10 @@ COURIER_STATUSES = {
 
 COURIER_TRANSITIONS = {
     Order.Status.ASSIGNED: {Order.Status.PICKED_UP},
-    Order.Status.PICKED_UP: {Order.Status.DELIVERED},
+    Order.Status.PICKED_UP: {
+        Order.Status.DELIVERED,
+        Order.Status.FAILED_DELIVERY,
+    },
 }
 
 
@@ -884,22 +940,34 @@ class CourierOrderStatusView(APIView):
                 pickup_status=OrderMarketSection.PickupStatus.PICKED_UP,
                 picked_up_at=timezone.now(),
             )
-        if new_status == Order.Status.DELIVERED:
-            order.delivered_at = timezone.now()
-            update_fields.append("delivered_at")
+        if new_status in (Order.Status.DELIVERED, Order.Status.FAILED_DELIVERY):
             if "delivery_note" in serializer.validated_data:
                 order.delivery_note = serializer.validated_data["delivery_note"].strip()
                 update_fields.append("delivery_note")
+        if new_status == Order.Status.DELIVERED:
+            order.delivered_at = timezone.now()
+            update_fields.append("delivered_at")
             if "delivery_proof" in serializer.validated_data:
                 order.delivery_proof = serializer.validated_data["delivery_proof"]
                 update_fields.append("delivery_proof")
         order.save(update_fields=update_fields)
-        record_order_event(
+        event = record_order_event(
             order,
             OrderEvent.EventType.STATUS_CHANGED,
             actor=request.user,
             from_status=old_status,
             to_status=new_status,
+        )
+        schedule_order_lifecycle_notification(
+            order,
+            event,
+            (
+                "order_failed_delivery"
+                if new_status == Order.Status.FAILED_DELIVERY
+                else "order_status_changed"
+            ),
+            old_status=old_status,
+            new_status=new_status,
         )
         return Response(
             CourierOrderDetailSerializer(

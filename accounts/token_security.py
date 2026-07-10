@@ -1,0 +1,35 @@
+from django.contrib.auth import get_user_model
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.settings import api_settings
+
+from .exceptions import AccountInactive
+
+User = get_user_model()
+
+
+def token_user(validated_token):
+    try:
+        user_id = validated_token[api_settings.USER_ID_CLAIM]
+        return User.objects.get(**{api_settings.USER_ID_FIELD: user_id})
+    except KeyError as exc:
+        raise AuthenticationFailed(
+            "Token contained no recognizable user identification.",
+            code="token_not_valid",
+        ) from exc
+    except User.DoesNotExist as exc:
+        raise AuthenticationFailed("User not found.", code="user_not_found") from exc
+
+
+def validate_client_token_state(validated_token, user=None):
+    user = user or token_user(validated_token)
+    if user.role != User.Role.CLIENT:
+        return user
+    if not user.is_active or user.deleted_at is not None:
+        raise AccountInactive()
+    try:
+        token_version = int(validated_token.get("auth_token_version", 0))
+    except (TypeError, ValueError) as exc:
+        raise AuthenticationFailed("Token is invalid.", code="token_not_valid") from exc
+    if token_version != user.auth_token_version:
+        raise AuthenticationFailed("Token is invalid.", code="token_not_valid")
+    return user

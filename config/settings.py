@@ -152,7 +152,7 @@ AUTH_USER_MODEL = "accounts.User"
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'accounts.authentication.DatabaseStateJWTAuthentication',
     ),
 }
 
@@ -167,6 +167,11 @@ SIMPLE_JWT = {
 # Client and representative refresh tokens retain the general Simple JWT lifetime.
 ADMIN_REMEMBER_SESSION_LIFETIME = timedelta(days=7)
 ADMIN_TEMPORARY_SESSION_LIFETIME = timedelta(hours=8)
+
+FIREBASE_SERVICE_ACCOUNT_BASE64 = os.environ.get(
+    "FIREBASE_SERVICE_ACCOUNT_BASE64", ""
+)
+FIREBASE_SERVICE_ACCOUNT_JSON = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
 
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")

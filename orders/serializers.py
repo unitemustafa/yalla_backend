@@ -2186,6 +2186,7 @@ class CourierOrderStatusSerializer(serializers.Serializer):
         choices=(
             (Order.Status.PICKED_UP, Order.Status.PICKED_UP.label),
             (Order.Status.DELIVERED, Order.Status.DELIVERED.label),
+            (Order.Status.FAILED_DELIVERY, Order.Status.FAILED_DELIVERY.label),
         )
     )
     delivery_note = serializers.CharField(required=False, allow_blank=True)

@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.db.models import ProtectedError
 
 from rest_framework import status
@@ -17,6 +18,12 @@ from markets.serializers import HomeOfferSerializer
 
 from .models import Offer
 from .serializers import AdminOfferSerializer
+
+
+def schedule_offer_notifications(offer_id):
+    from notifications.offer_services import create_offer_notifications
+
+    transaction.on_commit(lambda: create_offer_notifications(offer_id))
 
 
 class OfferListCreateView(APIView):
@@ -69,11 +76,13 @@ class OfferListCreateView(APIView):
             ).data
         )
 
+    @transaction.atomic
     def post(self, request):
         self._require_admin(request)
         serializer = AdminOfferSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         offer = serializer.save()
+        schedule_offer_notifications(offer.id)
         offer = self.get_queryset().get(id=offer.id)
         return Response(
             AdminOfferSerializer(offer).data,
@@ -132,9 +141,11 @@ class OfferDetailView(APIView):
         offer = self.get_offer(offer_id)
         return Response(AdminOfferSerializer(offer).data)
 
+    @transaction.atomic
     def patch(self, request, offer_id):
         self._require_admin(request)
         offer = self.get_offer(offer_id)
+        old_status = offer.status
         serializer = AdminOfferSerializer(
             offer,
             data=request.data,
@@ -142,6 +153,8 @@ class OfferDetailView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         offer = serializer.save()
+        if old_status != Offer.Status.ACTIVE and offer.status == Offer.Status.ACTIVE:
+            schedule_offer_notifications(offer.id)
         offer = self.get_queryset().get(id=offer.id)
         return Response(AdminOfferSerializer(offer).data)
 

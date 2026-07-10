@@ -2193,3 +2193,116 @@ Response is a one-item list.
 8. `seed_data` test expects every project model populated, but `orders.OrderEvent` remains empty.
 
 No backend behavior was changed while generating this report.
+
+
+## Real-Time Account, Offer, and Order Notifications (2026-07-10)
+
+### Inactive client contract
+
+The backend reloads the JWT user from the database on every request. Known inactive clients are rejected by login, refresh, /auth/me, all authenticated client APIs, and order preview/create:
+
+~~~http
+HTTP 403
+{"code":"account_inactive","detail":"تم إيقاف حسابك. تواصل مع الدعم."}
+~~~
+
+Invalid/expired/unknown-user tokens remain generic 401 responses. GET /api/v1/auth/me/ includes is_active but never exposes auth_token_version. Deactivation increments the token version, blacklists refresh tokens, and prevents old access tokens from becoming valid after restoration.
+
+Captured preview/create behavior:
+
+~~~http
+POST /api/v1/orders/preview/
+Authorization: Bearer <access-issued-before-deactivation>
+
+HTTP 403
+{"code":"account_inactive","detail":"تم إيقاف حسابك. تواصل مع الدعم."}
+~~~
+
+POST /api/v1/orders/create/ returns the identical response and creates no Order row.
+
+After a committed true-to-false transition, active devices receive:
+
+~~~json
+{"event":"account_disabled","code":"account_inactive","message":"تم إيقاف حسابك. تواصل مع الدعم."}
+~~~
+
+### Client device endpoints
+
+POST /api/v1/notifications/devices/register/ accepts:
+
+~~~json
+{"token":"<FCM token>","platform":"android"}
+~~~
+
+It returns HTTP 200. Repetition updates the same globally unique token, reactivates it, and refreshes last_seen_at. Platforms are android and ios.
+
+DELETE /api/v1/notifications/devices/unregister/ accepts {"token":"<FCM token>"} and returns HTTP 204 after deactivation.
+
+### offer_created
+
+~~~json
+{
+  "id": 123,
+  "audience": "client",
+  "type": "offer_created",
+  "title": "🔥 عرض جديد في القاهرة",
+  "message": "عرض «وجبة العائلة» من مطبخ النيل وصل القاهرة! خصم 20% لفترة محدودة، افتحه قبل ما يفوتك.",
+  "offer_id": 15,
+  "offer": {
+    "id": 15,
+    "title": "وجبة العائلة",
+    "image": null,
+    "market_id": 2,
+    "market_name": "مطبخ النيل",
+    "discount": "20.00",
+    "price": null,
+    "price_text": "خصم 20%",
+    "region_names": ["القاهرة"]
+  },
+  "data": {
+    "event": "offer_created",
+    "action": "open_offer",
+    "offer_id": 15,
+    "region_name": "القاهرة",
+    "market_name": "مطبخ النيل",
+    "price_text": "خصم 20%"
+  },
+  "is_read": false,
+  "created_at": "<ISO datetime>"
+}
+~~~
+
+General targeting is active, non-deleted role=client users with market_region_mode=general and no selected service city. City targeting is active, non-deleted role=client users with market_region_mode=service_city and market_region_service_city_id in the offer's active service_cities. show_in_general=true never targets city-mode users.
+
+Immediate delivery requires status=active, start_time <= now < end_time, an active market, and active targeted cities. Only committed creation and the first non-active-to-active transition trigger it. Future scheduled-start push requires a worker/scheduler and is not dispatched automatically.
+
+Offer has no fixed price. Exactly one product with exactly one non-negative variant produces a Decimal discounted price and EGP price_text. Every other shape returns price=null and price_text="خصم N%". Uniqueness is one offer_created row per recipient and offer.
+
+### Order lifecycle events
+
+Structured events are order_created, order_review_approved, order_review_rejected, order_status_changed, order_cancelled, and order_failed_delivery. order_review_rejected keeps the compatible stored type order_rejected.
+
+~~~json
+{
+  "event": "order_status_changed",
+  "notification_id": "502",
+  "order_id": "123",
+  "action": "open_order",
+  "old_status": "assigned",
+  "status": "picked_up",
+  "review_status": "approved",
+  "title": "تم استلام طلبك من المحلات 📦",
+  "message": "المندوب استلم طلبك #123 من المحلات.",
+  "market_count": "2",
+  "is_multi_market": "true",
+  "market_names_summary": "مطبخ النيل، السوق الثاني"
+}
+~~~
+
+Every event targets only order.user and is unique by recipient plus parent OrderEvent. Multi-market sections therefore still produce one client notification. All FCM data values are strings. Same-status/invalid updates and rollbacks create nothing, and push failure never rolls back business state or the in-app notification.
+
+PATCH /api/v1/courier/orders/{order_id}/status/ now accepts {"status":"failed_delivery","delivery_note":"تعذر الوصول للعميل"} only from picked_up. Existing new_order_review, order_assigned, and old rows remain compatible. There is no representative Flutter login in this repository, so courier device push was not guessed.
+
+### Push configuration
+
+The backend reads only the encrypted DigitalOcean secret FIREBASE_SERVICE_ACCOUNT_JSON. Missing credentials disable push only. Stale/unregistered FCM tokens are marked inactive. No worker is required for immediate events.

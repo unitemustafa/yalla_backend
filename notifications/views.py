@@ -7,8 +7,12 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 
-from .models import Notification
-from .serializers import NotificationSerializer
+from .models import ClientDevice, Notification
+from .serializers import (
+    ClientDeviceSerializer,
+    DeviceTokenSerializer,
+    NotificationSerializer,
+)
 
 
 def parse_bool(value):
@@ -67,7 +71,13 @@ class NotificationListView(APIView):
             visible_notifications(request.user),
             request.query_params,
         ).order_by("-created_at", "-id")
-        return Response(NotificationSerializer(notifications, many=True).data)
+        return Response(
+            NotificationSerializer(
+                notifications,
+                many=True,
+                context={"request": request},
+            ).data
+        )
 
 
 class NotificationReadView(APIView):
@@ -86,7 +96,12 @@ class NotificationReadView(APIView):
             notification.is_read = True
             notification.read_at = timezone.now()
             notification.save(update_fields=["is_read", "read_at", "updated_at"])
-        return Response(NotificationSerializer(notification).data)
+        return Response(
+            NotificationSerializer(
+                notification,
+                context={"request": request},
+            ).data
+        )
 
 
 class NotificationDeleteView(APIView):
@@ -146,3 +161,43 @@ class NotificationUnreadCountView(APIView):
     def get(self, request):
         count = visible_notifications(request.user).filter(is_read=False).count()
         return Response({"unread_count": count})
+
+
+class DeviceRegisterView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.role != User.Role.CLIENT:
+            return Response(
+                {"detail": "Only client devices can be registered."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        serializer = DeviceTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        device, _ = ClientDevice.objects.update_or_create(
+            token=serializer.validated_data["token"],
+            defaults={
+                "user": request.user,
+                "platform": serializer.validated_data.get(
+                    "platform",
+                    ClientDevice.Platform.ANDROID,
+                ),
+                "is_active": True,
+                "last_seen_at": timezone.now(),
+            },
+        )
+        return Response(ClientDeviceSerializer(device).data)
+
+
+class DeviceUnregisterView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        serializer = DeviceTokenSerializer(data=request.data)
+        serializer.fields["platform"].required = False
+        serializer.is_valid(raise_exception=True)
+        ClientDevice.objects.filter(
+            user=request.user,
+            token=serializer.validated_data["token"],
+        ).update(is_active=False, updated_at=timezone.now())
+        return Response(status=status.HTTP_204_NO_CONTENT)

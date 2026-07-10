@@ -1,5 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -178,6 +179,143 @@ class OrderAPITests(APITestCase):
     def authenticate_customer(self):
         token = RefreshToken.for_user(self.customer).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    def test_inactive_client_cannot_preview_or_create_with_existing_access_token(self):
+        token = RefreshToken.for_user(self.customer).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        self.customer.is_active = False
+        self.customer.save(update_fields=["is_active"])
+        payload = {
+            "address_id": self.address.id,
+            "payment_method": "cash_on_delivery",
+            "items": [{"variant_id": self.variant.id, "quantity": 1}],
+        }
+
+        preview = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            payload,
+            format="json",
+        )
+        create = self.client.post(
+            f"{ORDERS_BASE}/create/",
+            payload,
+            format="json",
+        )
+
+        for response in (preview, create):
+            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+            self.assertEqual(response.data["code"], "account_inactive")
+        self.assertFalse(Order.objects.exists())
+
+    @patch("notifications.order_services.send_notification_push")
+    def test_multi_market_creation_creates_one_parent_lifecycle_notification(self, send_push):
+        self.authenticate_customer()
+        payload = {
+            "address_id": self.address.id,
+            "payment_method": "cash_on_delivery",
+            "items": [
+                {"variant_id": self.variant.id, "quantity": 1},
+                {"variant_id": self.second_variant.id, "quantity": 1},
+            ],
+        }
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"{ORDERS_BASE}/create/",
+                payload,
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(Order.objects.count(), 1)
+        order = Order.objects.get()
+        self.assertEqual(order.market_sections.count(), 2)
+        notifications = Notification.objects.filter(
+            order=order,
+            recipient=self.customer,
+            type=Notification.Type.ORDER_CREATED,
+        )
+        self.assertEqual(notifications.count(), 1)
+        self.assertEqual(notifications.get().data["market_count"], 2)
+        send_push.assert_called_once_with(notifications.get().id)
+
+    @patch("notifications.order_services.send_notification_push")
+    def test_real_order_transitions_create_idempotent_client_notifications(self, send_push):
+        self.authenticate_customer()
+        with self.captureOnCommitCallbacks(execute=True):
+            created = self.client.post(
+                f"{ORDERS_BASE}/create/",
+                {
+                    "address_id": self.address.id,
+                    "payment_method": "cash_on_delivery",
+                    "items": [{"variant_id": self.variant.id, "quantity": 1}],
+                },
+                format="json",
+            )
+        order = Order.objects.get(pk=created.data[0]["id"])
+
+        admin_token = RefreshToken.for_user(self.admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {admin_token}")
+        with self.captureOnCommitCallbacks(execute=True):
+            approved = self.client.post(f"/api/v1/admin/orders/{order.id}/approve/")
+        with self.captureOnCommitCallbacks(execute=True):
+            assigned = self.client.patch(
+                f"{ORDERS_BASE}/{order.id}/assignment/",
+                {"representative_id": self.representative.id},
+                format="json",
+            )
+
+        courier_token = RefreshToken.for_user(self.representative).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {courier_token}")
+        with self.captureOnCommitCallbacks(execute=True):
+            picked_up = self.client.patch(
+                f"/api/v1/courier/orders/{order.id}/status/",
+                {"status": Order.Status.PICKED_UP},
+                format="json",
+            )
+        with self.captureOnCommitCallbacks(execute=True):
+            failed = self.client.patch(
+                f"/api/v1/courier/orders/{order.id}/status/",
+                {"status": Order.Status.FAILED_DELIVERY, "delivery_note": "No answer"},
+                format="json",
+            )
+        before_repeat = Notification.objects.filter(order=order, recipient=self.customer).count()
+        with self.captureOnCommitCallbacks(execute=True):
+            repeated = self.client.patch(
+                f"/api/v1/courier/orders/{order.id}/status/",
+                {"status": Order.Status.FAILED_DELIVERY},
+                format="json",
+            )
+
+        self.assertEqual(approved.status_code, status.HTTP_200_OK)
+        self.assertEqual(assigned.status_code, status.HTTP_200_OK)
+        self.assertEqual(picked_up.status_code, status.HTTP_200_OK)
+        self.assertEqual(failed.status_code, status.HTTP_200_OK)
+        self.assertEqual(repeated.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            Notification.objects.filter(order=order, recipient=self.customer).count(),
+            before_repeat,
+        )
+        events = set(
+            Notification.objects.filter(order=order, recipient=self.customer)
+            .values_list("data__event", flat=True)
+        )
+        self.assertTrue(
+            {
+                "order_created",
+                "order_review_approved",
+                "order_status_changed",
+                "order_failed_delivery",
+            }.issubset(events)
+        )
+        self.assertEqual(
+            Notification.objects.filter(
+                order=order,
+                recipient=self.customer,
+                type=Notification.Type.ORDER_FAILED_DELIVERY,
+            ).count(),
+            1,
+        )
 
     def set_customer_region(self, mode, service_city=None):
         self.customer.market_region_mode = mode

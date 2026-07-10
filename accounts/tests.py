@@ -151,7 +151,8 @@ class AuthenticationAPITests(APITestCase):
             f"{AUTH_BASE}/login",
             {"email": self.email, "password": self.password},
         )
-        self.assertEqual(login_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(login_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(login_response.data["code"], "account_inactive")
 
         verify_response = self.client.post(
             f"{AUTH_BASE}/verify-email",
@@ -877,10 +878,73 @@ class AuthenticationAPITests(APITestCase):
             {"email": client.email, "password": self.password},
         )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(response.data["non_field_errors"], ["Account is inactive."])
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(
+            response.data,
+            {
+                "code": "account_inactive",
+                "detail": "تم إيقاف حسابك. تواصل مع الدعم.",
+            },
+        )
         client.refresh_from_db()
         self.assertIsNone(client.last_login)
+
+    def test_inactive_client_refresh_is_rejected_with_stable_contract(self):
+        client = self.create_active_user(
+            username="inactive_refresh_client",
+            email="inactive-refresh-client@example.com",
+            phone="+213555000039",
+        )
+        refresh = RefreshToken.for_user(client)
+        refresh["auth_token_version"] = client.auth_token_version
+        client.is_active = False
+        client.save(update_fields=["is_active"])
+
+        response = self.client.post(
+            f"{AUTH_BASE}/refresh/",
+            {"refreshToken": str(refresh)},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data["code"], "account_inactive")
+
+    @patch("accounts.deactivation._dispatch_account_disabled")
+    def test_admin_deactivation_dispatches_once_after_commit(self, dispatch):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="deactivation_admin",
+            email="deactivation-admin@example.com",
+            phone="+213555000040",
+        )
+        client = self.create_active_user(
+            username="deactivation_client",
+            email="deactivation-client@example.com",
+            phone="+213555000041",
+        )
+        token = RefreshToken.for_user(admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                f"{AUTH_BASE}/users/{client.id}/",
+                {"is_active": False},
+                format="json",
+            )
+        client.refresh_from_db()
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(client.auth_token_version, 1)
+        dispatch.assert_called_once_with(client.id)
+
+        dispatch.reset_mock()
+        with self.captureOnCommitCallbacks(execute=True):
+            repeat = self.client.patch(
+                f"{AUTH_BASE}/users/{client.id}/",
+                {"first_name": "Still disabled", "is_active": False},
+                format="json",
+            )
+        self.assertEqual(repeat.status_code, status.HTTP_200_OK)
+        dispatch.assert_not_called()
 
     def test_admin_can_create_representative_without_courier_profile(self):
         admin = self.create_active_user(

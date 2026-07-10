@@ -2,6 +2,8 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
+from accounts.exceptions import AccountInactive
+
 from .models import Order, OrderEvent
 
 User = get_user_model()
@@ -49,7 +51,7 @@ def record_order_event(
     )
 
 
-def resolve_order_target_user(request, *, action):
+def resolve_order_target_user(request, *, action, lock=False):
     user = request.user
     user_id = request.data.get("user_id")
 
@@ -62,7 +64,13 @@ def resolve_order_target_user(request, *, action):
                     )
                 }
             )
-        return user
+        queryset = User.objects
+        if lock:
+            queryset = queryset.select_for_update()
+        current_user = queryset.get(pk=user.pk)
+        if not current_user.is_active or current_user.deleted_at is not None:
+            raise AccountInactive()
+        return current_user
 
     if user.role == User.Role.ADMIN or user.is_staff:
         if user_id in (None, ""):
@@ -70,7 +78,10 @@ def resolve_order_target_user(request, *, action):
                 {"user_id": "Select an active client user."}
             )
         try:
-            target_user = User.objects.get(pk=int(user_id))
+            queryset = User.objects
+            if lock:
+                queryset = queryset.select_for_update()
+            target_user = queryset.get(pk=int(user_id))
         except (TypeError, ValueError, User.DoesNotExist):
             raise serializers.ValidationError(
                 {"user_id": "Select an active client user."}

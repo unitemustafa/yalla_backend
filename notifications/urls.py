@@ -7,10 +7,22 @@ from .views import (
     NotificationMarkAllReadView,
     NotificationReadView,
     NotificationUnreadCountView,
+    DeviceRegisterView,
+    DeviceUnregisterView,
 )
 
 urlpatterns = [
     path("", NotificationListView.as_view(), name="notification-list"),
+    path(
+        "devices/register/",
+        DeviceRegisterView.as_view(),
+        name="notification-device-register",
+    ),
+    path(
+        "devices/unregister/",
+        DeviceUnregisterView.as_view(),
+        name="notification-device-unregister",
+    ),
     path(
         "clear-read/",
         NotificationClearReadView.as_view(),
