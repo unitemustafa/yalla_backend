@@ -91,8 +91,10 @@ def _messaging_module():
 
 
 def _send_tokens(tokens, data, *, title=None, message=None):
+    if not tokens:
+        return set()
     messaging = _messaging_module()
-    if messaging is None or not tokens:
+    if messaging is None:
         return set()
     stale_tokens = set()
     for start in range(0, len(tokens), 500):
@@ -116,6 +118,7 @@ def _send_tokens(tokens, data, *, title=None, message=None):
             if item.success or item.exception is None:
                 continue
             if item.exception.__class__.__name__ in {
+                "InvalidArgumentError",
                 "UnregisteredError",
                 "SenderIdMismatchError",
             }:

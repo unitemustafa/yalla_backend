@@ -1,12 +1,18 @@
 import base64
 import json
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
-from django.test import SimpleTestCase, override_settings
+from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 
 from . import push
+from .models import ClientDevice
+
+
+User = get_user_model()
 
 
 class FirebaseMessagingInitializationTests(SimpleTestCase):
@@ -160,3 +166,51 @@ class FirebaseMessagingInitializationTests(SimpleTestCase):
                 "Firebase configuration is missing",
             ):
                 push._messaging_module()
+
+
+class FCMTokenHandlingTests(TestCase):
+    def test_invalid_fcm_token_is_deactivated_without_affecting_valid_devices(self):
+        user = User.objects.create_user(
+            username="fcm-token-user",
+            email="fcm-token-user@example.com",
+            phone="+213555900001",
+            password="Password1!",
+        )
+        valid_device = ClientDevice.objects.create(
+            user=user,
+            token="valid-fcm-token",
+            platform=ClientDevice.Platform.ANDROID,
+            last_seen_at=timezone.now(),
+        )
+        invalid_device = ClientDevice.objects.create(
+            user=user,
+            token="invalid-fcm-token",
+            platform=ClientDevice.Platform.IOS,
+            last_seen_at=timezone.now(),
+        )
+        invalid_token_error = type(
+            "InvalidArgumentError",
+            (Exception,),
+            {},
+        )("invalid registration token")
+        messaging = Mock()
+        messaging.MulticastMessage.return_value = object()
+        messaging.send_each_for_multicast.return_value = SimpleNamespace(
+            responses=[
+                SimpleNamespace(success=True, exception=None),
+                SimpleNamespace(success=False, exception=invalid_token_error),
+            ]
+        )
+
+        with patch.object(push, "_messaging_module", return_value=messaging):
+            stale_tokens = push._send_tokens(
+                [valid_device.token, invalid_device.token],
+                {"event": "account_disabled"},
+            )
+
+        valid_device.refresh_from_db()
+        invalid_device.refresh_from_db()
+        self.assertEqual(stale_tokens, {invalid_device.token})
+        self.assertTrue(valid_device.is_active)
+        self.assertFalse(invalid_device.is_active)
+        messaging.send_each_for_multicast.assert_called_once()

@@ -17,6 +17,7 @@ class Notification(models.Model):
         ORDER_STATUS_CHANGED = "order_status_changed", "Order Status Changed"
         ORDER_CANCELLED = "order_cancelled", "Order Cancelled"
         ORDER_FAILED_DELIVERY = "order_failed_delivery", "Order Failed Delivery"
+        ACCOUNT_DISABLED = "account_disabled", "Account Disabled"
 
     audience = models.CharField(max_length=30, choices=Audience.choices)
     type = models.CharField(max_length=50, choices=Type.choices)

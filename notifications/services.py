@@ -1,6 +1,22 @@
 from django.utils import timezone
 
+from accounts.exceptions import ACCOUNT_INACTIVE_MESSAGE
+
 from .models import Notification
+
+
+def create_account_disabled_notification(user):
+    return Notification.objects.create(
+        audience=Notification.Audience.CLIENT,
+        type=Notification.Type.ACCOUNT_DISABLED,
+        title="Account disabled",
+        message=ACCOUNT_INACTIVE_MESSAGE,
+        recipient=user,
+        data={
+            "event": "account_disabled",
+            "code": "account_inactive",
+        },
+    )
 
 
 def create_new_order_review_notification(order):

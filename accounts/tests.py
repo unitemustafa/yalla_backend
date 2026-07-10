@@ -21,6 +21,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from locations.models import DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
+from notifications.models import ClientDevice, Notification
 from orders.models import Order
 
 from .models import CourierProfile, OTPCooldown, OneTimePassword
@@ -933,7 +934,14 @@ class AuthenticationAPITests(APITestCase):
         client.refresh_from_db()
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/json")
         self.assertEqual(client.auth_token_version, 1)
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=client,
+                type=Notification.Type.ACCOUNT_DISABLED,
+            ).exists()
+        )
         dispatch.assert_called_once_with(client.id)
 
         dispatch.reset_mock()
@@ -944,7 +952,294 @@ class AuthenticationAPITests(APITestCase):
                 format="json",
             )
         self.assertEqual(repeat.status_code, status.HTTP_200_OK)
+        self.assertEqual(client.auth_token_version, 1)
+        self.assertEqual(
+            Notification.objects.filter(
+                recipient=client,
+                type=Notification.Type.ACCOUNT_DISABLED,
+            ).count(),
+            1,
+        )
         dispatch.assert_not_called()
+
+    def test_admin_can_reactivate_an_inactive_client_without_notification(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="reactivation_admin",
+            email="reactivation-admin@example.com",
+            phone="+213555000130",
+        )
+        client = self.create_active_user(
+            username="reactivation_client",
+            email="reactivation-client@example.com",
+            phone="+213555000131",
+        )
+        client.is_active = False
+        client.auth_token_version = 4
+        client.save(update_fields=["is_active", "auth_token_version"])
+        token = RefreshToken.for_user(admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/users/{client.id}/",
+            {"is_active": True},
+            format="json",
+        )
+
+        client.refresh_from_db()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertTrue(client.is_active)
+        self.assertEqual(client.auth_token_version, 4)
+        self.assertFalse(
+            Notification.objects.filter(
+                recipient=client,
+                type=Notification.Type.ACCOUNT_DISABLED,
+            ).exists()
+        )
+
+    def test_admin_profile_update_does_not_run_deactivation_logic(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="profile_update_admin",
+            email="profile-update-admin@example.com",
+            phone="+213555000132",
+        )
+        client = self.create_active_user(
+            username="profile_update_client",
+            email="profile-update-client@example.com",
+            phone="+213555000133",
+        )
+        token = RefreshToken.for_user(admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        with patch("accounts.deactivation.handle_client_deactivation") as deactivation:
+            response = self.client.patch(
+                f"{AUTH_BASE}/users/{client.id}/",
+                {"first_name": "Updated"},
+                format="json",
+            )
+
+        client.refresh_from_db()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertEqual(client.first_name, "Updated")
+        self.assertTrue(client.is_active)
+        self.assertEqual(client.auth_token_version, 0)
+        deactivation.assert_not_called()
+
+    @override_settings(
+        FIREBASE_SERVICE_ACCOUNT_BASE64="",
+        FIREBASE_SERVICE_ACCOUNT_JSON="",
+    )
+    @patch("accounts.deactivation.logger")
+    def test_admin_deactivation_succeeds_when_firebase_configuration_fails(self, logger):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="firebase_failure_admin",
+            email="firebase-failure-admin@example.com",
+            phone="+213555000134",
+        )
+        client = self.create_active_user(
+            username="firebase_failure_client",
+            email="firebase-failure-client@example.com",
+            phone="+213555000135",
+        )
+        ClientDevice.objects.create(
+            user=client,
+            token="firebase-config-failure-token",
+            platform=ClientDevice.Platform.ANDROID,
+            last_seen_at=timezone.now(),
+        )
+        client_refresh = RefreshToken.for_user(client)
+        token = RefreshToken.for_user(admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                f"{AUTH_BASE}/users/{client.id}/",
+                {"is_active": False},
+                format="json",
+            )
+
+        client.refresh_from_db()
+        device = ClientDevice.objects.get(user=client)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertFalse(client.is_active)
+        self.assertEqual(client.auth_token_version, 1)
+        self.assertTrue(
+            BlacklistedToken.objects.filter(token__jti=client_refresh["jti"]).exists()
+        )
+        self.assertFalse(device.is_active)
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=client,
+                type=Notification.Type.ACCOUNT_DISABLED,
+            ).exists()
+        )
+        logger.exception.assert_called_once()
+
+    @patch("notifications.push._send_tokens", side_effect=RuntimeError("FCM failed"))
+    @patch("accounts.deactivation.logger")
+    def test_admin_deactivation_succeeds_when_firebase_send_fails(
+        self,
+        logger,
+        send_tokens,
+    ):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="firebase_send_failure_admin",
+            email="firebase-send-failure-admin@example.com",
+            phone="+213555000136",
+        )
+        client = self.create_active_user(
+            username="firebase_send_failure_client",
+            email="firebase-send-failure-client@example.com",
+            phone="+213555000137",
+        )
+        ClientDevice.objects.create(
+            user=client,
+            token="firebase-send-failure-token",
+            platform=ClientDevice.Platform.ANDROID,
+            last_seen_at=timezone.now(),
+        )
+        token = RefreshToken.for_user(admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                f"{AUTH_BASE}/users/{client.id}/",
+                {"is_active": False},
+                format="json",
+            )
+
+        client.refresh_from_db()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertFalse(client.is_active)
+        self.assertEqual(client.auth_token_version, 1)
+        self.assertTrue(send_tokens.called)
+        logger.exception.assert_called_once()
+
+    @override_settings(
+        FIREBASE_SERVICE_ACCOUNT_BASE64="",
+        FIREBASE_SERVICE_ACCOUNT_JSON="",
+    )
+    @patch("notifications.push._messaging_module")
+    def test_admin_deactivation_with_no_device_skips_firebase_initialization(
+        self,
+        messaging_module,
+    ):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="no_device_admin",
+            email="no-device-admin@example.com",
+            phone="+213555000138",
+        )
+        client = self.create_active_user(
+            username="no_device_client",
+            email="no-device-client@example.com",
+            phone="+213555000139",
+        )
+        token = RefreshToken.for_user(admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                f"{AUTH_BASE}/users/{client.id}/",
+                {"is_active": False},
+                format="json",
+            )
+
+        client.refresh_from_db()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertFalse(client.is_active)
+        self.assertEqual(client.auth_token_version, 1)
+        messaging_module.assert_not_called()
+
+    def test_deactivation_invalidates_existing_client_tokens(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="token_invalidation_admin",
+            email="token-invalidation-admin@example.com",
+            phone="+213555000140",
+        )
+        client = self.create_active_user(
+            username="token_invalidation_client",
+            email="token-invalidation-client@example.com",
+            phone="+213555000141",
+        )
+        login_response = self.client.post(
+            f"{AUTH_BASE}/login/client/",
+            {"email": client.email, "password": self.password},
+            format="json",
+        )
+        access_token = login_response.data["accessToken"]
+        refresh_token = login_response.data["refreshToken"]
+        admin_token = RefreshToken.for_user(admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {admin_token}")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                f"{AUTH_BASE}/users/{client.id}/",
+                {"is_active": False},
+                format="json",
+            )
+
+        client.refresh_from_db()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(client.auth_token_version, 1)
+        with self.assertRaises(TokenError):
+            RefreshToken(refresh_token).check_blacklist()
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access_token}")
+        me_response = self.client.get(f"{AUTH_BASE}/me/")
+        self.assertEqual(me_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(me_response["Content-Type"], "application/json")
+        self.assertEqual(me_response.data["code"], "account_inactive")
+
+    def test_admin_customer_update_error_responses_are_json(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="customer_errors_admin",
+            email="customer-errors-admin@example.com",
+            phone="+213555000142",
+        )
+        client = self.create_active_user(
+            username="customer_errors_client",
+            email="customer-errors-client@example.com",
+            phone="+213555000143",
+        )
+        client_token = RefreshToken.for_user(client).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {client_token}")
+
+        forbidden_response = self.client.patch(
+            f"{AUTH_BASE}/users/{admin.id}/",
+            {"is_active": False},
+            format="json",
+        )
+        self.assertEqual(forbidden_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(forbidden_response["Content-Type"], "application/json")
+
+        admin_token = RefreshToken.for_user(admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {admin_token}")
+        invalid_response = self.client.patch(
+            f"{AUTH_BASE}/users/{client.id}/",
+            {"is_active": "not-a-boolean"},
+            format="json",
+        )
+        missing_response = self.client.patch(
+            f"{AUTH_BASE}/users/999999/",
+            {"is_active": False},
+            format="json",
+        )
+
+        self.assertEqual(invalid_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(invalid_response["Content-Type"], "application/json")
+        self.assertEqual(missing_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(missing_response["Content-Type"], "application/json")
 
     def test_admin_can_create_representative_without_courier_profile(self):
         admin = self.create_active_user(

@@ -836,6 +836,9 @@ class AdminUserWriteSerializer(
 
     def update(self, instance, validated_data):
         was_active = instance.is_active
+        is_deactivation = (
+            was_active and validated_data.get("is_active") is False
+        )
         profile_data = validated_data.pop("courier_profile", None)
         avatar_image = validated_data.pop("avatar_image", None)
         password = validated_data.pop("password", None)
@@ -866,11 +869,7 @@ class AdminUserWriteSerializer(
             old_avatar.delete(save=False)
         if instance.role != User.Role.REPRESENTATIVE:
             CourierProfile.objects.filter(user=instance).delete()
-            from .deactivation import handle_client_deactivation
-
-            handle_client_deactivation(instance, was_active=was_active)
-            return instance
-        if profile_data is not None:
+        elif profile_data is not None:
             profile_data["delivery_area"] = None
             profile, _ = CourierProfile.objects.get_or_create(
                 user=instance,
@@ -880,9 +879,11 @@ class AdminUserWriteSerializer(
                 setattr(profile, field, value)
             profile.save()
             instance._state.fields_cache.pop("courier_profile", None)
-        from .deactivation import handle_client_deactivation
 
-        handle_client_deactivation(instance, was_active=was_active)
+        if is_deactivation:
+            from .deactivation import handle_client_deactivation
+
+            handle_client_deactivation(instance, was_active=was_active)
         return instance
 
 
