@@ -1,4 +1,6 @@
+from django.core.validators import FileExtensionValidator
 from django.db import models
+from django.db.models import Q
 
 
 class CategoryClassification(models.Model):
@@ -74,6 +76,40 @@ class Product(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class ProductImage(models.Model):
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="images",
+    )
+    image = models.ImageField(
+        upload_to="products/",
+        validators=[
+            FileExtensionValidator(
+                allowed_extensions=("jpg", "jpeg", "png", "webp")
+            )
+        ],
+    )
+    is_primary = models.BooleanField(default=False)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("sort_order", "id")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("product",),
+                condition=Q(is_primary=True),
+                name="catalog_one_primary_image_per_product",
+            ),
+            models.CheckConstraint(
+                condition=Q(sort_order__gte=0),
+                name="catalog_product_image_sort_order_non_negative",
+            ),
+        )
 
 
 class ProductAttributeValue(models.Model):

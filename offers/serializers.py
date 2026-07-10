@@ -3,6 +3,7 @@ import json
 from rest_framework import serializers
 
 from catalog.models import Product
+from catalog.serializers import ProductImageSerializer
 from locations.models import ServiceCity
 from markets.models import Market
 from markets.serializers import AdminMarketSerializer, ServiceCitySummarySerializer
@@ -59,6 +60,7 @@ class PrimaryKeyListField(serializers.Field):
 class OfferProductSerializer(serializers.ModelSerializer):
     category_id = serializers.IntegerField(read_only=True)
     market_id = serializers.IntegerField(read_only=True)
+    images = ProductImageSerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
@@ -70,6 +72,7 @@ class OfferProductSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "image",
+            "images",
             "discount",
             "created_at",
             "updated_at",

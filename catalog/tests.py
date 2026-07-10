@@ -1,7 +1,13 @@
 from decimal import Decimal
+from importlib import import_module
+from io import BytesIO
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
+from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
+from PIL import Image
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -14,6 +20,7 @@ from .models import (
     CategoryClassification,
     CategoryOption,
     Product,
+    ProductImage,
     ProductAddition,
     ProductCategory,
     ProductAttributeValue,
@@ -23,6 +30,13 @@ from .models import (
 
 User = get_user_model()
 CATALOG_BASE = "/api/v1/catalog"
+
+
+def product_image_upload(name="product.png", image_format="PNG", color="red"):
+    content = BytesIO()
+    Image.new("RGB", (2, 2), color=color).save(content, format=image_format)
+    mime_type = "image/jpeg" if image_format == "JPEG" else f"image/{image_format.lower()}"
+    return SimpleUploadedFile(name, content.getvalue(), content_type=mime_type)
 
 
 class AdditionClassificationAPITests(APITestCase):
@@ -709,17 +723,10 @@ class AdditionClassificationAPITests(APITestCase):
             status.HTTP_404_NOT_FOUND,
         )
 
+    @override_settings(MEDIA_ROOT="/tmp/yalla_catalog_legacy_image_test")
     def test_admin_can_create_product_with_image(self):
         self.authenticate(self.admin)
-        image = SimpleUploadedFile(
-            "meal.gif",
-            (
-                b"GIF87a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00"
-                b"\xff\xff\xff,\x00\x00\x00\x00\x01\x00\x01\x00"
-                b"\x00\x02\x02D\x01\x00;"
-            ),
-            content_type="image/gif",
-        )
+        image = product_image_upload("meal.png")
 
         response = self.client.post(
             f"{CATALOG_BASE}/products/",
@@ -738,6 +745,7 @@ class AdditionClassificationAPITests(APITestCase):
         product = Product.objects.get(id=response.data["id"])
         self.assertTrue(product.image.name.startswith("products/"))
         self.assertTrue(response.data["image"])
+        self.assertEqual(len(response.data["images"]), 1)
 
     def test_product_rejects_inconsistent_attribute_option(self):
         other_attribute = CategoryAttribute.objects.create(
@@ -877,3 +885,294 @@ class AdditionClassificationAPITests(APITestCase):
             status.HTTP_404_NOT_FOUND,
         )
         self.assertFalse(ProductAddition.objects.filter(id=addition.id).exists())
+
+
+@override_settings(MEDIA_ROOT="/tmp/yalla_product_image_tests")
+class ProductImageAPITests(APITestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="product_image_admin",
+            email="product-images@example.com",
+            phone="+213555499001",
+            password="Password1!",
+            role=User.Role.ADMIN,
+            is_active=True,
+        )
+        classification = MarketClassification.objects.create(name="Images")
+        self.market = Market.objects.create(
+            classification=classification,
+            name="Image market",
+        )
+        refresh = RefreshToken.for_user(self.admin)
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
+        )
+
+    def create_product(self, name="Image product"):
+        return Product.objects.create(market=self.market, name=name)
+
+    def create_product_response(self, images=None, image=None, **extra):
+        payload = {
+            "market_id": self.market.id,
+            "name": extra.pop("name", "Image product"),
+            "description": "",
+            "discount": "0.00",
+            **extra,
+        }
+        if images is not None:
+            payload["images"] = images
+        if image is not None:
+            payload["image"] = image
+        return self.client.post(
+            f"{CATALOG_BASE}/products/",
+            payload,
+            format="multipart",
+        )
+
+    def test_create_product_with_three_images_and_primary_index(self):
+        response = self.create_product_response(
+            images=[
+                product_image_upload("one.png", color="red"),
+                product_image_upload("two.png", color="green"),
+                product_image_upload("three.webp", "WEBP", "blue"),
+            ],
+            primary_image_index=1,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(len(response.data["images"]), 3)
+        self.assertEqual(
+            [image["sort_order"] for image in response.data["images"]],
+            [0, 1, 2],
+        )
+        self.assertTrue(response.data["images"][1]["is_primary"])
+        product = Product.objects.get(pk=response.data["id"])
+        primary = product.images.get(is_primary=True)
+        self.assertEqual(product.image.name, primary.image.name)
+
+    def test_first_image_is_primary_and_legacy_image_stays_compatible(self):
+        response = self.create_product_response(
+            image=product_image_upload("legacy.jpg", "JPEG")
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data["image"])
+        self.assertEqual(len(response.data["images"]), 1)
+        self.assertTrue(response.data["images"][0]["is_primary"])
+        product = Product.objects.get(pk=response.data["id"])
+        self.assertEqual(product.image.name, product.images.get().image.name)
+
+    def test_add_images_and_set_another_primary(self):
+        product = self.create_product()
+        first = ProductImage.objects.create(
+            product=product,
+            image=product_image_upload("first.png", color="red"),
+            is_primary=True,
+        )
+        product.image = first.image.name
+        product.save(update_fields=("image", "updated_at"))
+
+        upload_response = self.client.post(
+            f"{CATALOG_BASE}/products/{product.id}/images/",
+            {
+                "images": [
+                    product_image_upload("second.png", color="green"),
+                    product_image_upload("third.png", color="blue"),
+                ]
+            },
+            format="multipart",
+        )
+        self.assertEqual(upload_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(len(upload_response.data["images"]), 3)
+        target = upload_response.data["images"][2]
+
+        primary_response = self.client.patch(
+            f"{CATALOG_BASE}/products/{product.id}/images/{target['id']}/",
+            {"is_primary": True},
+            format="json",
+        )
+
+        self.assertEqual(primary_response.status_code, status.HTTP_200_OK)
+        product.refresh_from_db()
+        selected = ProductImage.objects.get(pk=target["id"])
+        self.assertTrue(selected.is_primary)
+        self.assertEqual(product.image.name, selected.image.name)
+        self.assertEqual(ProductImage.objects.filter(product=product, is_primary=True).count(), 1)
+
+    def test_delete_non_primary_then_primary_promotes_first_remaining(self):
+        response = self.create_product_response(
+            images=[
+                product_image_upload("one.png", color="red"),
+                product_image_upload("two.png", color="green"),
+                product_image_upload("three.png", color="blue"),
+            ]
+        )
+        product_id = response.data["id"]
+        first_id, second_id, third_id = [item["id"] for item in response.data["images"]]
+
+        non_primary_delete = self.client.delete(
+            f"{CATALOG_BASE}/products/{product_id}/images/{third_id}/"
+        )
+        primary_delete = self.client.delete(
+            f"{CATALOG_BASE}/products/{product_id}/images/{first_id}/"
+        )
+
+        self.assertEqual(non_primary_delete.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(primary_delete.status_code, status.HTTP_204_NO_CONTENT)
+        product = Product.objects.get(pk=product_id)
+        remaining = product.images.get()
+        self.assertEqual(remaining.id, second_id)
+        self.assertTrue(remaining.is_primary)
+        self.assertEqual(product.image.name, remaining.image.name)
+
+    def test_reorder_images_requires_complete_unique_owned_ids(self):
+        response = self.create_product_response(
+            images=[
+                product_image_upload("one.png", color="red"),
+                product_image_upload("two.png", color="green"),
+                product_image_upload("three.png", color="blue"),
+            ]
+        )
+        product_id = response.data["id"]
+        ids = [item["id"] for item in response.data["images"]]
+
+        reorder = self.client.post(
+            f"{CATALOG_BASE}/products/{product_id}/images/reorder/",
+            {"image_ids": list(reversed(ids))},
+            format="json",
+        )
+        duplicate = self.client.post(
+            f"{CATALOG_BASE}/products/{product_id}/images/reorder/",
+            {"image_ids": [ids[0], ids[0], ids[2]]},
+            format="json",
+        )
+
+        self.assertEqual(reorder.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [item["id"] for item in reorder.data["images"]],
+            list(reversed(ids)),
+        )
+        self.assertEqual(duplicate.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            ProductImage.objects.get(pk=ids[0]).is_primary,
+            True,
+        )
+
+    def test_rejects_more_than_ten_invalid_type_and_oversized_image(self):
+        too_many = self.create_product_response(
+            images=[
+                product_image_upload(f"image-{index}.png", color=(index, 0, 0))
+                for index in range(11)
+            ]
+        )
+        gif = BytesIO()
+        Image.new("RGB", (2, 2), color="red").save(gif, format="GIF")
+        invalid_type = self.create_product_response(
+            name="GIF product",
+            images=[
+                SimpleUploadedFile(
+                    "invalid.gif",
+                    gif.getvalue(),
+                    content_type="image/gif",
+                )
+            ],
+        )
+        oversized = product_image_upload("large.png")
+        oversized = SimpleUploadedFile(
+            oversized.name,
+            oversized.read() + b"0" * (5 * 1024 * 1024),
+            content_type="image/png",
+        )
+        oversized_response = self.create_product_response(
+            name="Large product",
+            images=[oversized],
+        )
+
+        self.assertEqual(too_many.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(invalid_type.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(oversized_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_cannot_operate_on_an_image_from_another_product(self):
+        first_product = self.create_product("First")
+        second_product = self.create_product("Second")
+        image = ProductImage.objects.create(
+            product=second_product,
+            image=product_image_upload("owned.png"),
+            is_primary=True,
+        )
+
+        patch_response = self.client.patch(
+            f"{CATALOG_BASE}/products/{first_product.id}/images/{image.id}/",
+            {"is_primary": True},
+            format="json",
+        )
+        delete_response = self.client.delete(
+            f"{CATALOG_BASE}/products/{first_product.id}/images/{image.id}/"
+        )
+
+        self.assertEqual(patch_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(delete_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertTrue(ProductImage.objects.filter(pk=image.id).exists())
+
+    def test_legacy_data_migration_reuses_the_stored_file_name(self):
+        product = Product.objects.create(
+            market=self.market,
+            name="Legacy migration",
+            image=product_image_upload("migration.png"),
+        )
+        stored_name = product.image.name
+        migration = import_module("catalog.migrations.0004_productimage")
+
+        migration.copy_legacy_product_images(import_module("django.apps").apps, None)
+        migration.copy_legacy_product_images(import_module("django.apps").apps, None)
+
+        product_image = ProductImage.objects.get(product=product)
+        self.assertEqual(product_image.image.name, stored_name)
+        self.assertTrue(product_image.is_primary)
+        self.assertEqual(ProductImage.objects.filter(product=product).count(), 1)
+
+    def test_storage_cleanup_preserves_a_shared_reference(self):
+        first_product = self.create_product("Shared one")
+        second_product = self.create_product("Shared two")
+        first = ProductImage.objects.create(
+            product=first_product,
+            image=product_image_upload("shared.png"),
+            is_primary=True,
+        )
+        second = ProductImage.objects.create(
+            product=second_product,
+            image=first.image.name,
+            is_primary=True,
+        )
+        storage = first.image.storage
+        stored_name = first.image.name
+
+        with self.captureOnCommitCallbacks(execute=True):
+            first.delete()
+
+        self.assertTrue(ProductImage.objects.filter(pk=second.id).exists())
+        self.assertTrue(storage.exists(stored_name))
+
+    def test_product_list_image_prefetch_does_not_grow_queries(self):
+        product = self.create_product("Query one")
+        ProductImage.objects.create(
+            product=product,
+            image=product_image_upload("query-one.png", color="red"),
+            is_primary=True,
+        )
+        with CaptureQueriesContext(connection) as one_product_queries:
+            response = self.client.get(f"{CATALOG_BASE}/products/")
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        for index, color in enumerate(("green", "blue", "yellow"), start=2):
+            product = self.create_product(f"Query {index}")
+            ProductImage.objects.create(
+                product=product,
+                image=product_image_upload(f"query-{index}.png", color=color),
+                is_primary=True,
+            )
+        with CaptureQueriesContext(connection) as many_product_queries:
+            response = self.client.get(f"{CATALOG_BASE}/products/")
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.assertEqual(len(one_product_queries), len(many_product_queries))

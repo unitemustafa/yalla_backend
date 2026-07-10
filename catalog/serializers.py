@@ -1,4 +1,6 @@
 import json
+import hashlib
+import copy
 
 from django.db import transaction
 from rest_framework import serializers
@@ -9,6 +11,7 @@ from .models import (
     CategoryClassification,
     CategoryOption,
     Product,
+    ProductImage,
     ProductCategory,
     ProductAddition,
     ProductAttribute,
@@ -18,6 +21,29 @@ from .models import (
     VariantAttributeValue,
 )
 from markets.models import Market
+from .product_images import (
+    PRODUCT_IMAGE_MAX_COUNT,
+    add_product_images,
+    clear_primary_product_image,
+    validate_product_image_upload,
+)
+
+
+def deduplicate_image_uploads(uploads):
+    unique_uploads = []
+    upload_indexes = []
+    seen_hashes = {}
+    for upload in uploads:
+        digest = hashlib.sha256()
+        for chunk in upload.chunks():
+            digest.update(chunk)
+        upload.seek(0)
+        fingerprint = digest.hexdigest()
+        if fingerprint not in seen_hashes:
+            seen_hashes[fingerprint] = len(unique_uploads)
+            unique_uploads.append(upload)
+        upload_indexes.append(seen_hashes[fingerprint])
+    return unique_uploads, upload_indexes
 
 
 class AdditionClassificationSerializer(serializers.ModelSerializer):
@@ -282,6 +308,74 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         return value.strip()
 
 
+class ProductImageSerializer(serializers.ModelSerializer):
+    image = serializers.ImageField(read_only=True)
+    url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductImage
+        fields = ("id", "url", "image", "is_primary", "sort_order")
+
+    def get_url(self, product_image):
+        if not product_image.image:
+            return None
+        try:
+            url = product_image.image.url
+        except ValueError:
+            return None
+        request = self.context.get("request")
+        return request.build_absolute_uri(url) if request else url
+
+
+class ProductImageUploadSerializer(serializers.Serializer):
+    images = serializers.ListField(
+        child=serializers.ImageField(
+            validators=[validate_product_image_upload],
+        ),
+        allow_empty=False,
+    )
+    primary_image_index = serializers.IntegerField(
+        required=False,
+        min_value=0,
+    )
+
+    def validate(self, attrs):
+        uploads = attrs["images"]
+        primary_index = attrs.get("primary_image_index")
+        if primary_index is not None and primary_index >= len(uploads):
+            raise serializers.ValidationError(
+                {"primary_image_index": "Invalid primary image index."}
+            )
+        unique_uploads, upload_indexes = deduplicate_image_uploads(uploads)
+        product = self.context["product"]
+        if product.images.count() + len(unique_uploads) > PRODUCT_IMAGE_MAX_COUNT:
+            raise serializers.ValidationError(
+                {"images": "A product can have at most 10 images."}
+            )
+        attrs["images"] = unique_uploads
+        if primary_index is not None:
+            attrs["primary_image_index"] = upload_indexes[primary_index]
+        return attrs
+
+
+class ProductImagePrimarySerializer(serializers.Serializer):
+    is_primary = serializers.BooleanField()
+
+    def validate_is_primary(self, value):
+        if value is not True:
+            raise serializers.ValidationError(
+                "An image can only be selected as primary; choose another image instead."
+            )
+        return value
+
+
+class ProductImageReorderSerializer(serializers.Serializer):
+    image_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=True,
+    )
+
+
 class AdminProductSerializer(serializers.ModelSerializer):
     market_id = serializers.PrimaryKeyRelatedField(
         queryset=Market.objects.all(),
@@ -305,6 +399,24 @@ class AdminProductSerializer(serializers.ModelSerializer):
         queryset=ProductAddition.objects.all(),
         required=False,
     )
+    images = ProductImageSerializer(many=True, read_only=True)
+    image_uploads = serializers.ListField(
+        child=serializers.ImageField(
+            validators=[validate_product_image_upload],
+        ),
+        required=False,
+        write_only=True,
+    )
+    image = serializers.ImageField(
+        required=False,
+        allow_null=True,
+        validators=[validate_product_image_upload],
+    )
+    primary_image_index = serializers.IntegerField(
+        required=False,
+        min_value=0,
+        write_only=True,
+    )
 
     class Meta:
         model = Product
@@ -320,6 +432,9 @@ class AdminProductSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "image",
+            "images",
+            "image_uploads",
+            "primary_image_index",
             "discount",
             "attributes",
             "attribute_values",
@@ -334,10 +449,16 @@ class AdminProductSerializer(serializers.ModelSerializer):
         return value.strip()
 
     def to_internal_value(self, data):
-        if hasattr(data, "copy"):
-            data = data.copy()
+        if hasattr(data, "getlist"):
+            data = copy.copy(data)
         else:
             data = dict(data)
+        if hasattr(data, "getlist"):
+            uploads = data.getlist("images")
+            if uploads:
+                data.setlist("image_uploads", uploads)
+        elif isinstance(data.get("images"), (list, tuple)):
+            data["image_uploads"] = list(data["images"])
         for key in ("attributes", "variants", "attribute_values", "additions"):
             value = data.get(key)
             if isinstance(value, str):
@@ -352,6 +473,37 @@ class AdminProductSerializer(serializers.ModelSerializer):
         return super().to_internal_value(data)
 
     def validate(self, attrs):
+        repeated_uploads = list(attrs.get("image_uploads", []))
+        legacy_image = attrs.get("image", serializers.empty)
+        uploads = list(repeated_uploads)
+        if legacy_image is not serializers.empty and legacy_image is not None:
+            uploads.append(legacy_image)
+
+        if uploads:
+            unique_uploads, upload_indexes = deduplicate_image_uploads(uploads)
+            attrs["image_uploads"] = unique_uploads
+
+            primary_index = attrs.get("primary_image_index")
+            if primary_index is not None:
+                selectable_count = len(repeated_uploads) or len(uploads)
+                if primary_index >= selectable_count:
+                    raise serializers.ValidationError(
+                        {"primary_image_index": "Invalid primary image index."}
+                    )
+                attrs["primary_image_index"] = upload_indexes[primary_index]
+            elif legacy_image is not serializers.empty and not repeated_uploads:
+                attrs["primary_image_index"] = upload_indexes[0]
+
+            existing_count = self.instance.images.count() if self.instance else 0
+            if existing_count + len(unique_uploads) > PRODUCT_IMAGE_MAX_COUNT:
+                raise serializers.ValidationError(
+                    {"images": "A product can have at most 10 images."}
+                )
+        elif "primary_image_index" in attrs:
+            raise serializers.ValidationError(
+                {"primary_image_index": "Upload images before selecting a primary."}
+            )
+
         category = attrs.get("category") or getattr(self.instance, "category", None)
         legacy_attribute_values = attrs.get("attribute_values", [])
         if legacy_attribute_values and category is not None:
@@ -464,6 +616,9 @@ class AdminProductSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
+        uploads = validated_data.pop("image_uploads", [])
+        primary_image_index = validated_data.pop("primary_image_index", None)
+        validated_data.pop("image", None)
         attribute_values = validated_data.pop("attribute_values", [])
         attributes = validated_data.pop("attributes", [])
         variants = validated_data.pop("variants", [])
@@ -473,10 +628,15 @@ class AdminProductSerializer(serializers.ModelSerializer):
         self._replace_attributes(product, attributes)
         self._replace_variants(product, variants)
         product.additions.set(additions)
+        if uploads:
+            add_product_images(product.id, uploads, primary_image_index)
         return product
 
     @transaction.atomic
     def update(self, instance, validated_data):
+        uploads = validated_data.pop("image_uploads", [])
+        primary_image_index = validated_data.pop("primary_image_index", None)
+        legacy_image = validated_data.pop("image", serializers.empty)
         attribute_values = validated_data.pop("attribute_values", None)
         attributes = validated_data.pop("attributes", None)
         variants = validated_data.pop("variants", None)
@@ -490,6 +650,12 @@ class AdminProductSerializer(serializers.ModelSerializer):
             self._replace_variants(instance, variants)
         if additions is not None:
             instance.additions.set(additions)
+        if uploads:
+            add_product_images(instance.id, uploads, primary_image_index)
+            instance.refresh_from_db(fields=("image", "updated_at"))
+        elif legacy_image is None:
+            clear_primary_product_image(instance.id)
+            instance.refresh_from_db(fields=("image", "updated_at"))
         return instance
 
     def _replace_product_attribute_values(self, product, attribute_values):
@@ -601,6 +767,7 @@ class LikedProductSerializer(serializers.ModelSerializer):
 
     market = MarketSummarySerializer(read_only=True)
     variants = LikedProductVariantSerializer(many=True, read_only=True)
+    images = ProductImageSerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
@@ -613,6 +780,7 @@ class LikedProductSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "image",
+            "images",
             "discount",
             "variants",
         )

@@ -39,6 +39,7 @@ class OfferListCreateView(APIView):
                 "market__service_cities",
                 "service_cities",
                 "products",
+                "products__images",
             )
             .order_by("-created_at", "-id")
         )
@@ -46,7 +47,11 @@ class OfferListCreateView(APIView):
     def get(self, request):
         if request.user.role == User.Role.ADMIN:
             return Response(
-                AdminOfferSerializer(self.get_queryset(), many=True).data
+                AdminOfferSerializer(
+                    self.get_queryset(),
+                    many=True,
+                    context={"request": request},
+                ).data
             )
         if request.user.role != User.Role.CLIENT:
             raise PermissionDenied("Only admin or client users can access offers.")
@@ -65,6 +70,7 @@ class OfferListCreateView(APIView):
                 "products__market__service_cities",
                 "products__market__delivery_areas",
                 "products__variants",
+                "products__images",
             )
             .order_by("-created_at", "-id")
         )
@@ -79,13 +85,19 @@ class OfferListCreateView(APIView):
     @transaction.atomic
     def post(self, request):
         self._require_admin(request)
-        serializer = AdminOfferSerializer(data=request.data)
+        serializer = AdminOfferSerializer(
+            data=request.data,
+            context={"request": request},
+        )
         serializer.is_valid(raise_exception=True)
         offer = serializer.save()
         schedule_offer_notifications(offer.id)
         offer = self.get_queryset().get(id=offer.id)
         return Response(
-            AdminOfferSerializer(offer).data,
+            AdminOfferSerializer(
+                offer,
+                context={"request": request},
+            ).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -108,6 +120,7 @@ class OfferDetailView(APIView):
                 "market__service_cities",
                 "service_cities",
                 "products",
+                "products__images",
             )
         )
 
@@ -130,6 +143,7 @@ class OfferDetailView(APIView):
                     "products__market__service_cities",
                     "products__market__delivery_areas",
                     "products__variants",
+                    "products__images",
                 ),
                 id=offer_id,
             )
@@ -139,7 +153,12 @@ class OfferDetailView(APIView):
         if request.user.role != User.Role.ADMIN:
             raise PermissionDenied("Only admin or client users can access offers.")
         offer = self.get_offer(offer_id)
-        return Response(AdminOfferSerializer(offer).data)
+        return Response(
+            AdminOfferSerializer(
+                offer,
+                context={"request": request},
+            ).data
+        )
 
     @transaction.atomic
     def patch(self, request, offer_id):
@@ -150,13 +169,19 @@ class OfferDetailView(APIView):
             offer,
             data=request.data,
             partial=True,
+            context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
         offer = serializer.save()
         if old_status != Offer.Status.ACTIVE and offer.status == Offer.Status.ACTIVE:
             schedule_offer_notifications(offer.id)
         offer = self.get_queryset().get(id=offer.id)
-        return Response(AdminOfferSerializer(offer).data)
+        return Response(
+            AdminOfferSerializer(
+                offer,
+                context={"request": request},
+            ).data
+        )
 
     def delete(self, request, offer_id):
         self._require_admin(request)

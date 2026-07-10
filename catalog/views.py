@@ -15,6 +15,7 @@ from .models import (
     CategoryClassification,
     CategoryOption,
     Product,
+    ProductImage,
     ProductCategory,
     ProductAddition,
 )
@@ -27,6 +28,15 @@ from .serializers import (
     LikedProductSerializer,
     ProductCategorySerializer,
     ProductAdditionSerializer,
+    ProductImagePrimarySerializer,
+    ProductImageReorderSerializer,
+    ProductImageUploadSerializer,
+)
+from .product_images import (
+    add_product_images,
+    delete_product_image,
+    reorder_product_images,
+    set_primary_product_image,
 )
 
 
@@ -68,6 +78,7 @@ def product_queryset():
             "variants__attribute_values__product_attribute__options",
             "variants__attribute_values__product_attribute_option",
             "additions",
+            "images",
         )
     )
 
@@ -402,16 +413,26 @@ class ProductListCreateView(APIView):
 
     def get(self, request):
         return Response(
-            AdminProductSerializer(self.get_queryset(), many=True).data
+            AdminProductSerializer(
+                self.get_queryset(),
+                many=True,
+                context={"request": request},
+            ).data
         )
 
     def post(self, request):
-        serializer = AdminProductSerializer(data=request.data)
+        serializer = AdminProductSerializer(
+            data=request.data,
+            context={"request": request},
+        )
         serializer.is_valid(raise_exception=True)
         product = serializer.save()
         product = self.get_queryset().get(id=product.id)
         return Response(
-            AdminProductSerializer(product).data,
+            AdminProductSerializer(
+                product,
+                context={"request": request},
+            ).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -428,7 +449,12 @@ class ProductDetailView(APIView):
 
     def get(self, request, product_id):
         product = self.get_product(product_id)
-        return Response(AdminProductSerializer(product).data)
+        return Response(
+            AdminProductSerializer(
+                product,
+                context={"request": request},
+            ).data
+        )
 
     def patch(self, request, product_id):
         product = self.get_product(product_id)
@@ -436,11 +462,34 @@ class ProductDetailView(APIView):
             product,
             data=request.data,
             partial=True,
+            context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
         product = serializer.save()
         product = self.get_queryset().get(id=product.id)
-        return Response(AdminProductSerializer(product).data)
+        return Response(
+            AdminProductSerializer(
+                product,
+                context={"request": request},
+            ).data
+        )
+
+    def put(self, request, product_id):
+        product = self.get_product(product_id)
+        serializer = AdminProductSerializer(
+            product,
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        product = serializer.save()
+        product = self.get_queryset().get(id=product.id)
+        return Response(
+            AdminProductSerializer(
+                product,
+                context={"request": request},
+            ).data
+        )
 
     def delete(self, request, product_id):
         product = self.get_product(product_id)
@@ -457,6 +506,79 @@ class ProductDetailView(APIView):
         )
 
 
+class ProductImageCollectionView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, product_id):
+        product = get_object_or_404(product_queryset(), id=product_id)
+        serializer = ProductImageUploadSerializer(
+            data=request.data,
+            context={"product": product, "request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        add_product_images(
+            product.id,
+            serializer.validated_data["images"],
+            serializer.validated_data.get("primary_image_index"),
+        )
+        product = product_queryset().get(id=product.id)
+        return Response(
+            AdminProductSerializer(
+                product,
+                context={"request": request},
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ProductImageDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get_product_image(self, product_id, image_id):
+        product = get_object_or_404(product_queryset(), id=product_id)
+        get_object_or_404(ProductImage, id=image_id, product=product)
+        return product
+
+    def patch(self, request, product_id, image_id):
+        product = self.get_product_image(product_id, image_id)
+        serializer = ProductImagePrimarySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        set_primary_product_image(product.id, image_id)
+        product = product_queryset().get(id=product.id)
+        return Response(
+            AdminProductSerializer(
+                product,
+                context={"request": request},
+            ).data
+        )
+
+    def delete(self, request, product_id, image_id):
+        product = self.get_product_image(product_id, image_id)
+        delete_product_image(product.id, image_id)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ProductImageReorderView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request, product_id):
+        product = get_object_or_404(product_queryset(), id=product_id)
+        serializer = ProductImageReorderSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reorder_product_images(
+            product.id,
+            serializer.validated_data["image_ids"],
+        )
+        product = product_queryset().get(id=product.id)
+        return Response(
+            AdminProductSerializer(
+                product,
+                context={"request": request},
+            ).data
+        )
+
+
 class ProductLikeListView(APIView):
     permission_classes = [IsAuthenticated, IsClientRole]
 
@@ -466,7 +588,13 @@ class ProductLikeListView(APIView):
             .filter(liked_by=request.user)
             .order_by("name", "id")
         )
-        return Response(LikedProductSerializer(products, many=True).data)
+        return Response(
+            LikedProductSerializer(
+                products,
+                many=True,
+                context={"request": request},
+            ).data
+        )
 
 
 class ProductLikeToggleView(APIView):

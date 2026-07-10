@@ -10,6 +10,7 @@ from catalog.models import (
     ProductVariant,
     VariantAttributeValue,
 )
+from catalog.serializers import ProductImageSerializer
 from locations.models import DeliveryArea, ServiceCity
 from offers.models import Offer
 
@@ -362,6 +363,7 @@ class HomeProductSerializer(serializers.ModelSerializer):
     market = HomeMarketSerializer(read_only=True)
     variants = HomeVariantSerializer(many=True, read_only=True)
     attributes = HomeProductAttributeSerializer(many=True, read_only=True)
+    images = ProductImageSerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
@@ -370,6 +372,7 @@ class HomeProductSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "image",
+            "images",
             "discount",
             "theme",
             "is_popular",
@@ -395,6 +398,8 @@ class ProductDetailSerializer(HomeProductSerializer):
 
 
 class MarketClassificationProductSerializer(serializers.ModelSerializer):
+    images = ProductImageSerializer(many=True, read_only=True)
+
     class Meta:
         model = Product
         fields = (
@@ -402,6 +407,7 @@ class MarketClassificationProductSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "image",
+            "images",
             "discount",
             "theme",
             "is_popular",

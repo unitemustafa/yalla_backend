@@ -256,6 +256,7 @@ class HomeView(APIView):
                 "market__service_cities",
                 "market__delivery_areas",
                 "attributes__options",
+                "images",
                 Prefetch(
                     "variants",
                     queryset=ProductVariant.objects.order_by("price", "id"),
@@ -281,6 +282,7 @@ class HomeView(APIView):
                     .prefetch_related(
                         "variants",
                         "attributes__options",
+                        "images",
                         "market__service_cities",
                         "market__delivery_areas",
                     ),
@@ -401,6 +403,7 @@ class MarketClassificationSummaryView(APIView):
                     market__status=Market.Status.ACTIVE,
                 )
                 .select_related("market__classification")
+                .prefetch_related("images")
                 .order_by("-created_at", "-id")
             )
             for market_id in market_ids_for_response
@@ -480,6 +483,7 @@ class MarketClassificationMarketsView(APIView):
             market.id: list(
                 Product.objects.filter(market=market)
                 .select_related("market__classification")
+                .prefetch_related("images")
                 .order_by("-created_at", "-id")[:3]
             )
             for market in markets
@@ -532,6 +536,7 @@ class ProductSearchView(APIView):
                 "market__service_cities",
                 "market__delivery_areas",
                 "attributes__options",
+                "images",
                 Prefetch(
                     "variants",
                     queryset=ProductVariant.objects.order_by("price", "id"),
@@ -607,6 +612,7 @@ class AddressProductListView(APIView):
                 "market__service_cities",
                 "market__delivery_areas",
                 "attributes__options",
+                "images",
                 Prefetch(
                     "variants",
                     queryset=ProductVariant.objects.order_by("price", "id"),
@@ -646,6 +652,7 @@ class ProductDetailView(APIView):
                 "market__service_cities",
                 "market__delivery_areas",
                 "attributes__options",
+                "images",
                 Prefetch(
                     "variants",
                     queryset=ProductVariant.objects.prefetch_related(
