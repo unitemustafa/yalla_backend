@@ -154,6 +154,35 @@ class DashboardSettingsAPITests(APITestCase):
         self.assertEqual(response.data["brand_name"], "يلا الجديد")
         self.assertEqual(response.data["brand_tagline"], "توصيل أسرع")
 
+    def test_settings_patch_is_reflected_in_public_login_snapshot(self):
+        self.authenticate_admin()
+        patch_response = self.client.patch(
+            SETTINGS_URL,
+            {
+                "brand_name": "Snapshot Brand",
+                "brand_tagline": "Snapshot Tagline",
+                "font_family": "Alexandria",
+            },
+            format="json",
+        )
+        self.assertEqual(patch_response.status_code, status.HTTP_200_OK)
+
+        self.client.force_authenticate(user=None)
+        snapshot_response = self.client.get(
+            "/api/v1/home/login-dashboard-snapshot/"
+        )
+
+        self.assertEqual(snapshot_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            snapshot_response.data["branding"]["brandName"], "Snapshot Brand"
+        )
+        self.assertEqual(
+            snapshot_response.data["branding"]["brandTagline"], "Snapshot Tagline"
+        )
+        self.assertEqual(
+            snapshot_response.data["branding"]["fontFamily"], "Alexandria"
+        )
+
     def test_invalid_color_is_rejected(self):
         self.authenticate_admin()
 

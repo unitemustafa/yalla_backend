@@ -23,6 +23,7 @@ from catalog.models import (
 from locations.models import Address, DeliveryArea, ServiceCity
 from offers.models import Offer
 from orders.models import Order
+from dashboard.models import DashboardSettings
 
 from .models import Market, MarketClassification
 from .region import visible_market_queryset
@@ -85,7 +86,7 @@ class LoginDashboardSnapshotAPITests(APITestCase):
         Order.objects.filter(pk=order.pk).update(created_at=created_at)
         return order
 
-    def test_snapshot_is_public_and_returns_only_active_aggregate_counts(self):
+    def test_snapshot_is_public_and_returns_active_aggregate_counts_and_branding(self):
         today = timezone.localdate()
         self.create_order_at(self.local_datetime(today, time(0, 0)))
         self.create_order_at(self.local_datetime(today, time(12, 0)))
@@ -96,7 +97,7 @@ class LoginDashboardSnapshotAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(
             set(response.data),
-            {"todayOrders", "availableCities", "deliveryZones"},
+            {"todayOrders", "availableCities", "deliveryZones", "branding"},
         )
         self.assertEqual(
             response.data,
@@ -104,10 +105,52 @@ class LoginDashboardSnapshotAPITests(APITestCase):
                 "todayOrders": 2,
                 "availableCities": 1,
                 "deliveryZones": 1,
+                "branding": {
+                    "brandName": "يلا ماركت",
+                    "brandTagline": "أول أونلاين ماركت في التل الكبير",
+                    "logoUrl": None,
+                    "fontFamily": "Cairo",
+                    "primaryColor": "#155d72",
+                    "subtleColor": "#e7f2f4",
+                    "accentColor": "#f0b64f",
+                    "brandName": DashboardSettings._meta.get_field(
+                        "brand_name"
+                    ).get_default(),
+                    "brandTagline": DashboardSettings._meta.get_field(
+                        "brand_tagline"
+                    ).get_default(),
+                },
             },
         )
-        self.assertTrue(
-            all(isinstance(value, int) for value in response.data.values())
+        self.assertTrue(DashboardSettings.objects.filter(pk=1).exists())
+
+    def test_snapshot_returns_dashboard_settings_branding(self):
+        DashboardSettings.objects.update_or_create(
+            pk=1,
+            defaults={
+                "brand_name": "Custom Brand",
+                "brand_tagline": "Custom Tagline",
+                "font_family": "Alexandria",
+                "primary_color": "#112233",
+                "subtle_color": "#ddeeff",
+                "accent_color": "#445566",
+            },
+        )
+
+        response = self.client.get(self.snapshot_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["branding"],
+            {
+                "brandName": "Custom Brand",
+                "brandTagline": "Custom Tagline",
+                "logoUrl": None,
+                "fontFamily": "Alexandria",
+                "primaryColor": "#112233",
+                "subtleColor": "#ddeeff",
+                "accentColor": "#445566",
+            },
         )
 
 

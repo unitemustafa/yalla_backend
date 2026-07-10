@@ -26,6 +26,10 @@ class User(AbstractUser):
     terms_accepted_at = models.DateTimeField(null=True, blank=True)
     privacy_policy_version = models.CharField(max_length=20, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    deleted_original_email = models.EmailField(null=True, blank=True)
+    deleted_original_username = models.CharField(max_length=150, null=True, blank=True)
+    deleted_original_phone = models.CharField(max_length=30, null=True, blank=True)
+    deleted_original_is_active = models.BooleanField(null=True, blank=True)
     market_region_mode = models.CharField(
         max_length=20,
         choices=MarketRegionMode.choices,

@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 from catalog.models import Product, ProductVariant
+from dashboard.models import DashboardSettings
 from locations.models import DeliveryArea, ServiceCity
 from orders.models import Order
 
@@ -77,6 +78,13 @@ class LoginDashboardSnapshotView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
+        dashboard_settings, _ = DashboardSettings.objects.get_or_create(pk=1)
+        logo_url = None
+        if dashboard_settings.logo:
+            try:
+                logo_url = request.build_absolute_uri(dashboard_settings.logo.url)
+            except ValueError:
+                logo_url = None
         local_today = timezone.localdate()
         current_timezone = timezone.get_current_timezone()
         start_of_day = timezone.make_aware(
@@ -93,6 +101,15 @@ class LoginDashboardSnapshotView(APIView):
                 ).count(),
                 "availableCities": ServiceCity.objects.filter(is_active=True).count(),
                 "deliveryZones": DeliveryArea.objects.filter(is_active=True).count(),
+                "branding": {
+                    "brandName": dashboard_settings.brand_name,
+                    "brandTagline": dashboard_settings.brand_tagline,
+                    "logoUrl": logo_url,
+                    "fontFamily": dashboard_settings.font_family,
+                    "primaryColor": dashboard_settings.primary_color,
+                    "subtleColor": dashboard_settings.subtle_color,
+                    "accentColor": dashboard_settings.accent_color,
+                },
             },
             status=status.HTTP_200_OK,
         )

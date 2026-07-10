@@ -54,6 +54,25 @@ def service_city_relation_counts(city):
     return {key: value for key, value in checks.items() if value}
 
 
+def service_city_relation_message(city, relations):
+    labels = {
+        "delivery_areas": "مناطق التوصيل",
+        "markets": "المحلات",
+        "offers": "العروض",
+        "couriers": "المندوبون",
+        "addresses": "عناوين العملاء",
+        "orders": "الطلبات",
+        "users": "حسابات العملاء",
+    }
+    linked_data = "، ".join(
+        f"{labels.get(key, key)} ({count})" for key, count in relations.items()
+    )
+    return (
+        f"لا يمكن حذف مدينة {city.name} لأنها مرتبطة بـ: {linked_data}. "
+        "انقل أو احذف هذه البيانات أولًا."
+    )
+
+
 class ServiceCityListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
     serializer_class = ServiceCitySerializer
@@ -82,7 +101,7 @@ class ServiceCityDetailView(
         if relations:
             return Response(
                 {
-                    "detail": "لا يمكن حذف المدينة لوجود بيانات مرتبطة بها.",
+                    "detail": service_city_relation_message(city, relations),
                     "code": "service_city_in_use",
                     "relations": relations,
                 },

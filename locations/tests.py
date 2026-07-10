@@ -831,6 +831,8 @@ class LocationManagementAPITests(TestCase):
         self.assertEqual(response.data["code"], "service_city_in_use")
         self.assertIn(expected_relation, response.data["relations"])
         self.assertGreater(response.data["relations"][expected_relation], 0)
+        self.assertIn(city.name, response.data["detail"])
+        self.assertIn("انقل أو احذف هذه البيانات أولًا", response.data["detail"])
         self.assertTrue(ServiceCity.objects.filter(pk=city.id).exists())
         return response
 

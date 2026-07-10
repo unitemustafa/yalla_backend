@@ -2,6 +2,7 @@ import re
 from datetime import timedelta
 from pathlib import Path
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.contrib.auth.password_validation import validate_password
@@ -12,8 +13,9 @@ from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.exceptions import PermissionDenied
-from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.exceptions import TokenBackendError, TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework_simplejwt.state import token_backend
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from locations.models import ServiceCity
@@ -140,15 +142,19 @@ class CourierProfileSerializer(RequiredFieldMessagesMixin, serializers.ModelSeri
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        existing_service_city = getattr(self.instance, "service_city", None)
         service_city = attrs.get(
             "service_city",
-            getattr(self.instance, "service_city", None),
+            existing_service_city,
         )
         if service_city is None:
             raise serializers.ValidationError(
                 {"service_city": "Service city is required for couriers."}
             )
-        if not service_city.is_active:
+        if (
+            (self.instance is None or "service_city" in attrs)
+            and not service_city.is_active
+        ):
             raise serializers.ValidationError(
                 {"service_city": "Service city must be active."}
             )
@@ -161,6 +167,11 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
     has_password = serializers.SerializerMethodField()
     courier_profile = CourierProfileSerializer(read_only=True)
+    market_region_service_city_name = serializers.CharField(
+        source="market_region_service_city.name",
+        read_only=True,
+        allow_null=True,
+    )
 
     class Meta:
         model = User
@@ -176,6 +187,8 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
             "avatar_url",
             "username_changed_at",
             "role",
+            "market_region_mode",
+            "market_region_service_city_name",
             "has_password",
             "courier_profile",
         )
@@ -445,6 +458,12 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
         }
 
 
+class AdminLoginSerializer(LoginSerializer):
+    """Dashboard-only login input; other login APIs keep their existing schema."""
+
+    remember = serializers.BooleanField(required=False, default=False)
+
+
 class ForgotPasswordSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
     email = serializers.EmailField()
 
@@ -541,6 +560,15 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
     def validate_email(self, value):
         email = normalize_email(value)
         user = self.context["request"].user
+        if (
+            user.role == User.Role.ADMIN
+            and self.instance is not None
+            and self.instance.pk == user.pk
+            and email != self.instance.email
+        ):
+            raise serializers.ValidationError(
+                "لا يمكن تغيير بريد حساب المدير من لوحة التحكم."
+            )
         if (
             User.objects.filter(email__iexact=email)
             .filter(deleted_at__isnull=True)
@@ -690,6 +718,17 @@ class AdminUserWriteSerializer(
         super().__init__(*args, **kwargs)
         if self.instance is None:
             self.fields["password"].required = True
+            return
+
+        if self.instance.role == User.Role.REPRESENTATIVE:
+            try:
+                profile = self.instance.courier_profile
+            except CourierProfile.DoesNotExist:
+                profile = None
+            if profile is not None:
+                courier_profile_field = self.fields["courier_profile"]
+                courier_profile_field.instance = profile
+                courier_profile_field.partial = True
 
 
     def validate_email(self, value):
@@ -832,6 +871,7 @@ class AdminUserWriteSerializer(
             for field, value in profile_data.items():
                 setattr(profile, field, value)
             profile.save()
+            instance._state.fields_cache.pop("courier_profile", None)
         return instance
 
 
@@ -858,7 +898,49 @@ class EmailTokenRefreshSerializer(
             raise serializers.ValidationError(
                 {"refresh": "Refresh token is required."}
             )
+        try:
+            token = RefreshToken(refresh)
+        except TokenError:
+            # A dashboard token's normal JWT expiry is deliberately the same as
+            # its absolute session expiry. Decode only to tailor that expired
+            # dashboard response; non-admin tokens retain Simple JWT's behavior.
+            try:
+                payload = token_backend.decode(refresh, verify=False)
+            except (TokenBackendError, TokenError):
+                raise
+            if payload.get("admin_session_exp") is not None:
+                raise AuthenticationFailed("Session expired. Please login again.")
+            raise
+        admin_session_exp = token.get("admin_session_exp")
+        if admin_session_exp is not None:
+            try:
+                admin_session_exp = int(admin_session_exp)
+            except (TypeError, ValueError):
+                raise AuthenticationFailed("Session expired. Please login again.")
+            if admin_session_exp <= int(timezone.now().timestamp()):
+                raise AuthenticationFailed("Session expired. Please login again.")
+
         data = super().validate({"refresh": refresh})
+        if admin_session_exp is not None:
+            # Simple JWT normally resets the rotated refresh expiry to the global
+            # 30-day lifetime. Restore the dashboard's original absolute expiry.
+            rotated_refresh = RefreshToken(data.get("refresh", refresh))
+            rotated_refresh["admin_session_exp"] = admin_session_exp
+            rotated_refresh["admin_remember"] = bool(token.get("admin_remember"))
+            rotated_refresh["exp"] = admin_session_exp
+
+            remaining = admin_session_exp - int(timezone.now().timestamp())
+            if remaining <= 0:
+                raise AuthenticationFailed("Session expired. Please login again.")
+            access = rotated_refresh.access_token
+            access.set_exp(
+                lifetime=min(
+                    timedelta(seconds=remaining),
+                    settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"],
+                )
+            )
+            data["access"] = str(access)
+            data["refresh"] = str(rotated_refresh)
         return {
             "accessToken": data["access"],
             "refreshToken": data.get("refresh", refresh),

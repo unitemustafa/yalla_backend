@@ -163,6 +163,11 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": True,
 }
 
+# These lifetimes apply only to tokens issued by the dashboard admin login.
+# Client and representative refresh tokens retain the general Simple JWT lifetime.
+ADMIN_REMEMBER_SESSION_LIFETIME = timedelta(days=7)
+ADMIN_TEMPORARY_SESSION_LIFETIME = timedelta(hours=8)
+
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
@@ -173,4 +178,6 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER)
 
 
 AUTH_OTP_EXPIRY_SECONDS = 10 * 60
-AUTH_OTP_INCLUDE_IN_RESPONSE = DEBUG
+AUTH_OTP_INCLUDE_IN_RESPONSE = (
+    os.environ.get("AUTH_OTP_INCLUDE_IN_RESPONSE", "False") == "True"
+)

@@ -91,6 +91,10 @@ class DeliveryAreaSerializer(ServiceCitySerializer):
         queryset=ServiceCity.objects.all(),
         source="service_city",
     )
+    service_city_name = serializers.CharField(
+        source="service_city.name",
+        read_only=True,
+    )
     center_latitude = serializers.DecimalField(
         max_digits=10,
         decimal_places=7,
@@ -115,6 +119,7 @@ class DeliveryAreaSerializer(ServiceCitySerializer):
         fields = (
             "id",
             "service_city_id",
+            "service_city_name",
             "name",
             "center_latitude",
             "center_longitude",
