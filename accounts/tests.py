@@ -11,7 +11,9 @@ from django.contrib.auth import get_user_model
 from django.apps import apps
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from PIL import Image
 from rest_framework import status
@@ -908,6 +910,55 @@ class AuthenticationAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(response.data["code"], "account_inactive")
+
+    @patch("accounts.deactivation._dispatch_account_disabled")
+    def test_admin_customer_patch_uses_user_only_lock(self, dispatch):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="locking_admin",
+            email="locking-admin@example.com",
+            phone="+213555000144",
+        )
+        client = self.create_active_user(
+            username="locking_client",
+            email="locking-client@example.com",
+            phone="+213555000145",
+        )
+        self.assertIsNone(client.market_region_service_city_id)
+        token = RefreshToken.for_user(admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        with CaptureQueriesContext(connection) as queries:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.patch(
+                    f"{AUTH_BASE}/users/{client.id}/",
+                    {"is_active": False},
+                    format="json",
+                )
+
+        locking_queries = [
+            query["sql"]
+            for query in queries.captured_queries
+            if 'FROM "accounts_user"' in query["sql"]
+            and '"accounts_user"."deleted_at" IS NULL' in query["sql"]
+        ]
+        self.assertEqual(len(locking_queries), 1)
+        locking_sql = locking_queries[0].upper()
+        self.assertNotIn(" JOIN ", locking_sql)
+        if connection.features.has_select_for_update:
+            self.assertIn("FOR UPDATE", locking_sql)
+
+        client.refresh_from_db()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(client.is_active)
+        self.assertEqual(client.auth_token_version, 1)
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=client,
+                type=Notification.Type.ACCOUNT_DISABLED,
+            ).exists()
+        )
+        dispatch.assert_called_once_with(client.id)
 
     @patch("accounts.deactivation._dispatch_account_disabled")
     def test_admin_deactivation_dispatches_once_after_commit(self, dispatch):

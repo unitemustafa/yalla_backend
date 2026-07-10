@@ -438,10 +438,12 @@ class AdminUserDetailView(APIView):
         queryset = User.objects.filter(deleted_at__isnull=True)
         if for_update:
             queryset = queryset.select_for_update()
-        return get_object_or_404(
-            queryset.select_related(
+        else:
+            queryset = queryset.select_related(
                 "market_region_service_city"
-            ),
+            )
+        return get_object_or_404(
+            queryset,
             id=user_id,
         )
 
