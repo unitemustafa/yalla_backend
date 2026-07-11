@@ -3,7 +3,6 @@ from django.urls import path
 from .views import (
     AdminLoginView,
     AdminRepresentativeListView,
-    AdminUserRestoreView,
     AdminUserDetailView,
     AdminUserListCreateView,
     CheckEmailView,
@@ -76,11 +75,6 @@ urlpatterns = [
         "representatives/",
         AdminRepresentativeListView.as_view(),
         name="admin-representatives",
-    ),
-    path(
-        "users/<int:user_id>/restore/",
-        AdminUserRestoreView.as_view(),
-        name="admin-user-restore",
     ),
     path(
         "users/<int:user_id>",

@@ -34,9 +34,9 @@ def handle_client_deactivation(user, *, was_active, notify_disabled=True):
     )
     if notify_disabled:
         create_account_disabled_notification(user)
-        transaction.on_commit(
-            lambda user_id=user.pk: _dispatch_account_disabled(user_id)
-        )
+    transaction.on_commit(
+        lambda user_id=user.pk: _dispatch_account_disabled(user_id)
+    )
     return True
 
 

@@ -1,5 +1,6 @@
 from math import asin, cos, radians, sin, sqrt
 
+from django.db.models import Count, F, Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -201,7 +202,23 @@ def visible_offer_queryset(user):
         start_time__lte=now,
         end_time__gte=now,
     )
-    return region_filtered_offer_queryset(queryset, user)
+    queryset = region_filtered_offer_queryset(queryset, user).annotate(
+        total_offer_uses=Count(
+            "order_offers",
+            filter=~Q(order_offers__order__status="cancelled"),
+            distinct=True,
+        ),
+        customer_offer_uses=Count(
+            "order_offers",
+            filter=Q(order_offers__order__user=user)
+            & ~Q(order_offers__order__status="cancelled"),
+            distinct=True,
+        ),
+    ).filter(
+        Q(use_limits__isnull=True) | Q(total_offer_uses__lt=F("use_limits")),
+        Q(user_limit__isnull=True) | Q(customer_offer_uses__lt=F("user_limit")),
+    )
+    return queryset.order_by("-announcement_priority", "-created_at", "-id")
 
 
 def market_matches_region(market, selection):

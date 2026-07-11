@@ -201,6 +201,15 @@ class AdminMarketSerializer(serializers.ModelSerializer):
             attrs["service_cities"] = service_cities
 
         if scope == Market.Scope.GENERAL:
+            if service_cities:
+                raise serializers.ValidationError(
+                    {
+                        "service_city_ids": (
+                            "General markets cannot target a service city."
+                        )
+                    }
+                )
+            attrs["service_cities"] = []
             return attrs
 
         existing_count = (
@@ -213,6 +222,14 @@ class AdminMarketSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"service_city_ids": "At least one service city is required."}
                 )
+            if len(service_cities) > 1:
+                raise serializers.ValidationError(
+                    {"service_city_ids": "Only one service city may be selected."}
+                )
+        elif existing_count > 1:
+            raise serializers.ValidationError(
+                {"service_city_ids": "Only one service city may be selected."}
+            )
         elif self.instance is None or existing_count == 0:
             raise serializers.ValidationError(
                 {"service_city_ids": "At least one service city is required."}
@@ -515,6 +532,10 @@ class HomeOfferSerializer(serializers.ModelSerializer):
             "active_days",
             "use_limits",
             "user_limit",
+            "announcement_url",
+            "announcement_cta_label",
+            "announcement_priority",
+            "announcement_display_seconds",
             "status",
             "market",
             "products",

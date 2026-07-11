@@ -15,6 +15,7 @@ from markets.region import (
     address_matches_market_region,
     current_market_region_selection,
     order_region_validation_error,
+    visible_offer_queryset,
 )
 from offers.models import Offer
 
@@ -111,6 +112,9 @@ class OrderPreviewSerializer(serializers.Serializer):
         "This address does not belong to the currently selected market region."
     )
     ADDRESS_REGION_MISMATCH_CODE = "address_region_mismatch"
+    DELIVERY_AREA_UNAVAILABLE_MESSAGE = (
+        "Delivery is no longer available for this address. Choose another address."
+    )
 
     address_id = serializers.PrimaryKeyRelatedField(
         queryset=Address.objects.select_related(
@@ -142,6 +146,11 @@ class OrderPreviewSerializer(serializers.Serializer):
                 {"items": "Choose at least one product variant or offer."}
             )
 
+        if any(item["offer"].type == Offer.OfferType.ANNOUNCEMENT for item in offers):
+            raise serializers.ValidationError(
+                {"offers": "Announcements are external links and cannot be added to an order."}
+            )
+
         region_error = order_region_validation_error(
             user,
             [item["variant"] for item in items],
@@ -149,6 +158,21 @@ class OrderPreviewSerializer(serializers.Serializer):
         )
         if region_error:
             raise serializers.ValidationError(region_error)
+
+        available_offer_ids = set(
+            visible_offer_queryset(user).filter(
+                id__in=[item["offer"].id for item in offers]
+            ).values_list("id", flat=True)
+        )
+        unavailable_offer_ids = [
+            item["offer"].id
+            for item in offers
+            if item["offer"].id not in available_offer_ids
+        ]
+        if unavailable_offer_ids:
+            raise serializers.ValidationError(
+                {"offers": "One or more offers are no longer available."}
+            )
 
         current_selection = current_market_region_selection(user)
         address = attrs.get("delivery_address")
@@ -455,9 +479,12 @@ class OrderPreviewSerializer(serializers.Serializer):
             and address.delivery_area_id
         ):
             delivery_area = address.delivery_area
+            if not delivery_area.is_active:
+                raise serializers.ValidationError(
+                    {"address_id": self.DELIVERY_AREA_UNAVAILABLE_MESSAGE}
+                )
             if (
-                delivery_area.is_active
-                and service_city is not None
+                service_city is not None
                 and delivery_area.service_city_id == service_city.id
             ):
                 return {

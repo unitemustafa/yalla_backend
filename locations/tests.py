@@ -876,6 +876,64 @@ class LocationManagementAPITests(TestCase):
 
         self.assert_service_city_delete_blocked(city, "couriers")
 
+    def test_deleted_courier_profile_does_not_block_service_city_deletion(self):
+        city = ServiceCity.objects.create(name="Deleted Courier City")
+        courier = User.objects.create_user(
+            username="deleted_city_courier",
+            email="deleted-city-courier@example.com",
+            phone="+201000000189",
+            password="Passw0rd!",
+            role=User.Role.REPRESENTATIVE,
+        )
+        profile = CourierProfile.objects.create(
+            user=courier,
+            vehicle_type="Bike",
+            plate_number="DEL-189",
+            service_city=city,
+        )
+        courier.deleted_at = timezone.now()
+        courier.save(update_fields=["deleted_at"])
+
+        response = self.client.delete(
+            f"/api/v1/locations/service-cities/{city.id}/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(ServiceCity.objects.filter(pk=city.id).exists())
+        self.assertFalse(CourierProfile.objects.filter(pk=profile.id).exists())
+
+    def test_deleted_client_relations_do_not_block_service_city_deletion(self):
+        city = ServiceCity.objects.create(name="Deleted Client City")
+        client = User.objects.create_user(
+            username="deleted_city_client",
+            email="deleted-city-client@example.com",
+            phone="+201000000190",
+            password="Passw0rd!",
+            role=User.Role.CLIENT,
+            market_region_mode=User.MarketRegionMode.SERVICE_CITY,
+            market_region_service_city=city,
+        )
+        address = Address.objects.create(
+            user=client,
+            name="Old home",
+            details="Old street",
+            service_city=city,
+            delivery_type=Address.DeliveryType.DELIVERY,
+        )
+        client.deleted_at = timezone.now()
+        client.save(update_fields=["deleted_at"])
+
+        response = self.client.delete(
+            f"/api/v1/locations/service-cities/{city.id}/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(ServiceCity.objects.filter(pk=city.id).exists())
+        self.assertFalse(Address.objects.filter(pk=address.id).exists())
+        client.refresh_from_db()
+        self.assertIsNone(client.market_region_mode)
+        self.assertIsNone(client.market_region_service_city_id)
+
     def test_service_city_with_addresses_is_not_deleted(self):
         city = ServiceCity.objects.create(name="Address City")
         Address.objects.create(
@@ -978,34 +1036,34 @@ class LocationManagementAPITests(TestCase):
         self.assertTrue(Market.objects.filter(pk=market.id).exists())
         self.assertFalse(market.delivery_areas.filter(pk=area.id).exists())
 
-    def test_delivery_area_delete_preserves_and_converts_saved_address(self):
+    def test_delivery_area_delete_blocks_saved_address_relation(self):
         area = self.create_area("Address Area")
         address = self.create_address_for_area(area)
 
         response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
 
-        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
         address.refresh_from_db()
-        self.assertIsNone(address.delivery_area_id)
-        self.assertEqual(address.delivery_type, Address.DeliveryType.DELIVERY)
+        self.assertEqual(address.delivery_area_id, area.id)
+        self.assertEqual(address.delivery_type, Address.DeliveryType.FIXED_AREA)
         self.assertEqual(address.service_city_id, area.service_city_id)
-        self.assertEqual(address.manual_area, area.name)
         self.assertTrue(Address.objects.filter(pk=address.id).exists())
 
-    def test_delivery_area_delete_cleans_market_and_address_together(self):
+    def test_delivery_area_delete_blocks_market_with_saved_address_relation(self):
         area = self.create_area("Mixed Area")
         market = self.create_market_for_area(area)
         address = self.create_address_for_area(area)
 
         response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
 
-        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(DeliveryArea.objects.filter(pk=area.id).exists())
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
         self.assertTrue(Market.objects.filter(pk=market.id).exists())
-        self.assertFalse(market.delivery_areas.filter(pk=area.id).exists())
+        self.assertTrue(market.delivery_areas.filter(pk=area.id).exists())
         address.refresh_from_db()
-        self.assertIsNone(address.delivery_area_id)
-        self.assertEqual(address.delivery_type, Address.DeliveryType.DELIVERY)
+        self.assertEqual(address.delivery_area_id, area.id)
+        self.assertEqual(address.delivery_type, Address.DeliveryType.FIXED_AREA)
 
     def test_delivery_area_delete_blocks_order_relation(self):
         area = self.create_area("Order Area")

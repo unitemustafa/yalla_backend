@@ -269,22 +269,22 @@ class OfferAPITests(APITestCase):
             ).exists()
         )
 
-    def test_admin_can_create_update_list_offer_with_city_targets(self):
+    def test_admin_can_create_update_list_offer_with_single_city_target(self):
         self.authenticate(self.admin)
 
         create_response = self.client.post(
             f"{OFFERS_BASE}/",
-            self.offer_payload(service_city_ids=[self.city.id, self.second_city.id]),
+            self.offer_payload(service_city_ids=[self.city.id]),
             format="json",
         )
 
         self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
         self.assertFalse(create_response.data["show_in_general"])
         self.assertEqual(
-            set(create_response.data["service_city_ids"]),
-            {self.city.id, self.second_city.id},
+            create_response.data["service_city_ids"],
+            [self.city.id],
         )
-        self.assertEqual(len(create_response.data["service_cities"]), 2)
+        self.assertEqual(len(create_response.data["service_cities"]), 1)
         offer_id = create_response.data["id"]
 
         update_response = self.client.patch(
@@ -292,7 +292,7 @@ class OfferAPITests(APITestCase):
             {
                 "market_id": self.general_market.id,
                 "show_in_general": True,
-                "service_city_ids": [self.city.id],
+                "service_city_ids": [],
                 "product_ids": [self.general_product.id],
             },
             format="json",
@@ -301,7 +301,7 @@ class OfferAPITests(APITestCase):
 
         self.assertEqual(update_response.status_code, status.HTTP_200_OK, update_response.data)
         self.assertTrue(update_response.data["show_in_general"])
-        self.assertEqual(update_response.data["service_city_ids"], [self.city.id])
+        self.assertEqual(update_response.data["service_city_ids"], [])
         self.assertIn(offer_id, [item["id"] for item in list_response.data])
 
     def test_admin_can_reactivate_expired_offer_by_extending_its_end_time(self):
@@ -324,10 +324,7 @@ class OfferAPITests(APITestCase):
         self.authenticate(self.admin)
         combinations = [
             (False, [self.city.id], self.market.id, [self.product.id]),
-            (False, [self.city.id, self.second_city.id], self.market.id, [self.product.id]),
             (True, [], self.general_market.id, [self.general_product.id]),
-            (True, [self.city.id], self.general_market.id, [self.general_product.id]),
-            (True, [self.city.id, self.second_city.id], self.general_market.id, [self.general_product.id]),
         ]
 
         for show_in_general, city_ids, market_id, product_ids in combinations:
@@ -343,6 +340,38 @@ class OfferAPITests(APITestCase):
                 format="json",
             )
             self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+
+    def test_offer_create_rejects_general_and_city_targets_together(self):
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(
+                show_in_general=True,
+                service_city_ids=[self.city.id],
+                market_id=self.general_market.id,
+                product_ids=[self.general_product.id],
+            ),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("show_in_general", response.data)
+
+    def test_offer_create_rejects_multiple_city_targets(self):
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(service_city_ids=[self.city.id, self.second_city.id]),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["service_city_ids"][0],
+            "Only one service city may be selected.",
+        )
 
     def test_offer_create_rejects_no_target(self):
         self.authenticate(self.admin)
@@ -376,7 +405,7 @@ class OfferAPITests(APITestCase):
 
         response = self.client.post(
             f"{OFFERS_BASE}/",
-            self.offer_payload(service_city_ids=[self.city.id, self.remote_city.id]),
+            self.offer_payload(service_city_ids=[self.remote_city.id]),
             format="json",
         )
 
@@ -417,12 +446,21 @@ class OfferAPITests(APITestCase):
         self.authenticate(self.admin)
 
         for offer_type in Offer.OfferType.values:
+            payload = self.offer_payload(
+                type=offer_type,
+                title=f"{offer_type} Offer",
+            )
+            if offer_type == Offer.OfferType.ANNOUNCEMENT:
+                payload.update(
+                    {
+                        "product_ids": [],
+                        "announcement_url": "https://example.com/campaign",
+                    }
+                )
+                payload.pop("market_id", None)
             response = self.client.post(
                 f"{OFFERS_BASE}/",
-                self.offer_payload(
-                    type=offer_type,
-                    title=f"{offer_type} Offer",
-                ),
+                payload,
                 format="json",
             )
 

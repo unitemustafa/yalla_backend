@@ -16,8 +16,10 @@ class Offer(models.Model):
 
     market = models.ForeignKey(
         "markets.Market",
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name="offers",
+        blank=True,
+        null=True,
     )
     show_in_general = models.BooleanField(default=False)
     service_cities = models.ManyToManyField(
@@ -50,6 +52,10 @@ class Offer(models.Model):
     active_days = models.JSONField(default=list, blank=True)
     use_limits = models.PositiveIntegerField(null=True, blank=True)
     user_limit = models.PositiveIntegerField(null=True, blank=True)
+    announcement_url = models.URLField(blank=True, default="")
+    announcement_cta_label = models.CharField(max_length=80, blank=True, default="")
+    announcement_priority = models.PositiveSmallIntegerField(default=0)
+    announcement_display_seconds = models.PositiveSmallIntegerField(default=15)
 
     status = models.CharField(
         max_length=20,

@@ -41,7 +41,7 @@ class OfferListCreateView(APIView):
                 "products",
                 "products__images",
             )
-            .order_by("-created_at", "-id")
+            .order_by("-announcement_priority", "-created_at", "-id")
         )
 
     def get(self, request):
@@ -72,7 +72,7 @@ class OfferListCreateView(APIView):
                 "products__variants",
                 "products__images",
             )
-            .order_by("-created_at", "-id")
+            .order_by("-announcement_priority", "-created_at", "-id")
         )
         return Response(
             HomeOfferSerializer(

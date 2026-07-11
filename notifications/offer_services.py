@@ -63,7 +63,7 @@ def create_offer_notifications(offer_id):
         offer.status != Offer.Status.ACTIVE
         or offer.start_time > now
         or offer.end_time <= now
-        or offer.market.status != Market.Status.ACTIVE
+        or (offer.market is not None and offer.market.status != Market.Status.ACTIVE)
     ):
         return []
 
@@ -103,6 +103,7 @@ def create_offer_notifications(offer_id):
 
     price, price_text = _offer_price(offer)
     image = _offer_image(offer)
+    market_name = offer.market.name if offer.market is not None else "Yalla Market"
     created_notification_ids = []
     for batch in _chunks(recipients):
         recipient_ids = [item["id"] for item in batch]
@@ -121,13 +122,13 @@ def create_offer_notifications(offer_id):
             if offer.show_in_general:
                 title = "🔥 عرض جديد متاح الآن"
                 message = (
-                    f"عرض «{offer.title}» من {offer.market.name} متاح في السوق العام! "
+                    f"عرض «{offer.title}» من {market_name} متاح في السوق العام! "
                     f"{price_text} لفترة محدودة، شوفه قبل ما يخلص."
                 )
             else:
                 title = f"🔥 عرض جديد في {region_name}"
                 message = (
-                    f"عرض «{offer.title}» من {offer.market.name} وصل {region_name}! "
+                    f"عرض «{offer.title}» من {market_name} وصل {region_name}! "
                     f"{price_text} لفترة محدودة، افتحه قبل ما يفوتك."
                 )
             objects.append(
@@ -147,7 +148,7 @@ def create_offer_notifications(offer_id):
                         "region_name": region_name,
                         "region_names": region_names,
                         "market_id": offer.market_id,
-                        "market_name": offer.market.name,
+                        "market_name": market_name,
                         "discount": f"{offer.discount:.2f}",
                         "price": price,
                         "price_text": price_text,

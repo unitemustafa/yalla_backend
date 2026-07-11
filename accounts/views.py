@@ -9,21 +9,14 @@ from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.token_blacklist.models import (
-    BlacklistedToken,
-    OutstandingToken,
-)
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from .courier_rules import active_assigned_orders_for_user
-from .deactivation import handle_client_deactivation
-from .models import OneTimePassword
+from .models import CourierProfile, OneTimePassword
 from .serializers import (
     AdminUserDetailSerializer,
     AdminUserSerializer,
     AdminUserWriteSerializer,
     AdminLoginSerializer,
-    DeleteAccountSerializer,
     EmailOTPSerializer,
     EmailTokenRefreshSerializer,
     ForgotPasswordSerializer,
@@ -98,8 +91,44 @@ def token_payload(user, request=None, admin_session_lifetime=None, remember=Fals
 
 
 def update_successful_login(user):
+    first_successful_login = user.last_login is None
     user.last_login = timezone.now()
     user.save(update_fields=["last_login"])
+
+    if user.role != user.Role.REPRESENTATIVE:
+        return
+
+    profile = CourierProfile.objects.filter(user=user).first()
+    became_available = profile is not None and not profile.is_available
+    if became_available:
+        profile.is_available = True
+        profile.save(update_fields=["is_available", "updated_at"])
+
+    if first_successful_login or became_available:
+        transaction.on_commit(
+            lambda courier_id=user.id: _notify_courier_availability(
+                courier_id,
+                source="login",
+            )
+        )
+
+
+def _notify_courier_availability(courier_id, *, source):
+    from .models import User
+    from notifications.services import create_admin_courier_availability_notification
+
+    courier = User.objects.filter(
+        pk=courier_id,
+        role=User.Role.REPRESENTATIVE,
+    ).first()
+    if courier is None:
+        return
+
+    create_admin_courier_availability_notification(
+        courier,
+        is_available=True,
+        source=source,
+    )
 
 
 def otp_cooldown_error_response(exc):
@@ -109,40 +138,6 @@ def otp_cooldown_error_response(exc):
             "retry_after_seconds": exc.retry_after_seconds,
         },
         status=status.HTTP_429_TOO_MANY_REQUESTS,
-    )
-
-
-def soft_delete_user(user, *, notify_disabled=False):
-    was_active = user.is_active
-    deleted_at = timezone.now()
-    deleted_marker = f"deleted-{user.pk}-{int(deleted_at.timestamp())}"
-    user.deleted_original_email = user.email
-    user.deleted_original_username = user.username
-    user.deleted_original_phone = user.phone
-    user.deleted_original_is_active = user.is_active
-    user.is_active = False
-    user.deleted_at = deleted_at
-    user.email = f"{deleted_marker}@deleted.local"
-    user.username = deleted_marker
-    user.phone = deleted_marker
-    user.save(
-        update_fields=[
-            "is_active",
-            "deleted_at",
-            "email",
-            "username",
-            "phone",
-            "deleted_original_email",
-            "deleted_original_username",
-            "deleted_original_phone",
-            "deleted_original_is_active",
-            "updated_at",
-        ]
-    )
-    handle_client_deactivation(
-        user,
-        was_active=was_active,
-        notify_disabled=notify_disabled,
     )
 
 
@@ -226,6 +221,7 @@ class VerifyRegistrationOTPView(APIView):
 
         user.is_active = True
         user.save(update_fields=["is_active"])
+        update_successful_login(user)
         clear_otp_cooldown(user.email, OneTimePassword.Purpose.REGISTRATION)
         return Response(token_payload(user, request=request), status=status.HTTP_200_OK)
 
@@ -345,25 +341,6 @@ class MeView(APIView):
         user = serializer.save()
         return Response(UserSerializer(user, context={"request": request}).data)
 
-    @transaction.atomic
-    def delete(self, request):
-        serializer = DeleteAccountSerializer(
-            data=request.data,
-            context={"request": request},
-        )
-        serializer.is_valid(raise_exception=True)
-        user = request.user
-        BlacklistedToken.objects.bulk_create(
-            [
-                BlacklistedToken(token=token)
-                for token in OutstandingToken.objects.filter(user=user)
-            ],
-            ignore_conflicts=True,
-        )
-        soft_delete_user(user, notify_disabled=False)
-        return Response({"detail": "Account deleted."}, status=status.HTTP_200_OK)
-
-
 class ClientProfileView(APIView):
     permission_classes = [IsAuthenticated, IsClientRole]
     parser_classes = [JSONParser, FormParser, MultiPartParser]
@@ -462,84 +439,6 @@ class AdminUserDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
         return Response(AdminUserDetailSerializer(user).data)
-
-    @transaction.atomic
-    def delete(self, request, user_id):
-        user = self.get_user(user_id, for_update=True)
-        if user.role == User.Role.REPRESENTATIVE and active_assigned_orders_for_user(user).exists():
-            return Response(
-                {"detail": "Reassign active orders before deleting this courier."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        soft_delete_user(user, notify_disabled=True)
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-
-class AdminUserRestoreView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminRole]
-
-    @transaction.atomic
-    def post(self, request, user_id):
-        user = get_object_or_404(
-            User.objects.filter(deleted_at__isnull=False).select_related(
-                "market_region_service_city"
-            ),
-            id=user_id,
-        )
-        original_email = user.deleted_original_email or request.data.get("email")
-        original_username = user.deleted_original_username or request.data.get(
-            "username"
-        )
-        original_phone = user.deleted_original_phone or request.data.get("phone")
-        original_is_active = user.deleted_original_is_active
-        if original_is_active is None:
-            original_is_active = request.data.get("is_active", False)
-        if not all([original_email, original_username, original_phone]):
-            return Response(
-                {"detail": "Original account details are unavailable for restoration."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        conflicts = User.objects.filter(deleted_at__isnull=True).exclude(pk=user.pk)
-        if conflicts.filter(email__iexact=original_email).exists():
-            return Response(
-                {"email": "An active account already uses this email."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if conflicts.filter(username__iexact=original_username).exists():
-            return Response(
-                {"username": "An active account already uses this username."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if conflicts.filter(phone=original_phone).exists():
-            return Response(
-                {"phone": "An active account already uses this phone."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        user.deleted_at = None
-        user.email = original_email
-        user.username = original_username
-        user.phone = original_phone
-        user.is_active = bool(original_is_active)
-        user.deleted_original_email = None
-        user.deleted_original_username = None
-        user.deleted_original_phone = None
-        user.deleted_original_is_active = None
-        user.save(
-            update_fields=[
-                "deleted_at",
-                "email",
-                "username",
-                "phone",
-                "is_active",
-                "deleted_original_email",
-                "deleted_original_username",
-                "deleted_original_phone",
-                "deleted_original_is_active",
-                "updated_at",
-            ]
-        )
-        return Response(AdminUserDetailSerializer(user).data)
-
 
 class CheckUsernameView(APIView):
     permission_classes = [AllowAny]

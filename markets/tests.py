@@ -1069,6 +1069,64 @@ class HomeAPITests(APITestCase):
             status.HTTP_404_NOT_FOUND,
         )
 
+    def test_admin_market_rejects_general_scope_with_service_city(self):
+        classification = MarketClassification.objects.create(name="General only")
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{HOME_BASE}/markets/",
+            {
+                "classification_id": classification.id,
+                "name": "Invalid general market",
+                "scope": Market.Scope.GENERAL,
+                "service_city_ids": [self.service_city.id],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("service_city_ids", response.data)
+
+    def test_admin_market_rejects_multiple_service_cities(self):
+        classification = MarketClassification.objects.create(name="One city only")
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{HOME_BASE}/markets/",
+            {
+                "classification_id": classification.id,
+                "name": "Invalid multi-city market",
+                "scope": Market.Scope.SERVICE_CITY,
+                "service_city_ids": [self.service_city.id, self.remote_city.id],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["service_city_ids"][0],
+            "Only one service city may be selected.",
+        )
+
+    def test_switching_market_to_general_clears_service_cities(self):
+        classification = MarketClassification.objects.create(name="Switch scope")
+        market = Market.objects.create(
+            classification=classification,
+            name="City market",
+            scope=Market.Scope.SERVICE_CITY,
+        )
+        market.service_cities.set([self.service_city])
+        self.authenticate(self.admin)
+
+        response = self.client.patch(
+            f"{HOME_BASE}/markets/{market.id}/",
+            {"scope": Market.Scope.GENERAL},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["service_cities"], [])
+
     def test_classification_summary_requires_authentication(self):
         response = self.client.get(f"{HOME_BASE}/classifications/")
 

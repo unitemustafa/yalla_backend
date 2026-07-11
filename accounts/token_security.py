@@ -22,14 +22,21 @@ def token_user(validated_token):
 
 def validate_client_token_state(validated_token, user=None):
     user = user or token_user(validated_token)
-    if user.role != User.Role.CLIENT:
+    if user.role not in {User.Role.CLIENT, User.Role.REPRESENTATIVE}:
         return user
-    if not user.is_active or user.deleted_at is not None:
+    if user.role == User.Role.CLIENT and (
+        user.deleted_at is not None or not user.is_active
+    ):
         raise AccountInactive()
     try:
         token_version = int(validated_token.get("auth_token_version", 0))
     except (TypeError, ValueError) as exc:
         raise AuthenticationFailed("Token is invalid.", code="token_not_valid") from exc
     if token_version != user.auth_token_version:
+        if user.role == User.Role.REPRESENTATIVE:
+            raise AuthenticationFailed(
+                "Password changed. Please login again.",
+                code="password_changed",
+            )
         raise AuthenticationFailed("Token is invalid.", code="token_not_valid")
     return user

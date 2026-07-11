@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 
 from accounts.views import IsAdminRole
-from accounts.models import CourierProfile
+from accounts.models import CourierProfile, User
 from orders.models import Order
 
 from .models import Address, DeliveryArea, ServiceCity
@@ -46,10 +46,18 @@ def service_city_relation_counts(city):
         "delivery_areas": city.delivery_areas.count(),
         "markets": city.markets.distinct().count(),
         "offers": city.offers.distinct().count(),
-        "couriers": CourierProfile.objects.filter(service_city=city).count(),
-        "addresses": Address.objects.filter(service_city=city).count(),
+        "couriers": CourierProfile.objects.filter(
+            service_city=city,
+            user__deleted_at__isnull=True,
+        ).count(),
+        "addresses": Address.objects.filter(
+            service_city=city,
+            user__deleted_at__isnull=True,
+        ).count(),
         "orders": Order.objects.filter(service_city=city).count(),
-        "users": city.market_region_users.count(),
+        "users": city.market_region_users.filter(
+            deleted_at__isnull=True,
+        ).count(),
     }
     return {key: value for key, value in checks.items() if value}
 
@@ -96,6 +104,25 @@ class ServiceCityDetailView(
         city = generics.get_object_or_404(
             ServiceCity.objects.select_for_update(),
             pk=kwargs[self.lookup_url_kwarg],
+        )
+        # Soft-deleted accounts are not active city dependencies. Remove their
+        # dependent data before deleting the city because its foreign keys
+        # intentionally protect a city while stale records still reference it.
+        CourierProfile.objects.filter(
+            service_city=city,
+            user__deleted_at__isnull=False,
+        ).delete()
+        Address.objects.filter(
+            service_city=city,
+            user__deleted_at__isnull=False,
+        ).delete()
+        User.objects.filter(
+            market_region_service_city=city,
+            deleted_at__isnull=False,
+        ).update(
+            market_region_mode=None,
+            market_region_service_city=None,
+            market_region_updated_at=None,
         )
         relations = service_city_relation_counts(city)
         if relations:
@@ -156,6 +183,9 @@ class DeliveryAreaDetailView(
     order_error_message = (
         "لا يمكن حذف منطقة التوصيل لوجود طلبات مرتبطة بها."
     )
+    address_error_message = (
+        "لا يمكن حذف منطقة التوصيل لوجود عناوين محفوظة مرتبطة بها."
+    )
 
     def get_queryset(self):
         queryset = DeliveryArea.objects.select_related("service_city")
@@ -165,6 +195,17 @@ class DeliveryAreaDetailView(
                 service_city__is_active=True,
             )
         return queryset
+
+    def perform_update(self, serializer):
+        was_active = serializer.instance.is_active
+        area = serializer.save()
+        if was_active != area.is_active:
+            transaction.on_commit(
+                lambda area_id=area.id, is_active=area.is_active: _send_delivery_area_status_change(
+                    area_id,
+                    is_active,
+                )
+            )
 
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
@@ -189,14 +230,25 @@ class DeliveryAreaDetailView(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        if Address.objects.filter(delivery_area=area).exists():
+            return Response(
+                {"detail": self.address_error_message},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         area.markets.clear()
-        Address.objects.filter(delivery_area=area).update(
-            delivery_area=None,
-            delivery_type=Address.DeliveryType.DELIVERY,
-            manual_area=area.name,
-        )
         area.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _send_delivery_area_status_change(area_id, is_active):
+    from notifications.push import send_delivery_area_status_changed_event
+
+    try:
+        send_delivery_area_status_changed_event(area_id, is_active)
+    except Exception:
+        # A refresh when the user reopens the app remains the fallback.
+        pass
 
 
 class DeliveryAreaListView(APIView):

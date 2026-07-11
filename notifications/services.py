@@ -19,6 +19,76 @@ def create_account_disabled_notification(user):
     )
 
 
+def create_account_restored_notification(user):
+    Notification.objects.filter(
+        recipient=user,
+        type=Notification.Type.ACCOUNT_DISABLED,
+    ).delete()
+    return Notification.objects.create(
+        audience=Notification.Audience.CLIENT,
+        type=Notification.Type.ACCOUNT_RESTORED,
+        title="Account restored",
+        message="Your account was restored by the Yalla Market team.",
+        recipient=user,
+        data={"event": "account_restored"},
+    )
+
+
+def create_admin_courier_availability_notification(
+    courier,
+    *,
+    is_available,
+    source,
+):
+    courier_name = courier.get_full_name().strip() or courier.username
+    availability_label = "متاح" if is_available else "غير متاح"
+
+    return Notification.objects.create(
+        audience=Notification.Audience.ADMIN,
+        type=Notification.Type.COURIER_AVAILABILITY_CHANGED,
+        title="تحديث حالة المندوب",
+        message=f"المندوب {courier_name} أصبح {availability_label}.",
+        data={
+            "event": "courier_availability_changed",
+            "courier_id": str(courier.id),
+            "is_available": is_available,
+            "source": source,
+        },
+    )
+
+
+def create_courier_availability_notification(courier, *, is_available, source):
+    availability_label = "متاح" if is_available else "غير متاح"
+
+    return Notification.objects.create(
+        audience=Notification.Audience.COURIER,
+        type=Notification.Type.COURIER_AVAILABILITY_CHANGED,
+        title="تحديث حالة استقبال الطلبات",
+        message=f"تم جعل حالة استقبال الطلبات {availability_label}.",
+        recipient=courier,
+        data={
+            "event": "courier_availability_changed",
+            "courier_id": str(courier.id),
+            "is_available": is_available,
+            "source": source,
+        },
+    )
+
+
+def create_courier_password_changed_notification(courier):
+    return Notification.objects.create(
+        audience=Notification.Audience.COURIER,
+        type=Notification.Type.PASSWORD_CHANGED,
+        title="تم تغيير كلمة المرور",
+        message="تم تغيير كلمة مرور حسابك. سجّل الدخول بكلمة المرور الجديدة.",
+        recipient=courier,
+        data={
+            "event": "password_changed",
+            "action": "login",
+        },
+    )
+
+
 def create_new_order_review_notification(order):
     notification, _ = Notification.objects.get_or_create(
         order=order,

@@ -1,4 +1,5 @@
 import json
+from urllib.parse import urlparse
 
 from django.utils import timezone
 from rest_framework import serializers
@@ -96,6 +97,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
     product_ids = PrimaryKeyListField(
         queryset=Product.objects.all(),
         source="products",
+        required=False,
     )
     products = OfferProductSerializer(many=True, read_only=True)
 
@@ -120,6 +122,10 @@ class AdminOfferSerializer(serializers.ModelSerializer):
             "active_days",
             "use_limits",
             "user_limit",
+            "announcement_url",
+            "announcement_cta_label",
+            "announcement_priority",
+            "announcement_display_seconds",
             "status",
             "created_at",
             "updated_at",
@@ -150,6 +156,32 @@ class AdminOfferSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
+        offer_type = attrs.get("type") or getattr(
+            self.instance,
+            "type",
+            None,
+        )
+        if offer_type == Offer.OfferType.ANNOUNCEMENT:
+            announcement_url = attrs.get(
+                "announcement_url",
+                getattr(self.instance, "announcement_url", ""),
+            ).strip()
+            parsed_url = urlparse(announcement_url)
+            if parsed_url.scheme != "https" or not parsed_url.netloc:
+                raise serializers.ValidationError(
+                    {"announcement_url": "A valid HTTPS URL is required."}
+                )
+            if attrs.get("products"):
+                raise serializers.ValidationError(
+                    {"product_ids": "External announcements cannot include products."}
+                )
+            attrs["announcement_url"] = announcement_url
+            attrs["discount"] = 0
+            attrs["use_limits"] = None
+            attrs["user_limit"] = None
+            attrs["market"] = None
+            return attrs
+
         market = attrs.get("market") or getattr(self.instance, "market", None)
         products = attrs.get("products")
         show_in_general = attrs.get(
@@ -223,6 +255,20 @@ class AdminOfferSerializer(serializers.ModelSerializer):
                 }
             )
 
+        if show_in_general and service_cities_to_check:
+            message = "Choose general visibility or one service city, not both."
+            raise serializers.ValidationError(
+                {
+                    "show_in_general": message,
+                    "service_city_ids": message,
+                }
+            )
+
+        if len(service_cities_to_check) > 1:
+            raise serializers.ValidationError(
+                {"service_city_ids": "Only one service city may be selected."}
+            )
+
         if show_in_general:
             if market.scope != Market.Scope.GENERAL:
                 raise serializers.ValidationError(
@@ -287,7 +333,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
         )
 
     def create(self, validated_data):
-        products = validated_data.pop("products")
+        products = validated_data.pop("products", [])
         service_cities = validated_data.pop("service_cities", [])
         offer = Offer.objects.create(**validated_data)
         offer.products.set(products)
@@ -298,7 +344,9 @@ class AdminOfferSerializer(serializers.ModelSerializer):
         products = validated_data.pop("products", None)
         service_cities = validated_data.pop("service_cities", None)
         instance = super().update(instance, validated_data)
-        if products is not None:
+        if instance.type == Offer.OfferType.ANNOUNCEMENT:
+            instance.products.clear()
+        elif products is not None:
             instance.products.set(products)
         if service_cities is not None:
             instance.service_cities.set(service_cities)

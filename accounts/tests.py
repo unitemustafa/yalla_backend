@@ -323,6 +323,41 @@ class AuthenticationAPITests(APITestCase):
             "تسجيل الدخول هذا مخصص لحسابات المدير فقط.",
         )
 
+    def test_representative_login_marks_courier_available_and_notifies_admins(self):
+        city = ServiceCity.objects.create(name="Courier Login City")
+        representative = self.create_active_user(
+            role=User.Role.REPRESENTATIVE,
+            username="courier_login_status",
+            email="courier-login-status@example.com",
+            phone="+213555000014",
+        )
+        CourierProfile.objects.create(
+            user=representative,
+            vehicle_type="Motorcycle",
+            plate_number="LOGIN-14",
+            service_city=city,
+            is_available=False,
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"{AUTH_BASE}/login/representative/",
+                {"email": representative.email, "password": self.password},
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        representative.refresh_from_db()
+        representative.courier_profile.refresh_from_db()
+        self.assertIsNotNone(representative.last_login)
+        self.assertTrue(representative.courier_profile.is_available)
+        notification = Notification.objects.get(
+            audience=Notification.Audience.ADMIN,
+            type=Notification.Type.COURIER_AVAILABILITY_CHANGED,
+        )
+        self.assertEqual(notification.data["courier_id"], str(representative.id))
+        self.assertTrue(notification.data["is_available"])
+        self.assertEqual(notification.data["source"], "login")
+
     def test_admin_login_remember_true_refresh_exp_is_about_7_days(self):
         admin = self.create_active_user(
             role=User.Role.ADMIN,
@@ -541,8 +576,6 @@ class AuthenticationAPITests(APITestCase):
                 "role": User.Role.CLIENT,
             },
         )
-        delete_response = self.client.delete(f"{AUTH_BASE}/users/{user_id}/")
-        deleted_detail_response = self.client.get(f"{AUTH_BASE}/users/{user_id}/")
 
         self.assertEqual(list_response.status_code, status.HTTP_200_OK)
         self.assertIn(
@@ -554,43 +587,6 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(update_response.status_code, status.HTTP_200_OK)
         self.assertEqual(update_response.data["first_name"], "Updated")
         self.assertEqual(update_response.data["role"], User.Role.CLIENT)
-        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertEqual(
-            deleted_detail_response.status_code,
-            status.HTTP_404_NOT_FOUND,
-        )
-        self.assertIsNotNone(User.objects.get(pk=user_id).deleted_at)
-
-    def test_admin_can_restore_a_soft_deleted_representative(self):
-        admin = self.create_active_user(
-            role=User.Role.ADMIN,
-            username="restore_courier_admin",
-            email="restore-courier-admin@example.com",
-            phone="+213555000130",
-        )
-        representative = self.create_active_user(
-            role=User.Role.REPRESENTATIVE,
-            username="restore_courier",
-            email="restore-courier@example.com",
-            phone="+213555000131",
-        )
-        refresh = RefreshToken.for_user(admin)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
-
-        delete_response = self.client.delete(f"{AUTH_BASE}/users/{representative.id}/")
-        restore_response = self.client.post(
-            f"{AUTH_BASE}/users/{representative.id}/restore/"
-        )
-
-        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertEqual(restore_response.status_code, status.HTTP_200_OK)
-        representative.refresh_from_db()
-        self.assertIsNone(representative.deleted_at)
-        self.assertTrue(representative.is_active)
-        self.assertEqual(representative.username, "restore_courier")
-        self.assertEqual(representative.email, "restore-courier@example.com")
-        self.assertEqual(representative.phone, "+213555000131")
-
     def test_admin_detail_for_client_returns_customer_stats_and_recent_orders(self):
         admin = self.create_active_user(
             role=User.Role.ADMIN,
@@ -739,6 +735,8 @@ class AuthenticationAPITests(APITestCase):
             email="patch-detail-client@example.com",
             phone="+213555000124",
         )
+        client.last_login = timezone.now()
+        client.save(update_fields=["last_login"])
         market = self.create_order_market()
         order = self.create_customer_order(
             client,
@@ -924,6 +922,8 @@ class AuthenticationAPITests(APITestCase):
             email="locking-client@example.com",
             phone="+213555000145",
         )
+        client.last_login = timezone.now()
+        client.save(update_fields=["last_login"])
         self.assertIsNone(client.market_region_service_city_id)
         token = RefreshToken.for_user(admin).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
@@ -952,7 +952,7 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(client.is_active)
         self.assertEqual(client.auth_token_version, 1)
-        self.assertTrue(
+        self.assertFalse(
             Notification.objects.filter(
                 recipient=client,
                 type=Notification.Type.ACCOUNT_DISABLED,
@@ -973,6 +973,8 @@ class AuthenticationAPITests(APITestCase):
             email="deactivation-client@example.com",
             phone="+213555000041",
         )
+        client.last_login = timezone.now()
+        client.save(update_fields=["last_login"])
         token = RefreshToken.for_user(admin).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
@@ -987,7 +989,7 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response["Content-Type"], "application/json")
         self.assertEqual(client.auth_token_version, 1)
-        self.assertTrue(
+        self.assertFalse(
             Notification.objects.filter(
                 recipient=client,
                 type=Notification.Type.ACCOUNT_DISABLED,
@@ -1009,11 +1011,11 @@ class AuthenticationAPITests(APITestCase):
                 recipient=client,
                 type=Notification.Type.ACCOUNT_DISABLED,
             ).count(),
-            1,
+            0,
         )
         dispatch.assert_not_called()
 
-    def test_admin_can_reactivate_an_inactive_client_without_notification(self):
+    def test_admin_reactivation_creates_a_restored_account_notification(self):
         admin = self.create_active_user(
             role=User.Role.ADMIN,
             username="reactivation_admin",
@@ -1027,7 +1029,8 @@ class AuthenticationAPITests(APITestCase):
         )
         client.is_active = False
         client.auth_token_version = 4
-        client.save(update_fields=["is_active", "auth_token_version"])
+        client.last_login = timezone.now()
+        client.save(update_fields=["is_active", "auth_token_version", "last_login"])
         token = RefreshToken.for_user(admin).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
@@ -1042,12 +1045,73 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(response["Content-Type"], "application/json")
         self.assertTrue(client.is_active)
         self.assertEqual(client.auth_token_version, 4)
-        self.assertFalse(
+        self.assertTrue(
             Notification.objects.filter(
                 recipient=client,
-                type=Notification.Type.ACCOUNT_DISABLED,
+                type=Notification.Type.ACCOUNT_RESTORED,
             ).exists()
         )
+
+    def test_admin_cannot_change_status_before_client_signs_in(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="fresh-client-admin",
+            email="fresh-client-admin@example.com",
+            phone="+213555000146",
+        )
+        client = self.create_active_user(
+            username="fresh-client",
+            email="fresh-client@example.com",
+            phone="+213555000147",
+        )
+        token = RefreshToken.for_user(admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/users/{client.id}/",
+            {"is_active": False},
+            format="json",
+        )
+
+        client.refresh_from_db()
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("is_active", response.data)
+        self.assertTrue(client.is_active)
+
+    def test_admin_cannot_change_courier_availability_before_sign_in(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="fresh-courier-admin",
+            email="fresh-courier-admin@example.com",
+            phone="+213555000148",
+        )
+        courier = self.create_active_user(
+            role=User.Role.REPRESENTATIVE,
+            username="fresh-courier",
+            email="fresh-courier@example.com",
+            phone="+213555000149",
+        )
+        city = ServiceCity.objects.create(name="Fresh courier city")
+        CourierProfile.objects.create(
+            user=courier,
+            vehicle_type="Motorcycle",
+            plate_number="FRESH-1",
+            service_city=city,
+            is_available=True,
+        )
+        token = RefreshToken.for_user(admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/users/{courier.id}/",
+            {"courier_profile": {"is_available": False}},
+            format="json",
+        )
+
+        courier.courier_profile.refresh_from_db()
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("is_active", response.data)
+        self.assertTrue(courier.courier_profile.is_available)
 
     def test_admin_profile_update_does_not_run_deactivation_logic(self):
         admin = self.create_active_user(
@@ -1096,6 +1160,8 @@ class AuthenticationAPITests(APITestCase):
             email="firebase-failure-client@example.com",
             phone="+213555000135",
         )
+        client.last_login = timezone.now()
+        client.save(update_fields=["last_login"])
         ClientDevice.objects.create(
             user=client,
             token="firebase-config-failure-token",
@@ -1123,7 +1189,7 @@ class AuthenticationAPITests(APITestCase):
             BlacklistedToken.objects.filter(token__jti=client_refresh["jti"]).exists()
         )
         self.assertFalse(device.is_active)
-        self.assertTrue(
+        self.assertFalse(
             Notification.objects.filter(
                 recipient=client,
                 type=Notification.Type.ACCOUNT_DISABLED,
@@ -1149,6 +1215,8 @@ class AuthenticationAPITests(APITestCase):
             email="firebase-send-failure-client@example.com",
             phone="+213555000137",
         )
+        client.last_login = timezone.now()
+        client.save(update_fields=["last_login"])
         ClientDevice.objects.create(
             user=client,
             token="firebase-send-failure-token",
@@ -1193,6 +1261,8 @@ class AuthenticationAPITests(APITestCase):
             email="no-device-client@example.com",
             phone="+213555000139",
         )
+        client.last_login = timezone.now()
+        client.save(update_fields=["last_login"])
         token = RefreshToken.for_user(admin).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
@@ -1380,6 +1450,8 @@ class AuthenticationAPITests(APITestCase):
             max_active_orders=3,
             is_available=True,
         )
+        representative.last_login = timezone.now()
+        representative.save(update_fields=["last_login"])
         city.is_active = False
         city.save(update_fields=["is_active"])
         admin = self.create_active_user(
@@ -1391,15 +1463,23 @@ class AuthenticationAPITests(APITestCase):
         refresh = RefreshToken.for_user(admin)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
-        response = self.client.patch(
-            f"{AUTH_BASE}/users/{representative.id}/",
-            {"courier_profile": {"is_available": False}},
-            format="json",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                f"{AUTH_BASE}/users/{representative.id}/",
+                {"courier_profile": {"is_available": False}},
+                format="json",
+            )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data["courier_profile"]["is_available"])
         self.assertEqual(response.data["courier_profile"]["service_city"], city.id)
+        notification = Notification.objects.get(
+            audience=Notification.Audience.COURIER,
+            type=Notification.Type.COURIER_AVAILABILITY_CHANGED,
+            recipient=representative,
+        )
+        self.assertFalse(notification.data["is_available"])
+        self.assertEqual(notification.data["source"], "admin")
 
     def test_admin_representative_area_payload_is_ignored_and_cleared(self):
         city = ServiceCity.objects.create(name="Courier City A")
@@ -1480,6 +1560,62 @@ class AuthenticationAPITests(APITestCase):
         representative.courier_profile.refresh_from_db()
         self.assertFalse(representative.courier_profile.is_available)
         self.assertTrue(representative.check_password("NewPassword1!"))
+
+    def test_admin_password_change_logs_out_courier_and_creates_notification(self):
+        city = ServiceCity.objects.create(name="Password Change Courier City")
+        representative = self.create_active_user(
+            role=User.Role.REPRESENTATIVE,
+            username="password_change_courier",
+            email="password-change-courier@example.com",
+            phone="+213555000151",
+        )
+        CourierProfile.objects.create(
+            user=representative,
+            vehicle_type="Motorcycle",
+            plate_number="PWD-151",
+            service_city=city,
+            is_available=True,
+        )
+        representative_refresh = RefreshToken.for_user(representative)
+        representative_refresh["auth_token_version"] = representative.auth_token_version
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="password_change_admin",
+            email="password-change-admin@example.com",
+            phone="+213555000152",
+        )
+        admin_token = RefreshToken.for_user(admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {admin_token}")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                f"{AUTH_BASE}/users/{representative.id}/",
+                {"password": "NewPassword1!"},
+                format="json",
+            )
+
+        representative.refresh_from_db()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(representative.auth_token_version, 1)
+        self.assertTrue(representative.check_password("NewPassword1!"))
+        self.assertTrue(
+            Notification.objects.filter(
+                audience=Notification.Audience.COURIER,
+                type=Notification.Type.PASSWORD_CHANGED,
+                recipient=representative,
+                data__event="password_changed",
+            ).exists()
+        )
+
+        self.client.credentials()
+        refresh_response = self.client.post(
+            f"{AUTH_BASE}/refresh/",
+            {"refreshToken": str(representative_refresh)},
+            format="json",
+        )
+
+        self.assertEqual(refresh_response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn("Password changed", str(refresh_response.data))
 
     def test_admin_update_keeps_delivery_area_null_and_preserves_active_flags(self):
         city = ServiceCity.objects.create(name="Null Area City")
@@ -1646,73 +1782,6 @@ class AuthenticationAPITests(APITestCase):
         self.assertTrue(username_response.data["available"])
         self.assertTrue(email_response.data["available"])
         self.assertTrue(phone_response.data["available"])
-
-    def test_representative_delete_uses_non_terminal_assigned_order_rule(self):
-        admin = self.create_active_user(
-            role=User.Role.ADMIN,
-            username="delete_rule_admin",
-            email="delete-rule-admin@example.com",
-            phone="+213555000061",
-        )
-        customer = self.create_active_user(
-            username="delete_rule_customer",
-            email="delete-rule-customer@example.com",
-            phone="+213555000062",
-        )
-        market = self.create_order_market()
-        refresh = RefreshToken.for_user(admin)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
-
-        for index, order_status in enumerate((
-            Order.Status.ASSIGNED,
-            Order.Status.PICKED_UP,
-        ), start=1):
-            representative = self.create_active_user(
-                role=User.Role.REPRESENTATIVE,
-                username=f"blocked_{order_status}",
-                email=f"blocked-{order_status}@example.com",
-                phone=f"+2135551{index:05d}",
-            )
-            order = self.create_customer_order(
-                customer,
-                market,
-                order_status,
-                Decimal("10.00"),
-                timezone.now(),
-            )
-            order.assigned_representative = representative
-            order.save(update_fields=["assigned_representative"])
-
-            response = self.client.delete(f"{AUTH_BASE}/users/{representative.id}/")
-            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-            self.assertEqual(
-                response.data["detail"],
-                "Reassign active orders before deleting this courier.",
-            )
-
-        for index, order_status in enumerate((
-            Order.Status.DELIVERED,
-            Order.Status.CANCELLED,
-            Order.Status.FAILED_DELIVERY,
-        ), start=1):
-            representative = self.create_active_user(
-                role=User.Role.REPRESENTATIVE,
-                username=f"allowed_{order_status}",
-                email=f"allowed-{order_status}@example.com",
-                phone=f"+2135552{index:05d}",
-            )
-            order = self.create_customer_order(
-                customer,
-                market,
-                order_status,
-                Decimal("10.00"),
-                timezone.now(),
-            )
-            order.assigned_representative = representative
-            order.save(update_fields=["assigned_representative"])
-
-            response = self.client.delete(f"{AUTH_BASE}/users/{representative.id}/")
-            self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
 
     def test_clear_courier_delivery_areas_migration_behavior(self):
         city = ServiceCity.objects.create(name="Migration City")
@@ -2236,42 +2305,21 @@ class AuthenticationAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_me_delete_requires_password_and_deletes_account(self):
+    def test_me_delete_is_not_available(self):
         user = self.create_active_user()
         refresh = RefreshToken.for_user(user)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
-
-        invalid_response = self.client.delete(
-            f"{AUTH_BASE}/me",
-            {"password": "wrong"},
-            format="json",
-        )
-        self.assertEqual(invalid_response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertTrue(User.objects.filter(pk=user.pk).exists())
 
         response = self.client.delete(
             f"{AUTH_BASE}/me",
             {"password": self.password},
             format="json",
         )
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
         self.assertTrue(User.objects.filter(pk=user.pk).exists())
         user.refresh_from_db()
-        self.assertFalse(user.is_active)
-        self.assertIsNotNone(user.deleted_at)
-        self.assertNotEqual(user.email, self.email)
-        self.assertTrue(user.email.endswith("@deleted.local"))
-        self.assertTrue(user.username.startswith("deleted-"))
-        self.assertTrue(user.phone.startswith("deleted-"))
-        self.assertTrue(BlacklistedToken.objects.filter(token__jti=refresh["jti"]).exists())
-
-        self.client.credentials()
-        email_response = self.client.get(
-            f"{AUTH_BASE}/check-email",
-            {"email": self.email},
-        )
-        self.assertTrue(email_response.data["available"])
-        self.assertFalse(email_response.data["registered"])
+        self.assertTrue(user.is_active)
+        self.assertIsNone(user.deleted_at)
 
     def test_availability_checks(self):
         self.create_active_user()

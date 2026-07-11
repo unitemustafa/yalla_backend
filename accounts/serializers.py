@@ -7,6 +7,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from django.db.models import Count, Max, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -412,7 +413,7 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
         if user is None or not user.check_password(attrs["password"]):
             raise AuthenticationFailed("Invalid email or password.")
         expected_role = self.context.get("expected_role")
-        if not user.is_active:
+        if user.deleted_at is not None or not user.is_active:
             if user.role == User.Role.CLIENT or expected_role == User.Role.CLIENT:
                 raise AccountInactive()
             raise serializers.ValidationError("Account is inactive.")
@@ -442,10 +443,12 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             return user
 
         candidates = phone_candidates(identifier)
-        if not candidates:
-            return None
+        if candidates:
+            user = base_queryset.filter(phone__in=candidates).first()
+            if user is not None:
+                return user
 
-        return base_queryset.filter(phone__in=candidates).first()
+        return None
 
     def _representative_wrong_role_error(self, user):
         if user.role == User.Role.ADMIN:
@@ -817,6 +820,36 @@ class AdminUserWriteSerializer(
             raise serializers.ValidationError(
                 {"is_active": "Reassign active orders before disabling this courier."}
             )
+        if (
+            self.instance is not None
+            and self.instance.role in {User.Role.CLIENT, User.Role.REPRESENTATIVE}
+            and self.instance.last_login is None
+        ):
+            current_availability = None
+            if self.instance.role == User.Role.REPRESENTATIVE:
+                try:
+                    current_availability = self.instance.courier_profile.is_available
+                except CourierProfile.DoesNotExist:
+                    pass
+            is_active_changed = (
+                "is_active" in attrs
+                and attrs["is_active"] != self.instance.is_active
+            )
+            is_available_changed = (
+                self.instance.role == User.Role.REPRESENTATIVE
+                and profile_data is not None
+                and "is_available" in profile_data
+                and profile_data["is_available"]
+                != current_availability
+            )
+            if is_active_changed or is_available_changed:
+                raise serializers.ValidationError(
+                    {
+                        "is_active": (
+                            "The account must sign in once before its status can be changed."
+                        )
+                    }
+                )
         password = attrs.get("password")
         if self.instance is not None and password and self.instance.check_password(password):
             raise serializers.ValidationError(
@@ -850,10 +883,14 @@ class AdminUserWriteSerializer(
         is_deactivation = (
             was_active and validated_data.get("is_active") is False
         )
+        is_reactivation = (
+            not was_active and validated_data.get("is_active") is True
+        )
         profile_data = validated_data.pop("courier_profile", None)
         avatar_image = validated_data.pop("avatar_image", None)
         remove_avatar = validated_data.pop("remove_avatar", False)
         password = validated_data.pop("password", None)
+        password_changed = password is not None
         update_fields = list(validated_data.keys())
         if (
             "username" in validated_data
@@ -874,7 +911,8 @@ class AdminUserWriteSerializer(
             update_fields.extend(["avatar_image", "avatar_url"])
         if password is not None:
             instance.set_password(password)
-            update_fields.append("password")
+            instance.auth_token_version += 1
+            update_fields.extend(["password", "auth_token_version"])
         if update_fields:
             instance.save(update_fields=[*update_fields, "updated_at"])
         if (
@@ -891,26 +929,71 @@ class AdminUserWriteSerializer(
                 user=instance,
                 defaults=profile_data,
             )
+            was_available = profile.is_available
             for field, value in profile_data.items():
                 setattr(profile, field, value)
             profile.save()
             instance._state.fields_cache.pop("courier_profile", None)
+            if (
+                "is_available" in profile_data
+                and profile.is_available != was_available
+            ):
+                transaction.on_commit(
+                    lambda courier_id=instance.id, is_available=profile.is_available: _notify_courier_availability_change(
+                        courier_id,
+                        is_available,
+                    )
+                )
 
         if is_deactivation:
             from .deactivation import handle_client_deactivation
 
-            handle_client_deactivation(instance, was_active=was_active)
+            handle_client_deactivation(
+                instance,
+                was_active=was_active,
+                notify_disabled=False,
+            )
+        elif is_reactivation and instance.role == instance.Role.CLIENT:
+            from notifications.services import create_account_restored_notification
+
+            create_account_restored_notification(instance)
+        if password_changed and instance.role == instance.Role.REPRESENTATIVE:
+            transaction.on_commit(
+                lambda courier_id=instance.id: _notify_courier_password_changed(
+                    courier_id,
+                )
+            )
         return instance
 
 
-class DeleteAccountSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
-    password = serializers.CharField(write_only=True, trim_whitespace=False)
+def _notify_courier_availability_change(courier_id, is_available):
+    from notifications.services import create_courier_availability_notification
 
-    def validate_password(self, value):
-        user = self.context["request"].user
-        if not user.check_password(value):
-            raise serializers.ValidationError("Invalid password.")
-        return value
+    courier = User.objects.filter(
+        pk=courier_id,
+        role=User.Role.REPRESENTATIVE,
+    ).first()
+    if courier is None:
+        return
+
+    create_courier_availability_notification(
+        courier,
+        is_available=is_available,
+        source="admin",
+    )
+
+
+def _notify_courier_password_changed(courier_id):
+    from notifications.services import create_courier_password_changed_notification
+
+    courier = User.objects.filter(
+        pk=courier_id,
+        role=User.Role.REPRESENTATIVE,
+    ).first()
+    if courier is None:
+        return
+
+    create_courier_password_changed_notification(courier)
 
 
 class EmailTokenRefreshSerializer(

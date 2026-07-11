@@ -182,3 +182,22 @@ def send_account_disabled_event(user_id):
             is_active=False,
             updated_at=timezone.now(),
         )
+
+
+def send_delivery_area_status_changed_event(area_id, is_active):
+    devices = list(
+        ClientDevice.objects.filter(
+            user__addresses__delivery_area_id=area_id,
+            is_active=True,
+        )
+        .distinct()
+        .values_list("token", flat=True)
+    )
+    _send_tokens(
+        devices,
+        {
+            "event": "delivery_area_status_changed",
+            "area_id": str(area_id),
+            "is_active": str(bool(is_active)).lower(),
+        },
+    )
