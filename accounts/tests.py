@@ -20,7 +20,10 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
+from rest_framework_simplejwt.token_blacklist.models import (
+    BlacklistedToken,
+    OutstandingToken,
+)
 from locations.models import DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
 from notifications.models import ClientDevice, Notification
@@ -1015,7 +1018,11 @@ class AuthenticationAPITests(APITestCase):
         )
         dispatch.assert_not_called()
 
-    def test_admin_reactivation_creates_a_restored_account_notification(self):
+    @patch("notifications.push.send_account_restored_push")
+    def test_admin_reactivation_creates_and_dispatches_restored_notification(
+        self,
+        send_restored_push,
+    ):
         admin = self.create_active_user(
             role=User.Role.ADMIN,
             username="reactivation_admin",
@@ -1034,23 +1041,78 @@ class AuthenticationAPITests(APITestCase):
         token = RefreshToken.for_user(admin).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
-        response = self.client.patch(
-            f"{AUTH_BASE}/users/{client.id}/",
-            {"is_active": True},
-            format="json",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                f"{AUTH_BASE}/users/{client.id}/",
+                {"is_active": True},
+                format="json",
+            )
 
         client.refresh_from_db()
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response["Content-Type"], "application/json")
         self.assertTrue(client.is_active)
         self.assertEqual(client.auth_token_version, 4)
+        notification = Notification.objects.get(
+            recipient=client,
+            type=Notification.Type.ACCOUNT_RESTORED,
+        )
+        self.assertEqual(notification.title, "تم استعادة حسابك")
+        self.assertEqual(
+            notification.message,
+            "تم استعادة حسابك بواسطة فريق دعم يلا ماركت.",
+        )
+        self.assertEqual(
+            notification.data,
+            {"event": "account_restored", "route": "login"},
+        )
+        send_restored_push.assert_called_once_with(notification.id)
+
+    @patch(
+        "notifications.push.send_account_restored_push",
+        side_effect=RuntimeError("temporary Firebase failure"),
+    )
+    def test_firebase_failure_does_not_fail_account_reactivation(
+        self,
+        send_restored_push,
+    ):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="reactivation_failure_admin",
+            email="reactivation-failure-admin@example.com",
+            phone="+213555000132",
+        )
+        client = self.create_active_user(
+            username="reactivation_failure_client",
+            email="reactivation-failure-client@example.com",
+            phone="+213555000133",
+        )
+        client.is_active = False
+        client.last_login = timezone.now()
+        client.save(update_fields=["is_active", "last_login"])
+        token = RefreshToken.for_user(admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        with (
+            self.assertLogs("notifications.services", level="ERROR"),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = self.client.patch(
+                f"{AUTH_BASE}/users/{client.id}/",
+                {"is_active": True},
+                format="json",
+            )
+
+        client.refresh_from_db()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(client.is_active)
         self.assertTrue(
             Notification.objects.filter(
                 recipient=client,
                 type=Notification.Type.ACCOUNT_RESTORED,
             ).exists()
         )
+        send_restored_push.assert_called_once()
 
     def test_admin_cannot_change_status_before_client_signs_in(self):
         admin = self.create_active_user(
@@ -1188,7 +1250,7 @@ class AuthenticationAPITests(APITestCase):
         self.assertTrue(
             BlacklistedToken.objects.filter(token__jti=client_refresh["jti"]).exists()
         )
-        self.assertFalse(device.is_active)
+        self.assertTrue(device.is_active)
         self.assertFalse(
             Notification.objects.filter(
                 recipient=client,
@@ -2570,6 +2632,53 @@ class AuthenticationAPITests(APITestCase):
             },
         )
         self.assertEqual(reused_otp_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_reset_password_blacklists_only_the_users_outstanding_tokens(self):
+        user = self.create_active_user()
+        other_user = self.create_active_user(
+            username="other-reset-user",
+            email="other-reset-user@example.com",
+            phone="+213555000099",
+        )
+        RefreshToken.for_user(user)
+        RefreshToken.for_user(user)
+        RefreshToken.for_user(other_user)
+        user_token_ids = set(
+            OutstandingToken.objects.filter(user=user).values_list("id", flat=True)
+        )
+        other_token_ids = set(
+            OutstandingToken.objects.filter(user=other_user).values_list(
+                "id",
+                flat=True,
+            )
+        )
+        forgot_response = self.client.post(
+            f"{AUTH_BASE}/forgot-password",
+            {"email": user.email},
+        )
+
+        response = self.client.post(
+            f"{AUTH_BASE}/reset-password",
+            {
+                "email": user.email,
+                "otp": forgot_response.data["dev_otp"],
+                "password": self.new_password,
+                "password_confirm": self.new_password,
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            set(
+                BlacklistedToken.objects.filter(
+                    token_id__in=user_token_ids,
+                ).values_list("token_id", flat=True)
+            ),
+            user_token_ids,
+        )
+        self.assertFalse(
+            BlacklistedToken.objects.filter(token_id__in=other_token_ids).exists()
+        )
 
     @override_settings(AUTH_OTP_INCLUDE_IN_RESPONSE=False)
     def test_forgot_password_response_does_not_include_dev_otp_by_default(self):

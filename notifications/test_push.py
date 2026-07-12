@@ -9,7 +9,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
 from . import push
-from .models import ClientDevice
+from .models import ClientDevice, Notification
 
 
 User = get_user_model()
@@ -169,7 +169,7 @@ class FirebaseMessagingInitializationTests(SimpleTestCase):
 
 
 class FCMTokenHandlingTests(TestCase):
-    def test_invalid_fcm_token_is_deactivated_without_affecting_valid_devices(self):
+    def test_only_unregistered_fcm_token_is_deleted(self):
         user = User.objects.create_user(
             username="fcm-token-user",
             email="fcm-token-user@example.com",
@@ -189,7 +189,7 @@ class FCMTokenHandlingTests(TestCase):
             last_seen_at=timezone.now(),
         )
         invalid_token_error = type(
-            "InvalidArgumentError",
+            "UnregisteredError",
             (Exception,),
             {},
         )("invalid registration token")
@@ -203,14 +203,173 @@ class FCMTokenHandlingTests(TestCase):
         )
 
         with patch.object(push, "_messaging_module", return_value=messaging):
-            stale_tokens = push._send_tokens(
+            result = push._send_tokens(
                 [valid_device.token, invalid_device.token],
                 {"event": "account_disabled"},
             )
 
         valid_device.refresh_from_db()
-        invalid_device.refresh_from_db()
-        self.assertEqual(stale_tokens, {invalid_device.token})
+        self.assertEqual(result.successful_tokens, {valid_device.token})
+        self.assertEqual(result.stale_tokens, {invalid_device.token})
+        self.assertEqual(result.failed_tokens, set())
         self.assertTrue(valid_device.is_active)
-        self.assertFalse(invalid_device.is_active)
+        self.assertFalse(ClientDevice.objects.filter(pk=invalid_device.pk).exists())
         messaging.send_each_for_multicast.assert_called_once()
+
+    def test_non_unregistered_fcm_error_keeps_device(self):
+        user = User.objects.create_user(
+            username="invalid-payload-user",
+            email="invalid-payload-user@example.com",
+            phone="+213555900004",
+            password="Password1!",
+        )
+        device = ClientDevice.objects.create(
+            user=user,
+            token="invalid-payload-token",
+            platform=ClientDevice.Platform.ANDROID,
+            last_seen_at=timezone.now(),
+        )
+        messaging = Mock()
+        messaging.MulticastMessage.return_value = object()
+        messaging.send_each_for_multicast.return_value = SimpleNamespace(
+            responses=[
+                SimpleNamespace(
+                    success=False,
+                    exception=type("InvalidArgumentError", (Exception,), {})(),
+                )
+            ]
+        )
+
+        with patch.object(push, "_messaging_module", return_value=messaging):
+            result = push._send_tokens([device.token], {"event": "test"})
+
+        self.assertEqual(result.failed_tokens, {device.token})
+        self.assertTrue(ClientDevice.objects.filter(pk=device.pk).exists())
+
+    def test_account_disabled_keeps_device_active_when_fcm_send_fails(self):
+        user = User.objects.create_user(
+            username="fcm-retry-user",
+            email="fcm-retry-user@example.com",
+            phone="+213555900002",
+            password="Password1!",
+        )
+        device = ClientDevice.objects.create(
+            user=user,
+            token="transient-failure-token",
+            platform=ClientDevice.Platform.ANDROID,
+            last_seen_at=timezone.now(),
+        )
+        messaging = Mock()
+        messaging.MulticastMessage.return_value = object()
+        messaging.send_each_for_multicast.side_effect = RuntimeError(
+            "temporary FCM failure"
+        )
+
+        with patch.object(push, "_messaging_module", return_value=messaging):
+            result = push.send_account_disabled_event(user.id)
+
+        device.refresh_from_db()
+        self.assertEqual(result.successful_tokens, set())
+        self.assertEqual(result.failed_tokens, {device.token})
+        self.assertTrue(device.is_active)
+
+    def test_account_disabled_keeps_device_after_successful_delivery(self):
+        user = User.objects.create_user(
+            username="fcm-delivered-user",
+            email="fcm-delivered-user@example.com",
+            phone="+213555900003",
+            password="Password1!",
+        )
+        device = ClientDevice.objects.create(
+            user=user,
+            token="delivered-token",
+            platform=ClientDevice.Platform.ANDROID,
+            last_seen_at=timezone.now(),
+        )
+        messaging = Mock()
+        messaging.MulticastMessage.return_value = object()
+        messaging.send_each_for_multicast.return_value = SimpleNamespace(
+            responses=[SimpleNamespace(success=True, exception=None)]
+        )
+
+        with patch.object(push, "_messaging_module", return_value=messaging):
+            result = push.send_account_disabled_event(user.id)
+
+        device.refresh_from_db()
+        self.assertEqual(result.successful_tokens, {device.token})
+        self.assertTrue(device.is_active)
+
+    def test_account_restored_push_has_required_payload_and_android_channel(self):
+        user = User.objects.create_user(
+            username="restored-push-user",
+            email="restored-push-user@example.com",
+            phone="+213555900005",
+            password="Password1!",
+        )
+        device = ClientDevice.objects.create(
+            user=user,
+            token="restored-token",
+            platform=ClientDevice.Platform.ANDROID,
+            last_seen_at=timezone.now(),
+        )
+        notification = Notification.objects.create(
+            audience=Notification.Audience.CLIENT,
+            type=Notification.Type.ACCOUNT_RESTORED,
+            title="تم استعادة حسابك",
+            message="تم استعادة حسابك بواسطة فريق دعم يلا ماركت.",
+            recipient=user,
+        )
+        messaging = Mock()
+        messaging.MulticastMessage.return_value = object()
+        messaging.send_each_for_multicast.return_value = SimpleNamespace(
+            responses=[SimpleNamespace(success=True, exception=None)]
+        )
+
+        with patch.object(push, "_messaging_module", return_value=messaging):
+            result = push.send_account_restored_push(notification.id)
+
+        self.assertEqual(result.successful_tokens, {device.token})
+        message_kwargs = messaging.MulticastMessage.call_args.kwargs
+        self.assertEqual(message_kwargs["tokens"], [device.token])
+        self.assertEqual(
+            message_kwargs["data"],
+            {
+                "event": "account_restored",
+                "notification_id": str(notification.id),
+                "route": "login",
+            },
+        )
+        messaging.Notification.assert_called_once_with(
+            title="تم استعادة حسابك",
+            body="تم استعادة حسابك بواسطة فريق دعم يلا ماركت.",
+        )
+        messaging.AndroidConfig.assert_called_once()
+        self.assertEqual(
+            messaging.AndroidConfig.call_args.kwargs["priority"],
+            "high",
+        )
+        messaging.AndroidNotification.assert_called_once_with(
+            channel_id="account_updates",
+        )
+
+    def test_account_restored_push_without_devices_is_successful(self):
+        user = User.objects.create_user(
+            username="restored-no-device-user",
+            email="restored-no-device-user@example.com",
+            phone="+213555900006",
+            password="Password1!",
+        )
+        notification = Notification.objects.create(
+            audience=Notification.Audience.CLIENT,
+            type=Notification.Type.ACCOUNT_RESTORED,
+            title="تم استعادة حسابك",
+            message="تم استعادة حسابك بواسطة فريق دعم يلا ماركت.",
+            recipient=user,
+        )
+
+        with patch.object(push, "_messaging_module") as messaging_module:
+            result = push.send_account_restored_push(notification.id)
+
+        self.assertEqual(result.successful_tokens, set())
+        self.assertEqual(result.failed_tokens, set())
+        messaging_module.assert_not_called()

@@ -106,18 +106,24 @@ class LoginDashboardSnapshotAPITests(APITestCase):
                 "availableCities": 1,
                 "deliveryZones": 1,
                 "branding": {
-                    "brandName": "يلا ماركت",
-                    "brandTagline": "أول أونلاين ماركت في التل الكبير",
-                    "logoUrl": None,
-                    "fontFamily": "Cairo",
-                    "primaryColor": "#155d72",
-                    "subtleColor": "#e7f2f4",
-                    "accentColor": "#f0b64f",
                     "brandName": DashboardSettings._meta.get_field(
                         "brand_name"
                     ).get_default(),
                     "brandTagline": DashboardSettings._meta.get_field(
                         "brand_tagline"
+                    ).get_default(),
+                    "logoUrl": None,
+                    "fontFamily": DashboardSettings._meta.get_field(
+                        "font_family"
+                    ).get_default(),
+                    "primaryColor": DashboardSettings._meta.get_field(
+                        "primary_color"
+                    ).get_default(),
+                    "subtleColor": DashboardSettings._meta.get_field(
+                        "subtle_color"
+                    ).get_default(),
+                    "accentColor": DashboardSettings._meta.get_field(
+                        "accent_color"
                     ).get_default(),
                 },
             },

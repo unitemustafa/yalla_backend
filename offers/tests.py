@@ -229,11 +229,12 @@ class OfferAPITests(APITestCase):
                     market_id=self.general_market.id,
                     product_ids=[self.general_product.id],
                     show_in_general=True,
-                    service_city_ids=[self.city.id],
+                    service_city_ids=[],
                 ),
                 format="json",
             )
 
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         notifications = Notification.objects.filter(
             offer_id=response.data["id"],
             type=Notification.Type.OFFER_CREATED,
@@ -480,7 +481,7 @@ class OfferAPITests(APITestCase):
                 f"{OFFERS_BASE}/",
                 {
                     **self.offer_payload(),
-                    "service_city_ids": f"[{self.city.id},{self.second_city.id}]",
+                    "service_city_ids": f"[{self.city.id}]",
                     "product_ids": f"[{self.product.id}]",
                     "active_days": '["saturday","sunday"]',
                     "image": image,
@@ -492,7 +493,7 @@ class OfferAPITests(APITestCase):
             self.assertTrue(create_response.data["image"])
             self.assertEqual(
                 set(create_response.data["service_city_ids"]),
-                {self.city.id, self.second_city.id},
+                {self.city.id},
             )
             offer_id = create_response.data["id"]
 

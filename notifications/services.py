@@ -1,8 +1,17 @@
+import logging
+
+from django.db import transaction
 from django.utils import timezone
 
 from accounts.exceptions import ACCOUNT_INACTIVE_MESSAGE
 
 from .models import Notification
+
+
+logger = logging.getLogger(__name__)
+
+ACCOUNT_RESTORED_TITLE = "تم استعادة حسابك"
+ACCOUNT_RESTORED_MESSAGE = "تم استعادة حسابك بواسطة فريق دعم يلا ماركت."
 
 
 def create_account_disabled_notification(user):
@@ -24,14 +33,36 @@ def create_account_restored_notification(user):
         recipient=user,
         type=Notification.Type.ACCOUNT_DISABLED,
     ).delete()
-    return Notification.objects.create(
+    notification = Notification.objects.create(
         audience=Notification.Audience.CLIENT,
         type=Notification.Type.ACCOUNT_RESTORED,
-        title="Account restored",
-        message="Your account was restored by the Yalla Market team.",
+        title=ACCOUNT_RESTORED_TITLE,
+        message=ACCOUNT_RESTORED_MESSAGE,
         recipient=user,
-        data={"event": "account_restored"},
+        data={
+            "event": "account_restored",
+            "route": "login",
+        },
     )
+    transaction.on_commit(
+        lambda notification_id=notification.id: _dispatch_account_restored(
+            notification_id
+        )
+    )
+    return notification
+
+
+def _dispatch_account_restored(notification_id):
+    from .push import send_account_restored_push
+
+    try:
+        send_account_restored_push(notification_id)
+    except Exception:
+        logger.exception(
+            "Account-restored notification delivery failed for "
+            "notification_id=%s",
+            notification_id,
+        )
 
 
 def create_admin_courier_availability_notification(

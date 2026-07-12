@@ -1,7 +1,7 @@
 from rest_framework.exceptions import APIException
 
 
-ACCOUNT_INACTIVE_MESSAGE = "تم تعطيل حسابك. تواصل مع الدعم."
+ACCOUNT_INACTIVE_MESSAGE = "تم إيقاف حسابك. تواصل مع الدعم."
 
 
 class AccountInactive(APIException):

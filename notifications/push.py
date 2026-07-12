@@ -2,11 +2,11 @@ import base64
 import binascii
 import json
 import logging
+from dataclasses import dataclass
+from datetime import timedelta
 from functools import lru_cache
 
 from django.conf import settings
-from django.utils import timezone
-
 from accounts.exceptions import ACCOUNT_INACTIVE_MESSAGE
 
 from .models import ClientDevice, Notification
@@ -16,6 +16,13 @@ logger = logging.getLogger(__name__)
 
 class FirebaseConfigurationError(RuntimeError):
     """Raised when Firebase Admin service account configuration is invalid."""
+
+
+@dataclass(frozen=True)
+class PushDeliveryResult:
+    successful_tokens: frozenset
+    stale_tokens: frozenset
+    failed_tokens: frozenset
 
 
 def _string_data(data):
@@ -90,13 +97,27 @@ def _messaging_module():
     return messaging
 
 
-def _send_tokens(tokens, data, *, title=None, message=None):
+def _send_tokens(
+    tokens,
+    data,
+    *,
+    title=None,
+    message=None,
+    high_priority=False,
+    android_channel_id=None,
+):
     if not tokens:
-        return set()
+        return PushDeliveryResult(frozenset(), frozenset(), frozenset())
     messaging = _messaging_module()
     if messaging is None:
-        return set()
+        return PushDeliveryResult(
+            frozenset(),
+            frozenset(),
+            frozenset(tokens),
+        )
+    successful_tokens = set()
     stale_tokens = set()
+    failed_tokens = set()
     for start in range(0, len(tokens), 500):
         chunk = tokens[start : start + 500]
         try:
@@ -109,26 +130,58 @@ def _send_tokens(tokens, data, *, title=None, message=None):
                         if title and message
                         else None
                     ),
+                    android=(
+                        messaging.AndroidConfig(
+                            priority="high",
+                            ttl=timedelta(minutes=5),
+                            notification=(
+                                messaging.AndroidNotification(
+                                    channel_id=android_channel_id,
+                                )
+                                if android_channel_id
+                                else None
+                            ),
+                        )
+                        if high_priority or android_channel_id
+                        else None
+                    ),
+                    apns=(
+                        messaging.APNSConfig(
+                            headers={"apns-priority": "10"},
+                            payload=messaging.APNSPayload(
+                                aps=messaging.Aps(
+                                    content_available=True,
+                                    sound="default",
+                                )
+                            ),
+                        )
+                        if high_priority
+                        else None
+                    ),
                 )
             )
         except Exception:
             logger.exception("FCM multicast request failed")
+            failed_tokens.update(chunk)
             continue
         for token, item in zip(chunk, response.responses):
-            if item.success or item.exception is None:
+            if item.success:
+                successful_tokens.add(token)
                 continue
-            if item.exception.__class__.__name__ in {
-                "InvalidArgumentError",
-                "UnregisteredError",
-                "SenderIdMismatchError",
-            }:
+            if (
+                item.exception is not None
+                and item.exception.__class__.__name__ == "UnregisteredError"
+            ):
                 stale_tokens.add(token)
+            else:
+                failed_tokens.add(token)
     if stale_tokens:
-        ClientDevice.objects.filter(token__in=stale_tokens).update(
-            is_active=False,
-            updated_at=timezone.now(),
-        )
-    return stale_tokens
+        ClientDevice.objects.filter(token__in=stale_tokens).delete()
+    return PushDeliveryResult(
+        frozenset(successful_tokens),
+        frozenset(stale_tokens),
+        frozenset(failed_tokens),
+    )
 
 
 def send_notification_push(notification_id):
@@ -161,6 +214,32 @@ def send_notification_push(notification_id):
         logger.exception("Notification push failed for notification_id=%s", notification_id)
 
 
+def send_account_restored_push(notification_id):
+    notification = Notification.objects.get(
+        pk=notification_id,
+        type=Notification.Type.ACCOUNT_RESTORED,
+        recipient__isnull=False,
+    )
+    tokens = list(
+        ClientDevice.objects.filter(
+            user_id=notification.recipient_id,
+            is_active=True,
+        ).values_list("token", flat=True)
+    )
+    return _send_tokens(
+        tokens,
+        {
+            "event": "account_restored",
+            "notification_id": str(notification.id),
+            "route": "login",
+        },
+        title=notification.title,
+        message=notification.message,
+        high_priority=True,
+        android_channel_id="account_updates",
+    )
+
+
 def send_account_disabled_event(user_id):
     devices = list(
         ClientDevice.objects.filter(user_id=user_id, is_active=True).values_list(
@@ -168,20 +247,25 @@ def send_account_disabled_event(user_id):
             flat=True,
         )
     )
-    try:
-        _send_tokens(
-            devices,
-            {
-                "event": "account_disabled",
-                "code": "account_inactive",
-                "message": ACCOUNT_INACTIVE_MESSAGE,
-            },
+    result = _send_tokens(
+        devices,
+        {
+            "event": "account_disabled",
+            "code": "account_inactive",
+            "message": ACCOUNT_INACTIVE_MESSAGE,
+        },
+        title="تم تعطيل حسابك",
+        message=ACCOUNT_INACTIVE_MESSAGE,
+        high_priority=True,
+    )
+    if result.failed_tokens:
+        logger.warning(
+            "Account-disabled push failed for user_id=%s on %s device(s); "
+            "tokens remain active for a later retry.",
+            user_id,
+            len(result.failed_tokens),
         )
-    finally:
-        ClientDevice.objects.filter(user_id=user_id, is_active=True).update(
-            is_active=False,
-            updated_at=timezone.now(),
-        )
+    return result
 
 
 def send_delivery_area_status_changed_event(area_id, is_active):

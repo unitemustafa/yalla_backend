@@ -3,6 +3,7 @@ from django.core.management import call_command
 from django.test import TestCase
 
 from accounts.models import CourierProfile
+from catalog.models import Product, ProductImage
 from locations.models import Address, DeliveryArea, ServiceCity
 
 
@@ -29,6 +30,10 @@ class SeedDataCommandTests(TestCase):
                 user=representative_profile.user,
                 is_default=True,
             ).exists()
+        )
+        self.assertEqual(ProductImage.objects.count(), Product.objects.count())
+        self.assertFalse(
+            ProductImage.objects.filter(is_primary=False).exists()
         )
 
     def test_seed_data_populates_every_project_model(self):

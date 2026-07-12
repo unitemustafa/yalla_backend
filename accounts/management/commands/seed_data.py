@@ -1,8 +1,10 @@
+import base64
 from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
+from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
@@ -19,6 +21,7 @@ from catalog.models import (
     ProductAttributeOption,
     ProductAttributeValue,
     ProductCategory,
+    ProductImage,
     ProductVariant,
     VariantAttributeValue,
 )
@@ -35,6 +38,11 @@ from orders.models import (
 from orders.services import record_order_event
 
 User = get_user_model()
+
+SEED_PRODUCT_IMAGE_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+    "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
 
 
 class Command(BaseCommand):
@@ -527,6 +535,7 @@ class Command(BaseCommand):
                     "discount": Decimal("0.00"),
                 },
             )
+            self._seed_product_image(product, index)
             products[name] = product
             attribute = attributes[category_name]
             first_option, second_option = options[category_name]
@@ -577,6 +586,26 @@ class Command(BaseCommand):
             variants[name] = product_variants
 
         return {"products": products, "variants": variants}
+
+    def _seed_product_image(self, product, index):
+        image_name = f"products/seed-product-{index:02d}.png"
+        storage = ProductImage._meta.get_field("image").storage
+        if not storage.exists(image_name):
+            image_name = storage.save(
+                image_name,
+                ContentFile(SEED_PRODUCT_IMAGE_BYTES),
+            )
+        product_image, _ = ProductImage.objects.update_or_create(
+            product=product,
+            sort_order=0,
+            defaults={
+                "image": image_name,
+                "is_primary": True,
+            },
+        )
+        if product.image.name != product_image.image.name:
+            product.image = product_image.image.name
+            product.save(update_fields=("image", "updated_at"))
 
     def _seed_additions(self, products):
         classifications = {}
