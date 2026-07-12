@@ -230,7 +230,20 @@ class DeliveryAreaDetailView(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if Address.objects.filter(delivery_area=area).exists():
+        stale_addresses = Address.objects.filter(
+            delivery_area=area,
+            is_active=False,
+            orders__isnull=True,
+        )
+        try:
+            stale_addresses.delete()
+        except ProtectedError:
+            return Response(
+                {"detail": self.order_error_message},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if Address.objects.filter(delivery_area=area, is_active=True).exists():
             return Response(
                 {"detail": self.address_error_message},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -348,13 +361,15 @@ class AddressDefaultView(APIView):
 class AddressDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get_address(self, request, address_id):
+    def get_address(self, request, address_id, *, for_update=False):
         queryset = Address.objects.select_related(
             "user",
             "service_city",
             "delivery_area",
             "delivery_area__service_city",
         )
+        if for_update:
+            queryset = queryset.select_for_update()
         queryset = queryset.filter(is_active=True)
         if request.user.role != request.user.Role.ADMIN:
             queryset = queryset.filter(user=request.user)
@@ -382,14 +397,17 @@ class AddressDetailView(APIView):
 
     @transaction.atomic
     def delete(self, request, address_id):
-        address = self.get_address(request, address_id)
+        address = self.get_address(request, address_id, for_update=True)
         if address is None:
             return Response({"detail": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
         user = address.user
         was_default = address.is_default
-        address.is_active = False
-        address.is_default = False
-        address.save(update_fields=["is_active", "is_default"])
+        if Order.objects.filter(delivery_address=address).exists():
+            address.is_active = False
+            address.is_default = False
+            address.save(update_fields=["is_active", "is_default"])
+        else:
+            address.delete()
         if was_default:
             next_address = (
                 Address.objects.filter(user=user, is_active=True)

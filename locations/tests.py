@@ -424,7 +424,7 @@ class AddressAPITests(TestCase):
         self.assertEqual(response.data[0]["name"], "Work")
         self.assertEqual(response.data[0]["line1"], "Saved street")
 
-    def test_deleting_unused_address_hides_it_from_list(self):
+    def test_deleting_unused_address_removes_it_permanently(self):
         address = Address.objects.create(
             user=self.user,
             name="Home",
@@ -438,9 +438,7 @@ class AddressAPITests(TestCase):
         list_response = self.client.get("/api/v1/addresses/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        address.refresh_from_db()
-        self.assertFalse(address.is_active)
-        self.assertFalse(address.is_default)
+        self.assertFalse(Address.objects.filter(pk=address.id).exists())
         self.assertEqual(response.data, [])
         self.assertEqual(list_response.data, [])
 
@@ -462,6 +460,7 @@ class AddressAPITests(TestCase):
         address.refresh_from_db()
         order.refresh_from_db()
         self.assertFalse(address.is_active)
+        self.assertFalse(address.is_default)
         self.assertEqual(order.delivery_address_id, address.id)
         self.assertTrue(Address.objects.filter(pk=address.id).exists())
         self.assertEqual(response.data, [])
@@ -507,10 +506,8 @@ class AddressAPITests(TestCase):
         response = self.client.delete(f"/api/v1/addresses/{old_default.id}/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        old_default.refresh_from_db()
         next_default.refresh_from_db()
-        self.assertFalse(old_default.is_active)
-        self.assertFalse(old_default.is_default)
+        self.assertFalse(Address.objects.filter(pk=old_default.id).exists())
         self.assertTrue(next_default.is_default)
         self.assertEqual([item["id"] for item in response.data], [next_default.id])
 
@@ -1043,12 +1040,50 @@ class LocationManagementAPITests(TestCase):
         response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "لا يمكن حذف منطقة التوصيل لوجود عناوين محفوظة مرتبطة بها.",
+        )
         self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
         address.refresh_from_db()
         self.assertEqual(address.delivery_area_id, area.id)
         self.assertEqual(address.delivery_type, Address.DeliveryType.FIXED_AREA)
         self.assertEqual(address.service_city_id, area.service_city_id)
         self.assertTrue(Address.objects.filter(pk=address.id).exists())
+
+    def test_delivery_area_delete_removes_stale_unreferenced_address(self):
+        area = self.create_area("Stale Address Area")
+        address = self.create_address_for_area(area)
+        address.is_active = False
+        address.is_default = False
+        address.save(update_fields=["is_active", "is_default"])
+
+        response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Address.objects.filter(pk=address.id).exists())
+        self.assertFalse(DeliveryArea.objects.filter(pk=area.id).exists())
+
+    def test_delivery_area_delete_preserves_inactive_historical_address(self):
+        area = self.create_area("Historical Address Area")
+        address = self.create_address_for_area(area)
+        address.is_active = False
+        address.is_default = False
+        address.save(update_fields=["is_active", "is_default"])
+        order = self.create_order_for_area(area, address=address)
+
+        response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "لا يمكن حذف منطقة التوصيل لوجود طلبات مرتبطة بها.",
+        )
+        self.assertTrue(Address.objects.filter(pk=address.id).exists())
+        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
+        order.refresh_from_db()
+        self.assertEqual(order.delivery_address_id, address.id)
+        self.assertEqual(order.delivery_area_id, area.id)
 
     def test_delivery_area_delete_blocks_market_with_saved_address_relation(self):
         area = self.create_area("Mixed Area")
