@@ -1,4 +1,25 @@
+import uuid
+
+from django.conf import settings
 from django.db import models
+
+
+class OfferNotificationDispatch(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    offer = models.ForeignKey("offers.Offer", on_delete=models.PROTECT, related_name="notification_dispatches")
+    request_id = models.UUIDField(default=uuid.uuid4, unique=True)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="offer_notification_dispatches", null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    recipient_count = models.PositiveIntegerField(default=0)
+    notification_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True)
 
 
 class Notification(models.Model):
@@ -10,6 +31,7 @@ class Notification(models.Model):
     class Type(models.TextChoices):
         NEW_ORDER_REVIEW = "new_order_review", "New Order Review"
         ORDER_ASSIGNED = "order_assigned", "Order Assigned"
+        ORDER_UNASSIGNED = "order_unassigned", "Order Unassigned"
         ORDER_REJECTED = "order_rejected", "Order Rejected"
         OFFER_CREATED = "offer_created", "Offer Created"
         ORDER_CREATED = "order_created", "Order Created"
@@ -23,6 +45,7 @@ class Notification(models.Model):
             "courier_availability_changed",
             "Courier Availability Changed",
         )
+        COURIER_PROFILE_UPDATED = "courier_profile_updated", "Courier Profile Updated"
         PASSWORD_CHANGED = "password_changed", "Password Changed"
 
     audience = models.CharField(max_length=30, choices=Audience.choices)
@@ -46,6 +69,13 @@ class Notification(models.Model):
     offer = models.ForeignKey(
         "offers.Offer",
         on_delete=models.SET_NULL,
+        related_name="notifications",
+        blank=True,
+        null=True,
+    )
+    offer_dispatch = models.ForeignKey(
+        OfferNotificationDispatch,
+        on_delete=models.PROTECT,
         related_name="notifications",
         blank=True,
         null=True,
@@ -74,9 +104,9 @@ class Notification(models.Model):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["recipient", "offer"],
-                condition=models.Q(type="offer_created", offer__isnull=False),
-                name="notifications_offer_recipient_unique",
+                fields=["offer_dispatch", "recipient"],
+                condition=models.Q(offer_dispatch__isnull=False),
+                name="notifications_offer_dispatch_recipient_unique",
             ),
             models.UniqueConstraint(
                 fields=["recipient", "order_event"],

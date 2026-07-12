@@ -268,6 +268,42 @@ def send_account_disabled_event(user_id):
     return result
 
 
+def send_courier_notification_push(notification_id):
+    notification = Notification.objects.get(
+        pk=notification_id,
+        audience=Notification.Audience.COURIER,
+        recipient__isnull=False,
+    )
+    tokens = list(
+        ClientDevice.objects.filter(
+            user_id=notification.recipient_id,
+            is_active=True,
+        ).values_list("token", flat=True)
+    )
+    data = {**(notification.data or {}), "notification_id": str(notification.id)}
+    event = data.get("event")
+    channel_id = (
+        "account_updates"
+        if event in {"courier_account_disabled", "courier_account_restored"}
+        else "courier_orders"
+        if event in {
+            "courier_order_assigned",
+            "courier_order_unassigned",
+            "courier_order_cancelled",
+        }
+        else "courier_updates"
+    )
+    show_notification = event != "courier_profile_updated"
+    return _send_tokens(
+        tokens,
+        data,
+        title=notification.title if show_notification else None,
+        message=notification.message if show_notification else None,
+        high_priority=channel_id in {"account_updates", "courier_orders"},
+        android_channel_id=channel_id,
+    )
+
+
 def send_delivery_area_status_changed_event(area_id, is_active):
     devices = list(
         ClientDevice.objects.filter(

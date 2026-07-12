@@ -43,13 +43,14 @@ class NotificationSerializer(serializers.ModelSerializer):
     offer = serializers.SerializerMethodField()
 
     def get_offer(self, instance):
-        if instance.offer is None:
+        offer = instance.offer
+        if offer is None:
             return None
         data = instance.data or {}
         image = None
-        if instance.offer.image:
+        if offer.image:
             try:
-                image = instance.offer.image.url
+                image = offer.image.url
             except ValueError:
                 image = None
         if image:
@@ -58,11 +59,11 @@ class NotificationSerializer(serializers.ModelSerializer):
                 image = request.build_absolute_uri(image)
         return {
             "id": instance.offer_id,
-            "title": instance.offer.title,
+            "title": offer.title,
             "image": image,
-            "market_id": instance.offer.market_id,
-            "market_name": instance.offer.market.name,
-            "discount": f"{instance.offer.discount:.2f}",
+            "market_id": offer.market_id,
+            "market_name": offer.market.name if offer.market is not None else "",
+            "discount": f"{offer.discount:.2f}",
             "price": data.get("price"),
             "price_text": data.get("price_text"),
             "region_names": data.get("region_names", []),

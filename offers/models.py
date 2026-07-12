@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 
 class Offer(models.Model):
@@ -63,8 +64,42 @@ class Offer(models.Model):
         default=Status.ACTIVE,
     )
 
+    send_push_notification = models.BooleanField(default=False)
+    push_sent_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.title
+
+    def get_effective_status(self, now=None):
+        now = now or timezone.now()
+        if self.status == self.Status.INACTIVE:
+            return self.Status.INACTIVE
+        if self.end_time <= now:
+            return self.Status.EXPIRED
+        if self.start_time > now:
+            return "scheduled"
+        return self.Status.ACTIVE
+
+    def has_valid_visibility_scope(self):
+        active_cities = self.service_cities.filter(is_active=True).count()
+        return active_cities == 0 if self.show_in_general else active_cities == 1
+
+    def has_active_markets(self):
+        from markets.models import Market
+
+        if self.market_id and self.market.status != Market.Status.ACTIVE:
+            return False
+        return not self.products.exclude(market__status=Market.Status.ACTIVE).exists()
+
+    def is_currently_visible(self, now=None):
+        return self.get_effective_status(now) == self.Status.ACTIVE and self.has_valid_visibility_scope()
+
+    def can_send_notification(self, now=None):
+        return self.is_currently_visible(now) and self.has_active_markets()

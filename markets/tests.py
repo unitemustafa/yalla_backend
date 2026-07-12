@@ -2,7 +2,10 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -17,6 +20,7 @@ from catalog.models import (
     ProductAddition,
     ProductAttributeValue,
     ProductCategory,
+    ProductImage,
     ProductVariant,
     VariantAttributeValue,
 )
@@ -746,14 +750,14 @@ class HomeAPITests(APITestCase):
         self.assertTrue(response.data["requires_region_selection"])
         self.assertIsNone(response.data["current_selection"])
 
-    def test_home_returns_limited_content_from_user_location_only(self):
+    def test_home_returns_all_offers_and_limited_products_from_user_location_only(self):
         self.authenticate()
 
         response = self.client.get(f"{HOME_BASE}/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["location"]["name"], "Home")
-        self.assertEqual(len(response.data["offers"]), 4)
+        self.assertEqual(len(response.data["offers"]), len(self.local_offers))
         self.assertEqual(len(response.data["products"]), 8)
         self.assertEqual(len(response.data["market_classifications"]), 2)
 
@@ -1731,6 +1735,17 @@ class HomeAPITests(APITestCase):
 
     def test_product_detail_returns_all_product_information(self):
         product = self.local_products[0]
+        primary_image = ProductImage.objects.create(
+            product=product,
+            image=SimpleUploadedFile("primary.png", b"primary"),
+            is_primary=True,
+            sort_order=0,
+        )
+        secondary_image = ProductImage.objects.create(
+            product=product,
+            image=SimpleUploadedFile("secondary.png", b"secondary"),
+            sort_order=1,
+        )
         attribute = CategoryAttribute.objects.create(
             category=self.category,
             name="Size",
@@ -1760,12 +1775,25 @@ class HomeAPITests(APITestCase):
             price=Decimal("120.00"),
         )
         addition.products.add(product)
+        inactive_addition = ProductAddition.objects.create(
+            classification=addition_classification,
+            name_ar="إضافة غير نشطة",
+            name_en="Inactive extra",
+            price=Decimal("10.00"),
+            is_active=False,
+        )
+        inactive_addition.products.add(product)
         self.authenticate()
 
         response = self.client.get(f"{HOME_BASE}/products/{product.id}/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["id"], product.id)
+        self.assertEqual(response.data["description"], product.description)
+        self.assertEqual(
+            [image["id"] for image in response.data["images"]],
+            [primary_image.id, secondary_image.id],
+        )
         self.assertEqual(response.data["market"]["id"], self.local_market.id)
         self.assertNotIn("category", response.data)
         self.assertEqual(response.data["theme"], Product.Theme.OTHER)
@@ -1778,12 +1806,42 @@ class HomeAPITests(APITestCase):
             "Large",
         )
         self.assertEqual(response.data["additions"][0]["name_en"], "Cheese")
+        self.assertEqual(len(response.data["additions"]), 1)
         self.assertEqual(
             response.data["additions"][0]["classification_name"],
             "Extras",
         )
         self.assertIn("created_at", response.data)
         self.assertIn("updated_at", response.data)
+
+    def test_product_detail_hides_unavailable_draft(self):
+        product = self.local_products[0]
+        product.is_available = False
+        product.save(update_fields=["is_available"])
+        self.authenticate()
+
+        response = self.client.get(f"{HOME_BASE}/products/{product.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_product_detail_query_count_is_bounded(self):
+        product = self.local_products[0]
+        classification = AdditionClassification.objects.create(name="Query extras")
+        for index in range(5):
+            addition = ProductAddition.objects.create(
+                classification=classification,
+                name_ar=f"إضافة {index}",
+                name_en=f"Extra {index}",
+                price=Decimal("5.00"),
+            )
+            addition.products.add(product)
+        self.authenticate()
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(f"{HOME_BASE}/products/{product.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertLessEqual(len(queries), 15)
 
     def test_product_detail_returns_not_found_for_remote_product(self):
         self.authenticate()

@@ -880,6 +880,15 @@ class AdminUserWriteSerializer(
 
     def update(self, instance, validated_data):
         was_active = instance.is_active
+        was_role = instance.role
+        profile_event_fields = {
+            "first_name",
+            "last_name",
+            "phone",
+            "avatar_image",
+            "remove_avatar",
+        }
+        user_profile_changed = bool(profile_event_fields.intersection(validated_data))
         is_deactivation = (
             was_active and validated_data.get("is_active") is False
         )
@@ -953,10 +962,34 @@ class AdminUserWriteSerializer(
                 was_active=was_active,
                 notify_disabled=False,
             )
-        elif is_reactivation and instance.role == instance.Role.CLIENT:
-            from notifications.services import create_account_restored_notification
+        elif is_reactivation:
+            if instance.role == instance.Role.CLIENT:
+                from notifications.services import create_account_restored_notification
 
-            create_account_restored_notification(instance)
+                create_account_restored_notification(instance)
+            elif instance.role == instance.Role.REPRESENTATIVE:
+                from notifications.services import create_courier_account_notification
+
+                create_courier_account_notification(instance, restored=True)
+        if is_deactivation and was_role == User.Role.REPRESENTATIVE:
+            instance.auth_token_version += 1
+            instance.save(update_fields=["auth_token_version", "updated_at"])
+            from notifications.services import create_courier_account_notification
+
+            create_courier_account_notification(instance, restored=False)
+        courier_profile_fields = {
+            "vehicle_type",
+            "plate_number",
+            "service_city",
+            "max_active_orders",
+        }
+        if (
+            instance.role == User.Role.REPRESENTATIVE
+            and (user_profile_changed or bool(courier_profile_fields.intersection(profile_data or {})))
+        ):
+            from notifications.services import create_courier_profile_updated_notification
+
+            create_courier_profile_updated_notification(instance)
         if password_changed and instance.role == instance.Role.REPRESENTATIVE:
             transaction.on_commit(
                 lambda courier_id=instance.id: _notify_courier_password_changed(

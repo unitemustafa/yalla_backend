@@ -594,6 +594,80 @@ class AdditionClassificationAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_available_product_without_variants_is_rejected(self):
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{CATALOG_BASE}/products/",
+            {
+                "market_id": self.market.id,
+                "name": "Available without price",
+                "is_available": True,
+                "variants": [],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["variants"][0],
+            "يجب إضافة سعر أو متغير صالح قبل إتاحة المنتج للبيع.",
+        )
+
+    def test_available_product_with_base_variant_is_created(self):
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{CATALOG_BASE}/products/",
+            {
+                "market_id": self.market.id,
+                "name": "Available base product",
+                "is_available": True,
+                "variants": [{"price": "125.50", "sku": "BASE"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(len(response.data["variants"]), 1)
+        self.assertEqual(response.data["variants"][0]["price"], "125.50")
+
+    def test_unavailable_draft_without_variants_is_created(self):
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{CATALOG_BASE}/products/",
+            {
+                "market_id": self.market.id,
+                "name": "Draft without price",
+                "is_available": False,
+                "variants": [],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["variants"], [])
+
+    def test_patch_description_preserves_existing_variants(self):
+        variant = ProductVariant.objects.create(
+            product=self.product,
+            price="90.00",
+            sku="PRESERVE",
+        )
+        self.authenticate(self.admin)
+
+        response = self.client.patch(
+            f"{CATALOG_BASE}/products/{self.product.id}/",
+            {"description": "Updated description only"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["description"], "Updated description only")
+        self.assertEqual(response.data["variants"][0]["id"], variant.id)
+        self.assertEqual(self.product.variants.count(), 1)
+
     def test_admin_can_create_read_update_and_delete_product(self):
         addition_classification = AdditionClassification.objects.create(
             name="إضافات الوجبات"
@@ -736,6 +810,7 @@ class AdditionClassificationAPITests(APITestCase):
                 "name": "طبق بصورة",
                 "description": "طبق تجريبي",
                 "discount": "0.00",
+                "is_available": False,
                 "image": image,
             },
             format="multipart",

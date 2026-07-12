@@ -2,14 +2,14 @@ from django.db import models
 
 
 class DashboardSettings(models.Model):
-    primary_color = models.CharField(max_length=7, default="#155d72")
-    subtle_color = models.CharField(max_length=7, default="#e7f2f4")
-    accent_color = models.CharField(max_length=7, default="#f0b64f")
+    primary_color = models.CharField(max_length=7, default="#4F60F6")
+    subtle_color = models.CharField(max_length=7, default="#EEF2FF")
+    accent_color = models.CharField(max_length=7, default="#14B8A6")
     font_family = models.CharField(max_length=30, default="Cairo")
-    brand_name = models.CharField(max_length=120, default="يلا ماركت")
+    brand_name = models.CharField(max_length=120, default="يلا أدمن")
     brand_tagline = models.CharField(
         max_length=255,
-        default="أول أونلاين ماركت في النيل الكبير",
+        default="أول أونلاين ماركت في التل الكبير",
     )
     logo = models.ImageField(
         upload_to="dashboard/branding/",

@@ -409,6 +409,18 @@ class OrderAPITests(APITestCase):
         self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(detail_response.data["items"]), 1)
         self.assertEqual(len(detail_response.data["offers"]), 1)
+        serialized_offer = detail_response.data["offers"][0]
+        self.assertEqual(serialized_offer["offer_id"], self.offer.id)
+        self.assertEqual(serialized_offer["offer"]["id"], self.offer.id)
+        self.assertEqual(serialized_offer["offer"]["title"], "Lunch")
+        self.assertEqual(serialized_offer["offer"]["type"], self.offer.type)
+        self.assertEqual(
+            detail_response.data["market_sections"][0]["offers"][0]["offer"]["title"],
+            "Lunch",
+        )
+        list_order = next(item for item in list_response.data if item["id"] == order_id)
+        self.assertTrue(list_order["has_offer"])
+        self.assertEqual(list_order["offer_titles"], ["Lunch"])
         self.assertEqual(detail_response.data["service_city"]["id"], self.service_city.id)
         self.assertEqual(detail_response.data["order_scope"], Order.Scope.SERVICE_CITY)
         self.assertFalse(detail_response.data["is_multi_market"])
@@ -439,6 +451,22 @@ class OrderAPITests(APITestCase):
         self.assertEqual(detail_response.data["history"][0]["actor"]["id"], self.admin.id)
         self.assertEqual(detail_response.data["allowed_statuses"], [Order.Status.CANCELLED])
         self.assertEqual(update_response.data["description"], "Updated description")
+
+    def test_order_list_discount_without_order_offer_is_not_an_offer(self):
+        payload = self.payload()
+        payload["offers"] = []
+        response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        order = Order.objects.get(pk=response.data["id"])
+        order.discount = Decimal("25.00")
+        order.save(update_fields=["discount"])
+
+        list_response = self.client.get(f"{ORDERS_BASE}/")
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        list_order = next(item for item in list_response.data if item["id"] == order.id)
+        self.assertFalse(list_order["has_offer"])
+        self.assertEqual(list_order["offer_titles"], [])
 
     def test_admin_create_sets_selected_client_as_order_user(self):
         response = self.client.post(f"{ORDERS_BASE}/", self.payload(), format="json")

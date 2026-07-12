@@ -86,14 +86,14 @@ class DashboardSettingsAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(DashboardSettings.objects.count(), 1)
-        self.assertEqual(response.data["primary_color"], "#155d72")
-        self.assertEqual(response.data["subtle_color"], "#e7f2f4")
-        self.assertEqual(response.data["accent_color"], "#f0b64f")
+        self.assertEqual(response.data["primary_color"], "#4F60F6")
+        self.assertEqual(response.data["subtle_color"], "#EEF2FF")
+        self.assertEqual(response.data["accent_color"], "#14B8A6")
         self.assertEqual(response.data["font_family"], "Cairo")
-        self.assertEqual(response.data["brand_name"], "يلا ماركت")
+        self.assertEqual(response.data["brand_name"], "يلا أدمن")
         self.assertEqual(
             response.data["brand_tagline"],
-            "أول أونلاين ماركت في النيل الكبير",
+            "أول أونلاين ماركت في التل الكبير",
         )
         self.assertIsNone(response.data["logo_url"])
         self.assertIn("updated_at", response.data)

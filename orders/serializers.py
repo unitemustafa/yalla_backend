@@ -562,19 +562,7 @@ class OrderPreviewSerializer(serializers.Serializer):
 
             variant = product.variants.order_by("id").first()
             if variant is None:
-                group["products"].append(
-                    {
-                        "product_id": product.id,
-                        "product_name": product.name,
-                        "image": self._image_url(product.image),
-                        "variant_id": None,
-                        "quantity": 0,
-                        "unit_price": self._money(Decimal("0.00")),
-                        "subtotal": self._money(Decimal("0.00")),
-                        "is_selected": False,
-                    }
-                )
-                continue
+                raise serializers.ValidationError({"offers": f"المنتج {product.name} لا يحتوي على خيار صالح للطلب."})
 
             subtotal = variant.price
             group["offer_products_subtotal"] += subtotal
@@ -797,7 +785,7 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
 
                 variant = product.variants.order_by("id").first()
                 if variant is None:
-                    continue
+                    raise serializers.ValidationError({"offers": f"المنتج {product.name} لا يحتوي على خيار صالح للطلب."})
                 offer_group["offer_products_subtotal"] += variant.price
                 group["products_subtotal"] += variant.price
                 group["items"].append(
@@ -888,17 +876,25 @@ class OrderItemSerializer(serializers.ModelSerializer):
         return " - ".join(values)
 
 
+class OrderOfferSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Offer
+        fields = ("id", "title", "type")
+        read_only_fields = fields
+
+
 class OrderOfferSerializer(serializers.ModelSerializer):
     offer_id = serializers.PrimaryKeyRelatedField(
         queryset=Offer.objects.all(),
         source="offer",
     )
     section_id = serializers.IntegerField(read_only=True)
+    offer = OrderOfferSummarySerializer(read_only=True)
 
     class Meta:
         model = OrderOffer
-        fields = ("id", "section_id", "offer_id", "discount_amount", "created_at")
-        read_only_fields = ("id", "created_at")
+        fields = ("id", "section_id", "offer_id", "offer", "discount_amount", "created_at")
+        read_only_fields = ("id", "offer", "created_at")
 
 
 class OrderMarketSectionSerializer(serializers.ModelSerializer):
@@ -1178,6 +1174,33 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def get_customer(self, instance):
         return user_summary(instance.user)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        aggregated = {}
+        for row in data.get("offers", []):
+            offer_id = row.get("offer_id")
+            if offer_id is None:
+                continue
+            current = aggregated.setdefault(
+                str(offer_id),
+                {
+                    "id": row.get("id"),
+                    "offer_id": offer_id,
+                    "offer": row.get("offer"),
+                    "discount_amount": Decimal("0.00"),
+                    "section_ids": [],
+                },
+            )
+            current["discount_amount"] += Decimal(str(row.get("discount_amount") or "0"))
+            section_id = row.get("section_id")
+            if section_id is not None and section_id not in current["section_ids"]:
+                current["section_ids"].append(section_id)
+        for current in aggregated.values():
+            current["discount_amount"] = f'{current["discount_amount"]:.2f}'
+            current["market_count"] = len(current["section_ids"])
+        data["offers"] = list(aggregated.values())
+        return data
 
     def get_delivery_address(self, instance):
         address = instance.delivery_address
@@ -1762,6 +1785,8 @@ class OrderListSerializer(serializers.ModelSerializer):
     delivery_address = serializers.SerializerMethodField()
     market_count = serializers.SerializerMethodField()
     market_names_summary = serializers.SerializerMethodField()
+    has_offer = serializers.SerializerMethodField()
+    offer_titles = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -1774,6 +1799,8 @@ class OrderListSerializer(serializers.ModelSerializer):
             "market",
             "market_count",
             "market_names_summary",
+            "has_offer",
+            "offer_titles",
             "delivery_address",
             "delivery_type",
             "delivery_price",
@@ -1800,6 +1827,19 @@ class OrderListSerializer(serializers.ModelSerializer):
         if sections:
             return ", ".join(section.market.name for section in sections)
         return instance.market.name if instance.market_id else ""
+
+    def _order_offers(self, instance):
+        return list(instance.order_offers.all())
+
+    def get_has_offer(self, instance):
+        return bool(self._order_offers(instance))
+
+    def get_offer_titles(self, instance):
+        titles = {}
+        for order_offer in self._order_offers(instance):
+            if order_offer.offer_id and order_offer.offer.title:
+                titles.setdefault(order_offer.offer_id, order_offer.offer.title)
+        return list(titles.values())
 
 
 class AdminOrderCreateSerializer(OrderSerializer):

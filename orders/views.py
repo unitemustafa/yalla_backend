@@ -33,9 +33,13 @@ from .services import (
     resolve_order_target_user,
 )
 from notifications.services import (
-    create_order_assigned_notification,
     create_new_order_review_notification,
     resolve_order_review_notifications,
+)
+from notifications.courier_services import (
+    notify_courier_order_assigned,
+    notify_courier_order_cancelled,
+    notify_courier_order_unassigned,
 )
 from notifications.order_services import schedule_order_lifecycle_notification
 
@@ -332,6 +336,7 @@ class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
     def destroy(self, request, *args, **kwargs):
         order = self.get_object()
         old_status = order.status
+        old_representative = order.assigned_representative
         order.status = Order.Status.CANCELLED
         order.assigned_representative = None
         order.assigned_at = None
@@ -350,6 +355,12 @@ class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
             from_status=old_status,
             to_status=order.status,
         )
+        if old_representative is not None and old_status != Order.Status.CANCELLED:
+            notify_courier_order_cancelled(
+                order,
+                old_representative,
+                order_event=event,
+            )
         schedule_order_lifecycle_notification(
             order,
             event,
@@ -382,6 +393,7 @@ class OrderStatusView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         old_status = order.status
+        old_representative = order.assigned_representative
         order.status = new_status
         if order.status in (Order.Status.CANCELLED, Order.Status.FAILED_DELIVERY):
             order.assigned_representative = None
@@ -398,6 +410,16 @@ class OrderStatusView(APIView):
             from_status=old_status,
             to_status=new_status,
         )
+        if (
+            new_status == Order.Status.CANCELLED
+            and old_status != Order.Status.CANCELLED
+            and old_representative is not None
+        ):
+            notify_courier_order_cancelled(
+                order,
+                old_representative,
+                order_event=event,
+            )
         schedule_order_lifecycle_notification(
             order,
             event,
@@ -525,6 +547,13 @@ class OrderAssignmentView(APIView):
                 to_status=order.status,
                 metadata={"representative_id": old_representative_id},
             )
+            old_representative = User.objects.filter(pk=old_representative_id).first()
+            if old_representative is not None:
+                notify_courier_order_unassigned(
+                    order,
+                    old_representative,
+                    order_event=event,
+                )
             schedule_order_lifecycle_notification(
                 order,
                 event,
@@ -572,6 +601,12 @@ class OrderAssignmentView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         old_status = order.status
+        old_representative = order.assigned_representative
+        if old_representative is not None and old_representative.pk == representative.pk:
+            refreshed_order = order_queryset().get(pk=order.pk)
+            return Response(
+                OrderSerializer(refreshed_order, context={"request": request}).data
+            )
         order.assigned_representative = representative
         order.assigned_at = timezone.now()
         order.status = Order.Status.ASSIGNED
@@ -598,7 +633,13 @@ class OrderAssignmentView(APIView):
             old_status=old_status,
             new_status=order.status,
         )
-        create_order_assigned_notification(order, representative)
+        if old_representative is not None:
+            notify_courier_order_unassigned(
+                order,
+                old_representative,
+                order_event=event,
+            )
+        notify_courier_order_assigned(order, representative, order_event=event)
         return Response(
             {
                 "message": "Order assigned successfully.",

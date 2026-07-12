@@ -70,7 +70,7 @@ class NotificationListView(APIView):
         notifications = apply_notification_filters(
             visible_notifications(request.user),
             request.query_params,
-        ).order_by("-created_at", "-id")
+        ).select_related("offer__market").order_by("-created_at", "-id")
         return Response(
             NotificationSerializer(
                 notifications,
@@ -167,9 +167,12 @@ class DeviceRegisterView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if request.user.role != User.Role.CLIENT:
+        if request.user.role not in {
+            User.Role.CLIENT,
+            User.Role.REPRESENTATIVE,
+        }:
             return Response(
-                {"detail": "Only client devices can be registered."},
+                {"detail": "Only client or courier devices can be registered."},
                 status=status.HTTP_403_FORBIDDEN,
             )
         serializer = DeviceTokenSerializer(data=request.data)

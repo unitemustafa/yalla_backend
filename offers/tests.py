@@ -2,6 +2,7 @@ from datetime import timedelta
 from decimal import Decimal
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+import uuid
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -82,6 +83,11 @@ class OfferAPITests(APITestCase):
             name="Remote Market",
         )
         self.remote_market.service_cities.set([self.remote_city])
+        self.second_market = Market.objects.create(
+            classification=market_classification,
+            name="Second City Market",
+        )
+        self.second_market.service_cities.set([self.city])
         self.product = Product.objects.create(
             market=self.market,
             category=self.category,
@@ -105,6 +111,12 @@ class OfferAPITests(APITestCase):
             category=self.category,
             name="Remote Product",
             description="Remote",
+        )
+        self.second_market_product = Product.objects.create(
+            market=self.second_market,
+            category=self.category,
+            name="Second Market Product",
+            description="Second market",
         )
         self.now = timezone.now()
         self.set_client_region(self.city)
@@ -145,6 +157,7 @@ class OfferAPITests(APITestCase):
             "use_limits": 100,
             "user_limit": 2,
             "status": Offer.Status.ACTIVE,
+            "send_push_notification": False,
         }
         payload.update(overrides)
         return payload
@@ -191,11 +204,17 @@ class OfferAPITests(APITestCase):
         with self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(
                 f"{OFFERS_BASE}/",
-                self.offer_payload(),
+                self.offer_payload(send_push_notification=True),
                 format="json",
             )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        with self.captureOnCommitCallbacks(execute=True):
+            dispatch_response = self.client.post(
+                f"{OFFERS_BASE}/{response.data['id']}/send-notification/",
+                {"request_id": str(uuid.uuid4())}, format="json",
+            )
+        self.assertEqual(dispatch_response.status_code, status.HTTP_200_OK, dispatch_response.data)
         notifications = Notification.objects.filter(
             offer_id=response.data["id"],
             type=Notification.Type.OFFER_CREATED,
@@ -230,11 +249,18 @@ class OfferAPITests(APITestCase):
                     product_ids=[self.general_product.id],
                     show_in_general=True,
                     service_city_ids=[],
+                    send_push_notification=True,
                 ),
                 format="json",
             )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        with self.captureOnCommitCallbacks(execute=True):
+            dispatch_response = self.client.post(
+                f"{OFFERS_BASE}/{response.data['id']}/send-notification/",
+                {"request_id": str(uuid.uuid4())}, format="json",
+            )
+        self.assertEqual(dispatch_response.status_code, status.HTTP_200_OK, dispatch_response.data)
         notifications = Notification.objects.filter(
             offer_id=response.data["id"],
             type=Notification.Type.OFFER_CREATED,
@@ -428,8 +454,26 @@ class OfferAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             response.data["product_ids"][0],
-            "All selected products must belong to the selected market.",
+            "العروض غير الباكج يجب أن تكون منتجاتها من محل واحد.",
         )
+
+    def test_service_city_package_accepts_products_from_multiple_markets(self):
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(
+                type=Offer.OfferType.PACKAGE,
+                product_ids=[self.product.id, self.second_market_product.id],
+            ),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(set(response.data["product_ids"]), {self.product.id, self.second_market_product.id})
+        self.assertEqual(response.data["market_count"], 2)
+        self.assertTrue(response.data["is_multi_market"])
+        self.assertEqual(response.data["market_id"], self.market.id)
 
     def test_offer_create_rejects_missing_products(self):
         self.authenticate(self.admin)
@@ -541,6 +585,100 @@ class OfferAPITests(APITestCase):
             "Cannot delete offer while orders are using it.",
         )
         self.assertTrue(Offer.objects.filter(id=offer.id).exists())
+
+    @patch("notifications.offer_services.send_notification_push")
+    def test_push_opt_out_creates_no_notification(self, send_push):
+        self.authenticate(self.admin)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"{OFFERS_BASE}/",
+                self.offer_payload(send_push_notification=False),
+                format="json",
+            )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertFalse(Notification.objects.filter(offer_id=response.data["id"]).exists())
+        self.assertIsNone(response.data["push_sent_at"])
+        send_push.assert_not_called()
+
+    @patch("notifications.offer_services.send_notification_push")
+    def test_saving_never_sends_and_explicit_request_is_idempotent(self, send_push):
+        self.authenticate(self.admin)
+        with self.captureOnCommitCallbacks(execute=True):
+            created = self.client.post(
+                f"{OFFERS_BASE}/", self.offer_payload(), format="json"
+            )
+        offer_url = f"{OFFERS_BASE}/{created.data['id']}/"
+        with self.captureOnCommitCallbacks(execute=True):
+            enabled = self.client.patch(
+                offer_url, {"send_push_notification": True}, format="json"
+            )
+        with self.captureOnCommitCallbacks(execute=True):
+            renamed = self.client.patch(offer_url, {"title": "Renamed"}, format="json")
+        self.assertEqual(Notification.objects.filter(offer_id=created.data["id"]).count(), 0)
+        send_push.assert_not_called()
+        request_id = str(uuid.uuid4())
+        with self.captureOnCommitCallbacks(execute=True):
+            first = self.client.post(
+                f"{offer_url}send-notification/", {"request_id": request_id}, format="json"
+            )
+        with self.captureOnCommitCallbacks(execute=True):
+            repeated = self.client.post(
+                f"{offer_url}send-notification/", {"request_id": request_id}, format="json"
+            )
+        self.assertEqual(first.status_code, status.HTTP_200_OK, first.data)
+        self.assertEqual(repeated.data["dispatch_id"], first.data["dispatch_id"])
+        offer = Offer.objects.get(pk=created.data["id"])
+        self.assertIsNotNone(offer.push_sent_at)
+        sent_at = offer.push_sent_at
+        offer.refresh_from_db()
+        self.assertEqual(offer.push_sent_at, sent_at)
+        self.assertEqual(Notification.objects.filter(offer_id=created.data["id"]).count(), 1)
+        send_push.assert_called_once()
+
+    def test_push_sent_at_is_read_only(self):
+        self.authenticate(self.admin)
+        response = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(push_sent_at=(self.now - timedelta(days=1)).isoformat()),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIsNone(response.data["push_sent_at"])
+
+    def test_send_notification_rejects_non_active_effective_statuses(self):
+        self.authenticate(self.admin)
+        cases = (
+            ("scheduled", self.now + timedelta(hours=1), self.now + timedelta(hours=2), Offer.Status.ACTIVE),
+            ("expired", self.now - timedelta(hours=2), self.now - timedelta(hours=1), Offer.Status.ACTIVE),
+            ("inactive", self.now - timedelta(hours=1), self.now + timedelta(hours=1), Offer.Status.INACTIVE),
+        )
+        for label, start_time, end_time, stored_status in cases:
+            offer = self.create_offer()
+            offer.start_time = start_time
+            offer.end_time = end_time
+            offer.save(update_fields=["start_time", "end_time", "status"])
+            response = self.client.post(
+                f"{OFFERS_BASE}/{offer.id}/send-notification/",
+                {"request_id": str(uuid.uuid4())}, format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, label)
+            self.assertFalse(Notification.objects.filter(offer=offer).exists(), label)
+
+    def test_future_push_offer_is_not_scheduled_or_marked_sent(self):
+        self.authenticate(self.admin)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"{OFFERS_BASE}/",
+                self.offer_payload(
+                    send_push_notification=True,
+                    start_time=(self.now + timedelta(hours=1)).isoformat(),
+                    end_time=(self.now + timedelta(hours=2)).isoformat(),
+                ),
+                format="json",
+            )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIsNone(response.data["push_sent_at"])
+        self.assertFalse(Notification.objects.filter(offer_id=response.data["id"]).exists())
 
     def test_client_visibility_for_general_and_selected_cities(self):
         city_offer = self.create_offer(cities=[self.city])

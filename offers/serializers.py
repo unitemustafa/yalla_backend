@@ -82,6 +82,15 @@ class OfferProductSerializer(serializers.ModelSerializer):
 
 
 class AdminOfferSerializer(serializers.ModelSerializer):
+    effective_status = serializers.SerializerMethodField()
+    is_currently_visible = serializers.SerializerMethodField()
+    can_send_notification = serializers.SerializerMethodField()
+    last_notification_sent_at = serializers.SerializerMethodField()
+    notification_send_count = serializers.SerializerMethodField()
+    is_multi_market = serializers.SerializerMethodField()
+    market_count = serializers.SerializerMethodField()
+    markets = serializers.SerializerMethodField()
+    market_names_summary = serializers.SerializerMethodField()
     market_id = serializers.PrimaryKeyRelatedField(
         queryset=Market.objects.all(),
         source="market",
@@ -112,6 +121,10 @@ class AdminOfferSerializer(serializers.ModelSerializer):
             "service_city_ids",
             "products",
             "product_ids",
+            "is_multi_market",
+            "market_count",
+            "markets",
+            "market_names_summary",
             "title",
             "description",
             "image",
@@ -127,10 +140,55 @@ class AdminOfferSerializer(serializers.ModelSerializer):
             "announcement_priority",
             "announcement_display_seconds",
             "status",
+            "effective_status",
+            "is_currently_visible",
+            "can_send_notification",
+            "send_push_notification",
+            "push_sent_at",
+            "last_notification_sent_at",
+            "notification_send_count",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = ("id", "push_sent_at", "created_at", "updated_at")
+
+    def get_effective_status(self, instance):
+        return instance.get_effective_status()
+
+    def get_is_currently_visible(self, instance):
+        return instance.is_currently_visible()
+
+    def get_can_send_notification(self, instance):
+        return instance.can_send_notification()
+
+    def _completed_dispatches(self, instance):
+        return instance.notification_dispatches.filter(status="completed")
+
+    def get_last_notification_sent_at(self, instance):
+        dispatch = self._completed_dispatches(instance).order_by("-completed_at").first()
+        return dispatch.completed_at if dispatch else None
+
+    def get_notification_send_count(self, instance):
+        return self._completed_dispatches(instance).count()
+
+    def _product_markets(self, instance):
+        cache_name = "_offer_serializer_markets"
+        if not hasattr(instance, cache_name):
+            markets = {product.market_id: product.market for product in instance.products.all() if product.market_id}
+            setattr(instance, cache_name, [markets[key] for key in sorted(markets)])
+        return getattr(instance, cache_name)
+
+    def get_markets(self, instance):
+        return [{"id": market.id, "name": market.name, "branch": market.branch} for market in self._product_markets(instance)]
+
+    def get_market_count(self, instance):
+        return len(self._product_markets(instance))
+
+    def get_is_multi_market(self, instance):
+        return self.get_market_count(instance) > 1
+
+    def get_market_names_summary(self, instance):
+        return "، ".join(market.name for market in self._product_markets(instance))
 
     def validate_title(self, value):
         return value.strip()
@@ -205,20 +263,19 @@ class AdminOfferSerializer(serializers.ModelSerializer):
                 {"end_time": "End time must be after start time."}
             )
 
-        # An expired offer is allowed to become active again when an admin
-        # extends its schedule.  Keep an explicitly supplied status intact so
-        # a deliberate pause still wins over this automatic recovery.
+        supplied_status = attrs.get("status")
         if (
             self.instance is not None
             and self.instance.status == Offer.Status.EXPIRED
-            and "status" not in attrs
-            and "end_time" in attrs
             and end_time > timezone.now()
+            and supplied_status != Offer.Status.INACTIVE
         ):
+            attrs["status"] = Offer.Status.ACTIVE
+        elif supplied_status == Offer.Status.EXPIRED and end_time > timezone.now():
             attrs["status"] = Offer.Status.ACTIVE
 
         products_to_check = products
-        if products_to_check is None and self.instance is not None and market:
+        if products_to_check is None and self.instance is not None:
             products_to_check = list(self.instance.products.all())
 
         if products_to_check is not None:
@@ -295,9 +352,32 @@ class AdminOfferSerializer(serializers.ModelSerializer):
                 {"service_city_ids": "Only active service cities may be selected."}
             )
 
-        unserved_city_ids = [
-            service_city.id
-            for service_city in service_cities_to_check
+        is_service_city_package = (
+            offer_type == Offer.OfferType.PACKAGE and not show_in_general
+        )
+        product_markets = {
+            product.market_id: product.market
+            for product in (products_to_check or [])
+            if product.market_id
+        }
+        if is_service_city_package and products_to_check:
+            if any(product.market_id is None for product in products_to_check):
+                raise serializers.ValidationError({"product_ids": "كل منتج في الباكج يجب أن يكون تابعًا لمحل."})
+            if any(item.status != Market.Status.ACTIVE for item in product_markets.values()):
+                raise serializers.ValidationError({"product_ids": "كل منتجات الباكج يجب أن تكون من محلات نشطة."})
+            if any(item.scope != Market.Scope.SERVICE_CITY for item in product_markets.values()):
+                raise serializers.ValidationError({"product_ids": "لا يمكن خلط منتجات السوق العام مع منتجات مدينة خدمة."})
+            selected_city = service_cities_to_check[0] if len(service_cities_to_check) == 1 else None
+            if selected_city and any(not self._market_serves_service_city(item, selected_city) for item in product_markets.values()):
+                raise serializers.ValidationError({"product_ids": "هذا المنتج تابع لمحل لا يخدم مدينة العرض المحددة."})
+            if market.id not in product_markets:
+                if "market" in attrs:
+                    raise serializers.ValidationError({"market_id": "المحل الأساسي يجب أن يكون أحد محلات منتجات الباكج."})
+                attrs["market"] = products_to_check[0].market
+                market = attrs["market"]
+
+        unserved_city_ids = [] if is_service_city_package else [
+            service_city.id for service_city in service_cities_to_check
             if not self._market_serves_service_city(market, service_city)
         ]
         if unserved_city_ids:
@@ -305,7 +385,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
                 {"service_city_ids": "Offer market does not serve every selected city."}
             )
 
-        if products_to_check is not None:
+        if products_to_check is not None and not is_service_city_package:
             invalid_product_ids = [
                 product.id
                 for product in products_to_check
@@ -315,8 +395,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {
                         "product_ids": (
-                            "All selected products must belong to the selected "
-                            "market."
+                            "العروض غير الباكج يجب أن تكون منتجاتها من محل واحد."
                         )
                     }
                 )

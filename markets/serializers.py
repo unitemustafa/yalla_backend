@@ -512,6 +512,10 @@ class MarketWithCommonProductsSerializer(HomeMarketSerializer):
 
 
 class HomeOfferSerializer(serializers.ModelSerializer):
+    is_multi_market = serializers.SerializerMethodField()
+    market_count = serializers.SerializerMethodField()
+    markets = serializers.SerializerMethodField()
+    market_names_summary = serializers.SerializerMethodField()
     market = HomeMarketSerializer(read_only=True)
     products = HomeProductSerializer(many=True, read_only=True)
     service_cities = ServiceCitySummarySerializer(many=True, read_only=True)
@@ -539,4 +543,24 @@ class HomeOfferSerializer(serializers.ModelSerializer):
             "status",
             "market",
             "products",
+            "is_multi_market",
+            "market_count",
+            "markets",
+            "market_names_summary",
         )
+
+    def _markets(self, instance):
+        values = {product.market_id: product.market for product in instance.products.all() if product.market_id}
+        return [values[key] for key in sorted(values)]
+
+    def get_markets(self, instance):
+        return [{"id": market.id, "name": market.name, "branch": market.branch} for market in self._markets(instance)]
+
+    def get_market_count(self, instance):
+        return len(self._markets(instance))
+
+    def get_is_multi_market(self, instance):
+        return self.get_market_count(instance) > 1
+
+    def get_market_names_summary(self, instance):
+        return "، ".join(market.name for market in self._markets(instance))

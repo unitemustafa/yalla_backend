@@ -261,7 +261,18 @@ class OrderOffer(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ("order", "offer")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("order", "offer", "section"),
+                condition=models.Q(section__isnull=False),
+                name="unique_order_offer_per_section",
+            ),
+            models.UniqueConstraint(
+                fields=("order", "offer"),
+                condition=models.Q(section__isnull=True),
+                name="unique_order_offer_without_section",
+            ),
+        ]
 
 
 class OrderEvent(models.Model):

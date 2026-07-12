@@ -204,12 +204,12 @@ def visible_offer_queryset(user):
     )
     queryset = region_filtered_offer_queryset(queryset, user).annotate(
         total_offer_uses=Count(
-            "order_offers",
+            "order_offers__order",
             filter=~Q(order_offers__order__status="cancelled"),
             distinct=True,
         ),
         customer_offer_uses=Count(
-            "order_offers",
+            "order_offers__order",
             filter=Q(order_offers__order__user=user)
             & ~Q(order_offers__order__status="cancelled"),
             distinct=True,

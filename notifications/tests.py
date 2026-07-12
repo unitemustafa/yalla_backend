@@ -1,4 +1,6 @@
+from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -9,10 +11,16 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from catalog.models import CategoryClassification, Product, ProductCategory, ProductVariant
 from locations.models import Address, DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
+from offers.models import Offer
 from orders.models import Order
 
 from .models import ClientDevice, Notification
 from .services import create_new_order_review_notification
+from .courier_services import (
+    notify_courier_order_assigned,
+    notify_courier_order_cancelled,
+    notify_courier_order_unassigned,
+)
 
 User = get_user_model()
 
@@ -152,6 +160,58 @@ class NotificationAPITests(APITestCase):
         self.assertEqual(ClientDevice.objects.filter(token="fcm-token-1").count(), 1)
         self.assertFalse(ClientDevice.objects.get(token="fcm-token-1").is_active)
 
+    def test_courier_device_registration_is_authenticated_and_moves_ownership(self):
+        payload = {"token": "shared-courier-token", "platform": "android"}
+        self.authenticate(self.customer)
+        self.client.post(
+            "/api/v1/notifications/devices/register/", payload, format="json"
+        )
+
+        self.authenticate(self.courier)
+        response = self.client.post(
+            "/api/v1/notifications/devices/register/", payload, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        device = ClientDevice.objects.get(token=payload["token"])
+        self.assertEqual(device.user, self.courier)
+        self.assertEqual(ClientDevice.objects.filter(token=payload["token"]).count(), 1)
+
+    @patch("notifications.services._dispatch_courier_notification")
+    def test_courier_order_events_create_one_db_notification_and_dispatch_after_commit(
+        self, dispatch
+    ):
+        with self.captureOnCommitCallbacks(execute=True):
+            assigned = notify_courier_order_assigned(self.order, self.courier)
+        self.assertEqual(assigned.data["event"], "courier_order_assigned")
+        dispatch.assert_called_once_with(assigned.id)
+
+        dispatch.reset_mock()
+        with self.captureOnCommitCallbacks(execute=True):
+            unassigned = notify_courier_order_unassigned(self.order, self.courier)
+            cancelled = notify_courier_order_cancelled(self.order, self.courier)
+        self.assertEqual(unassigned.data["event"], "courier_order_unassigned")
+        self.assertEqual(cancelled.data["event"], "courier_order_cancelled")
+        self.assertEqual(dispatch.call_count, 2)
+
+    @patch("notifications.services._dispatch_courier_notification")
+    def test_rolled_back_courier_notification_does_not_dispatch(self, dispatch):
+        from django.db import transaction
+
+        try:
+            with transaction.atomic():
+                notify_courier_order_assigned(self.order, self.courier)
+                raise RuntimeError("rollback")
+        except RuntimeError:
+            pass
+        dispatch.assert_not_called()
+        self.assertFalse(
+            Notification.objects.filter(
+                recipient=self.courier,
+                data__event="courier_order_assigned",
+            ).exists()
+        )
+
     def create_client_order_requiring_review(self):
         self.authenticate(self.customer)
         response = self.client.post(
@@ -202,6 +262,55 @@ class NotificationAPITests(APITestCase):
         self.assertTrue(read_response.data["is_read"])
         self.assertEqual(admin_read_response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(final_count_response.data["unread_count"], 0)
+
+    def test_client_notification_serializes_offer_without_market(self):
+        now = timezone.now()
+        offer = Offer.objects.create(
+            market=None,
+            show_in_general=True,
+            title="Legacy Offer",
+            description="Offer whose market was removed",
+            type=Offer.OfferType.DISCOUNT,
+            discount=Decimal("15.00"),
+            start_time=now - timedelta(days=1),
+            end_time=now + timedelta(days=1),
+            status=Offer.Status.ACTIVE,
+        )
+        notification = Notification.objects.create(
+            audience=Notification.Audience.CLIENT,
+            type=Notification.Type.OFFER_CREATED,
+            title="Legacy offer",
+            message="Legacy offer notification",
+            offer=offer,
+            recipient=self.customer,
+        )
+        self.authenticate(self.customer)
+
+        response = self.client.get("/api/v1/notifications/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        item = next(item for item in response.data if item["id"] == notification.id)
+        self.assertEqual(item["offer"]["id"], offer.id)
+        self.assertIsNone(item["offer"]["market_id"])
+        self.assertEqual(item["offer"]["market_name"], "")
+
+    def test_client_notification_without_offer_serializes_offer_as_null(self):
+        notification = Notification.objects.create(
+            audience=Notification.Audience.CLIENT,
+            type=Notification.Type.OFFER_CREATED,
+            title="Unavailable offer",
+            message="The linked offer is no longer available",
+            offer=None,
+            recipient=self.customer,
+        )
+        self.authenticate(self.customer)
+
+        response = self.client.get("/api/v1/notifications/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        item = next(item for item in response.data if item["id"] == notification.id)
+        self.assertIsNone(item["offer_id"])
+        self.assertIsNone(item["offer"])
 
     def test_mark_all_read_marks_visible_notifications(self):
         self.authenticate(self.courier)

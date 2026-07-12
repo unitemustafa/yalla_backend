@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
-from catalog.models import Product, ProductVariant
+from catalog.models import Product, ProductAddition, ProductVariant
 from dashboard.models import DashboardSettings
 from locations.models import DeliveryArea, ServiceCity
 from orders.models import Order
@@ -288,7 +288,7 @@ class HomeView(APIView):
                     ),
                 )
             )
-            .order_by("-created_at", "-id")[:4]
+            .order_by("-created_at", "-id")
         )
         classifications = (
             MarketClassification.objects.filter(
@@ -649,6 +649,7 @@ class ProductDetailView(APIView):
             .filter(
                 id=product_id,
                 market__status=Market.Status.ACTIVE,
+                is_available=True,
             )
             .select_related(
                 "market__classification",
@@ -669,7 +670,12 @@ class ProductDetailView(APIView):
                 ),
                 "attribute_values__attribute",
                 "attribute_values__option",
-                "additions__classification",
+                Prefetch(
+                    "additions",
+                    queryset=ProductAddition.objects.filter(
+                        is_active=True,
+                    ).select_related("classification"),
+                ),
             )
         )
         serializer = ProductDetailSerializer(

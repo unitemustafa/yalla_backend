@@ -377,6 +377,9 @@ class ProductImageReorderSerializer(serializers.Serializer):
 
 
 class AdminProductSerializer(serializers.ModelSerializer):
+    SALE_VARIANT_ERROR = (
+        "يجب إضافة سعر أو متغير صالح قبل إتاحة المنتج للبيع."
+    )
     market_id = serializers.PrimaryKeyRelatedField(
         queryset=Market.objects.all(),
         source="market",
@@ -518,7 +521,42 @@ class AdminProductSerializer(serializers.ModelSerializer):
                 if legacy_values and category is not None:
                     self._validate_legacy_attribute_values(legacy_values, category)
             self._validate_variant_payload(attributes, variants)
+        self._validate_sale_variants(attrs, variants)
         return attrs
+
+    def _validate_sale_variants(self, attrs, variants):
+        is_available = attrs.get(
+            "is_available",
+            self.instance.is_available if self.instance is not None else True,
+        )
+
+        if variants is not None:
+            has_valid_variant = bool(variants) and all(
+                variant.get("price") is not None and variant["price"] >= 0
+                for variant in variants
+            )
+        elif self.instance is not None:
+            has_valid_variant = self.instance.variants.filter(price__gte=0).exists()
+        else:
+            has_valid_variant = False
+
+        if is_available and not has_valid_variant:
+            raise serializers.ValidationError(
+                {"variants": self.SALE_VARIANT_ERROR}
+            )
+
+        if is_available and "attributes" in attrs and variants is None:
+            raise serializers.ValidationError(
+                {"variants": self.SALE_VARIANT_ERROR}
+            )
+
+        if variants is not None and any(
+            variant.get("price") is None or variant["price"] < 0
+            for variant in variants
+        ):
+            raise serializers.ValidationError(
+                {"variants": self.SALE_VARIANT_ERROR}
+            )
 
     def _validate_legacy_attribute_values(self, attribute_values, category):
         seen_attribute_ids = set()
@@ -582,12 +620,33 @@ class AdminProductSerializer(serializers.ModelSerializer):
                 {"variants": "Only one base variant is allowed without attributes."}
             )
         seen_combinations = {}
+        expected_attribute_keys = {
+            str(attribute.get("client_id") or attribute.get("id"))
+            for attribute in attributes or []
+        }
         for index, variant in enumerate(variants, start=1):
             selections = self._variant_selections(variant)
             if expected_count and len(selections) != expected_count:
                 raise serializers.ValidationError(
                     {"variants": f"Variant {index} is missing attribute selections."}
                 )
+            if expected_attribute_keys:
+                selected_attribute_keys = {
+                    str(
+                        selection.get("attribute_client_id")
+                        or selection.get("attribute_id")
+                    )
+                    for selection in selections
+                }
+                if selected_attribute_keys != expected_attribute_keys:
+                    raise serializers.ValidationError(
+                        {
+                            "variants": (
+                                f"Variant {index} must select exactly one option "
+                                "for every product attribute."
+                            )
+                        }
+                    )
             key = tuple(
                 sorted(
                     (
