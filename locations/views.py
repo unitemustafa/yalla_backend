@@ -10,6 +10,9 @@ from rest_framework.views import APIView
 from accounts.views import IsAdminRole
 from accounts.models import CourierProfile, User
 from orders.models import Order
+from notifications.delivery_area_services import (
+    schedule_delivery_area_created_notifications,
+)
 
 from .models import Address, DeliveryArea, ServiceCity
 from .serializers import (
@@ -151,6 +154,14 @@ class DeliveryAreaPermission(IsAuthenticated):
 class DeliveryAreaListCreateView(generics.ListCreateAPIView):
     permission_classes = [DeliveryAreaPermission]
     serializer_class = DeliveryAreaSerializer
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        area = serializer.save()
+        schedule_delivery_area_created_notifications(area.id)
 
     def get_queryset(self):
         queryset = DeliveryArea.objects.select_related("service_city").order_by(

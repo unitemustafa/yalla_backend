@@ -32,6 +32,7 @@ from .serializers import (
     HomeProductSerializer,
     MarketClassificationCountSerializer,
     MarketWithCommonProductsSerializer,
+    MarketWithStoreProductsSerializer,
     ProductDetailSerializer,
     StoreMarketClassificationSerializer,
 )
@@ -72,6 +73,8 @@ class ProductSearchPagination(PageNumberPagination):
 
 class AddressProductPagination(PageNumberPagination):
     page_size = 4
+    page_size_query_param = "page_size"
+    max_page_size = 15
 
 
 class LoginDashboardSnapshotView(APIView):
@@ -121,15 +124,25 @@ class AdminMarketClassificationListCreateView(APIView):
     def get(self, request):
         classifications = MarketClassification.objects.order_by("name", "id")
         return Response(
-            AdminMarketClassificationSerializer(classifications, many=True).data
+            AdminMarketClassificationSerializer(
+                classifications,
+                many=True,
+                context={"request": request},
+            ).data
         )
 
     def post(self, request):
-        serializer = AdminMarketClassificationSerializer(data=request.data)
+        serializer = AdminMarketClassificationSerializer(
+            data=request.data,
+            context={"request": request},
+        )
         serializer.is_valid(raise_exception=True)
         classification = serializer.save()
         return Response(
-            AdminMarketClassificationSerializer(classification).data,
+            AdminMarketClassificationSerializer(
+                classification,
+                context={"request": request},
+            ).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -142,7 +155,12 @@ class AdminMarketClassificationDetailView(APIView):
 
     def get(self, request, classification_id):
         classification = self.get_classification(classification_id)
-        return Response(AdminMarketClassificationSerializer(classification).data)
+        return Response(
+            AdminMarketClassificationSerializer(
+                classification,
+                context={"request": request},
+            ).data
+        )
 
     def patch(self, request, classification_id):
         classification = self.get_classification(classification_id)
@@ -150,10 +168,16 @@ class AdminMarketClassificationDetailView(APIView):
             classification,
             data=request.data,
             partial=True,
+            context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
         classification = serializer.save()
-        return Response(AdminMarketClassificationSerializer(classification).data)
+        return Response(
+            AdminMarketClassificationSerializer(
+                classification,
+                context={"request": request},
+            ).data
+        )
 
     def delete(self, request, classification_id):
         classification = self.get_classification(classification_id)
@@ -250,7 +274,11 @@ class HomeView(APIView):
 
         products = (
             Product.objects.filter(market_id__in=market_ids)
-            .filter(is_available=True, is_popular=True)
+            .filter(
+                is_available=True,
+                is_popular=True,
+                variants__isnull=False,
+            )
             .select_related("market__classification")
             .prefetch_related(
                 "market__service_cities",
@@ -262,6 +290,7 @@ class HomeView(APIView):
                     queryset=ProductVariant.objects.order_by("price", "id"),
                 )
             )
+            .distinct()
             .order_by("-created_at", "-id")[:8]
         )
         offers = (
@@ -294,6 +323,7 @@ class HomeView(APIView):
             MarketClassification.objects.filter(
                 markets__id__in=market_ids,
                 is_active=True,
+                classification_type=MarketClassification.ClassificationType.POPULAR,
             )
             .distinct()
             .order_by("name")
@@ -356,9 +386,20 @@ class MarketClassificationSummaryView(APIView):
         common_classifications = (
             MarketClassification.objects.filter(**classification_filters)
             .annotate(
+                market_count=Count(
+                    "markets",
+                    filter=Q(
+                        markets__id__in=market_ids,
+                        markets__status=Market.Status.ACTIVE,
+                    ),
+                    distinct=True,
+                ),
                 product_count=Count(
                     "markets__products",
-                    filter=Q(markets__id__in=market_ids),
+                    filter=Q(
+                        markets__id__in=market_ids,
+                        markets__status=Market.Status.ACTIVE,
+                    ),
                     distinct=True,
                 )
             )
@@ -368,9 +409,20 @@ class MarketClassificationSummaryView(APIView):
         all_classifications = (
             MarketClassification.objects.filter(**classification_filters)
             .annotate(
+                market_count=Count(
+                    "markets",
+                    filter=Q(
+                        markets__id__in=market_ids,
+                        markets__status=Market.Status.ACTIVE,
+                    ),
+                    distinct=True,
+                ),
                 product_count=Count(
                     "markets__products",
-                    filter=Q(markets__id__in=market_ids),
+                    filter=Q(
+                        markets__id__in=market_ids,
+                        markets__status=Market.Status.ACTIVE,
+                    ),
                     distinct=True,
                 )
             )
@@ -391,15 +443,29 @@ class MarketClassificationSummaryView(APIView):
                     )
                 )
                 .prefetch_related("service_cities", "delivery_areas")
-                .order_by("-product_count", "name", "id")[:5]
+                .order_by("-is_popular", "-product_count", "name", "id")[:5]
             )
             for classification in all_classifications
         }
+        latest_markets = list(
+            Market.objects.filter(
+                id__in=market_ids,
+                status=Market.Status.ACTIVE,
+            )
+            .annotate(product_count=Count("products", distinct=True))
+            .prefetch_related("service_cities", "delivery_areas")
+            .order_by("-created_at", "-id")[:15]
+        )
         market_ids_for_response = [
             market.id
             for markets in markets_by_classification.values()
             for market in markets
         ]
+        market_ids_for_response = list(
+            dict.fromkeys(
+                [*market_ids_for_response, *(market.id for market in latest_markets)]
+            )
+        )
         products_by_market = {
             market_id: list(
                 Product.objects.filter(
@@ -407,7 +473,13 @@ class MarketClassificationSummaryView(APIView):
                     market__status=Market.Status.ACTIVE,
                 )
                 .select_related("market__classification")
-                .prefetch_related("images")
+                .prefetch_related(
+                    "images",
+                    Prefetch(
+                        "variants",
+                        queryset=ProductVariant.objects.order_by("price", "id"),
+                    ),
+                )
                 .order_by("-created_at", "-id")
             )
             for market_id in market_ids_for_response
@@ -436,9 +508,15 @@ class MarketClassificationSummaryView(APIView):
                 "common_market_classifications": MarketClassificationCountSerializer(
                     common_classifications,
                     many=True,
+                    context={"request": request},
                 ).data,
                 "market_classifications": StoreMarketClassificationSerializer(
                     all_classifications,
+                    many=True,
+                    context=serializer_context,
+                ).data,
+                "latest_markets": MarketWithStoreProductsSerializer(
+                    latest_markets,
                     many=True,
                     context=serializer_context,
                 ).data,
@@ -482,13 +560,19 @@ class MarketClassificationMarketsView(APIView):
             )
             .distinct()
             .prefetch_related("service_cities", "delivery_areas")
-            .order_by("name", "id")
+            .order_by("-is_popular", "name", "id")
         )
         products_by_market = {
             market.id: list(
                 Product.objects.filter(market=market)
                 .select_related("market__classification")
-                .prefetch_related("images")
+                .prefetch_related(
+                    "images",
+                    Prefetch(
+                        "variants",
+                        queryset=ProductVariant.objects.order_by("price", "id"),
+                    ),
+                )
                 .order_by("-created_at", "-id")[:3]
             )
             for market in markets

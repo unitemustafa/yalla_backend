@@ -635,6 +635,44 @@ class OfferAPITests(APITestCase):
         self.assertEqual(Notification.objects.filter(offer_id=created.data["id"]).count(), 1)
         send_push.assert_called_once()
 
+    @patch("notifications.offer_services.send_notification_push")
+    def test_expired_offer_can_send_again_after_extending_end_time(self, send_push):
+        self.authenticate(self.admin)
+        offer = self.create_offer(cities=[self.city])
+        offer_url = f"{OFFERS_BASE}/{offer.id}/"
+
+        with self.captureOnCommitCallbacks(execute=True):
+            first = self.client.post(
+                f"{offer_url}send-notification/",
+                {"request_id": str(uuid.uuid4())},
+                format="json",
+            )
+        self.assertEqual(first.status_code, status.HTTP_200_OK, first.data)
+
+        offer.end_time = self.now - timedelta(minutes=1)
+        offer.save(update_fields=["end_time"])
+        self.assertEqual(offer.get_effective_status(), Offer.Status.EXPIRED)
+
+        extended = self.client.patch(
+            offer_url,
+            {"end_time": (timezone.now() + timedelta(days=1)).isoformat()},
+            format="json",
+        )
+        self.assertEqual(extended.status_code, status.HTTP_200_OK, extended.data)
+        self.assertTrue(extended.data["can_send_notification"])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            second = self.client.post(
+                f"{offer_url}send-notification/",
+                {"request_id": str(uuid.uuid4())},
+                format="json",
+            )
+
+        self.assertEqual(second.status_code, status.HTTP_200_OK, second.data)
+        self.assertNotEqual(second.data["dispatch_id"], first.data["dispatch_id"])
+        self.assertEqual(Notification.objects.filter(offer=offer).count(), 2)
+        self.assertEqual(send_push.call_count, 2)
+
     def test_push_sent_at_is_read_only(self):
         self.authenticate(self.admin)
         response = self.client.post(

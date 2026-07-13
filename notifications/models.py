@@ -56,6 +56,28 @@ class ProductNotificationDispatch(models.Model):
     error_message = models.TextField(blank=True)
 
 
+class DeliveryAreaNotificationDispatch(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        COMPLETED = "completed", "Completed"
+
+    delivery_area = models.OneToOneField(
+        "locations.DeliveryArea",
+        on_delete=models.CASCADE,
+        related_name="notification_dispatch",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    recipient_count = models.PositiveIntegerField(default=0)
+    notification_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+
 class Notification(models.Model):
     class Audience(models.TextChoices):
         ADMIN = "admin", "Admin"
@@ -76,6 +98,7 @@ class Notification(models.Model):
         ORDER_FAILED_DELIVERY = "order_failed_delivery", "Order Failed Delivery"
         ACCOUNT_DISABLED = "account_disabled", "Account Disabled"
         ACCOUNT_RESTORED = "account_restored", "Account Restored"
+        DELIVERY_AREA_CREATED = "delivery_area_created", "Delivery Area Created"
         COURIER_AVAILABILITY_CHANGED = (
             "courier_availability_changed",
             "Courier Availability Changed",
@@ -117,6 +140,13 @@ class Notification(models.Model):
     )
     product = models.ForeignKey(
         "catalog.Product",
+        on_delete=models.SET_NULL,
+        related_name="notifications",
+        blank=True,
+        null=True,
+    )
+    delivery_area_dispatch = models.ForeignKey(
+        DeliveryAreaNotificationDispatch,
         on_delete=models.SET_NULL,
         related_name="notifications",
         blank=True,
@@ -166,6 +196,11 @@ class Notification(models.Model):
                 fields=["recipient", "order_event"],
                 condition=models.Q(order_event__isnull=False),
                 name="notifications_order_event_recipient_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["delivery_area_dispatch", "recipient"],
+                condition=models.Q(delivery_area_dispatch__isnull=False),
+                name="notifications_area_dispatch_recipient_unique",
             ),
         ]
 

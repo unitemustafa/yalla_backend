@@ -1,6 +1,7 @@
 from decimal import Decimal
 from importlib import import_module
 from io import BytesIO
+import json
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -631,6 +632,79 @@ class AdditionClassificationAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(len(response.data["variants"]), 1)
         self.assertEqual(response.data["variants"][0]["price"], "125.50")
+
+    @override_settings(MEDIA_ROOT="/tmp/yalla_catalog_multipart_variants_test")
+    def test_multipart_product_preserves_nested_variant_payload(self):
+        self.authenticate(self.admin)
+        attributes = [
+            {
+                "client_id": "attr-color",
+                "name": "Color",
+                "sort_order": 0,
+                "options": [
+                    {"client_id": "opt-white", "value": "White", "sort_order": 0},
+                    {"client_id": "opt-black", "value": "Black", "sort_order": 1},
+                ],
+            },
+            {
+                "client_id": "attr-size",
+                "name": "Size",
+                "sort_order": 1,
+                "options": [
+                    {"client_id": "opt-small", "value": "Small", "sort_order": 0},
+                    {"client_id": "opt-large", "value": "Large", "sort_order": 1},
+                ],
+            },
+        ]
+        combinations = (
+            ("opt-white", "opt-small", "100.00"),
+            ("opt-white", "opt-large", "110.00"),
+            ("opt-black", "opt-small", "120.00"),
+            ("opt-black", "opt-large", "130.00"),
+        )
+        variants = [
+            {
+                "price": price,
+                "selections": [
+                    {
+                        "attribute_client_id": "attr-color",
+                        "option_client_id": color,
+                    },
+                    {
+                        "attribute_client_id": "attr-size",
+                        "option_client_id": size,
+                    },
+                ],
+            }
+            for color, size, price in combinations
+        ]
+
+        response = self.client.post(
+            f"{CATALOG_BASE}/products/",
+            {
+                "market_id": str(self.market.id),
+                "name": "Multipart variants",
+                "theme": Product.Theme.OTHER,
+                "is_available": "true",
+                "discount": "0.00",
+                "attributes": json.dumps(attributes),
+                "variants": json.dumps(variants),
+                "images": product_image_upload("variants.png"),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        product = Product.objects.get(pk=response.data["id"])
+        self.assertEqual(product.attributes.count(), 2)
+        self.assertEqual(product.variants.count(), 4)
+        self.assertEqual(
+            list(product.variants.order_by("price").values_list("price", flat=True)),
+            [Decimal("100.00"), Decimal("110.00"), Decimal("120.00"), Decimal("130.00")],
+        )
+        self.assertTrue(
+            all(variant.attribute_values.count() == 2 for variant in product.variants.all())
+        )
 
     def test_unavailable_draft_without_variants_is_created(self):
         self.authenticate(self.admin)

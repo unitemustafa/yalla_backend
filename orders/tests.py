@@ -1251,6 +1251,57 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.data["summary"]["delivery_total"], "120.00")
         self.assertEqual(response.data["summary"]["grand_total"], "1580.00")
 
+    def test_product_percentage_discount_is_applied_to_preview_and_order(self):
+        self.product.discount = Decimal("50.00")
+        self.product.save(update_fields=["discount", "updated_at"])
+        self.authenticate_customer()
+
+        payload = {
+            "address_id": self.address.id,
+            "items": [{"variant_id": self.variant.id, "quantity": 2}],
+        }
+        preview_response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(
+            preview_response.status_code,
+            status.HTTP_200_OK,
+            preview_response.data,
+        )
+        selected_product = preview_response.data["market_groups"][0][
+            "selected_products"
+        ][0]
+        self.assertEqual(selected_product["unit_price"], "250.00")
+        self.assertEqual(selected_product["subtotal"], "500.00")
+        self.assertEqual(preview_response.data["summary"]["subtotal"], "500.00")
+        self.assertEqual(
+            preview_response.data["summary"]["grand_total"],
+            "620.00",
+        )
+
+        create_response = self.client.post(
+            f"{ORDERS_BASE}/create/",
+            {
+                **payload,
+                "payment_method": "cash_on_delivery",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            create_response.status_code,
+            status.HTTP_201_CREATED,
+            create_response.data,
+        )
+        order = Order.objects.get(pk=create_response.data[0]["id"])
+        item = order.items.get()
+        self.assertEqual(item.unit_price, Decimal("250.00"))
+        self.assertEqual(order.subtotal_price, Decimal("500.00"))
+        self.assertEqual(order.total_price, Decimal("620.00"))
+
     def test_client_can_preview_their_own_order(self):
         self.authenticate_customer()
 

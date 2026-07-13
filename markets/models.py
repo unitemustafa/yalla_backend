@@ -8,6 +8,12 @@ class MarketClassification(models.Model):
         NORMAL = "normal", "Normal"
 
     name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    image = models.ImageField(
+        upload_to="market-classifications/",
+        blank=True,
+        null=True,
+    )
     classification_type = models.CharField(
         max_length=20,
         choices=ClassificationType.choices,
@@ -57,6 +63,7 @@ class Market(models.Model):
         default=Scope.SERVICE_CITY,
     )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    is_popular = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

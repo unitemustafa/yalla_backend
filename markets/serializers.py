@@ -18,9 +18,18 @@ from .models import Market, MarketClassification
 
 
 class AdminMarketClassificationSerializer(serializers.ModelSerializer):
+    max_active_featured_classifications = 4
+
     class Meta:
         model = MarketClassification
-        fields = ("id", "name", "classification_type", "is_active")
+        fields = (
+            "id",
+            "name",
+            "description",
+            "image",
+            "classification_type",
+            "is_active",
+        )
 
     def validate_name(self, value):
         name = value.strip()
@@ -32,6 +41,43 @@ class AdminMarketClassificationSerializer(serializers.ModelSerializer):
                 "A market classification with this name already exists."
             )
         return name
+
+    def validate(self, attrs):
+        classification_type = attrs.get(
+            "classification_type",
+            getattr(
+                self.instance,
+                "classification_type",
+                MarketClassification.ClassificationType.NORMAL,
+            ),
+        )
+        is_active = attrs.get(
+            "is_active",
+            getattr(self.instance, "is_active", True),
+        )
+
+        if (
+            classification_type
+            == MarketClassification.ClassificationType.FEATURED
+            and is_active
+        ):
+            featured = MarketClassification.objects.filter(
+                classification_type=MarketClassification.ClassificationType.FEATURED,
+                is_active=True,
+            )
+            if self.instance is not None:
+                featured = featured.exclude(pk=self.instance.pk)
+            if featured.count() >= self.max_active_featured_classifications:
+                raise serializers.ValidationError(
+                    {
+                        "classification_type": (
+                            "Only four active featured market classifications "
+                            "are allowed."
+                        )
+                    }
+                )
+
+        return attrs
 
 
 class DeliveryAreaSummarySerializer(serializers.ModelSerializer):
@@ -87,6 +133,7 @@ class HomeMarketSerializer(serializers.ModelSerializer):
             "branch",
             "scope",
             "status",
+            "is_popular",
             "classification_id",
             "service_cities",
             "delivery_areas",
@@ -98,7 +145,14 @@ class HomeMarketClassificationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = MarketClassification
-        fields = ("id", "name", "classification_type", "markets")
+        fields = (
+            "id",
+            "name",
+            "description",
+            "image",
+            "classification_type",
+            "markets",
+        )
 
     def get_markets(self, classification):
         eligible_market_ids = self.context["eligible_market_ids"]
@@ -153,6 +207,7 @@ class AdminMarketSerializer(serializers.ModelSerializer):
             "branch",
             "scope",
             "status",
+            "is_popular",
             "service_cities",
             "service_city_ids",
             "delivery_areas",
@@ -257,10 +312,19 @@ class AdminMarketSerializer(serializers.ModelSerializer):
 
 class MarketClassificationCountSerializer(serializers.ModelSerializer):
     product_count = serializers.IntegerField(read_only=True)
+    market_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = MarketClassification
-        fields = ("id", "name", "classification_type", "product_count")
+        fields = (
+            "id",
+            "name",
+            "description",
+            "image",
+            "classification_type",
+            "product_count",
+            "market_count",
+        )
 
 
 class HomeCategorySerializer(serializers.ModelSerializer):
@@ -420,6 +484,7 @@ class ProductDetailSerializer(HomeProductSerializer):
 
 class MarketClassificationProductSerializer(serializers.ModelSerializer):
     images = ProductImageSerializer(many=True, read_only=True)
+    variants = HomeVariantSerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
@@ -432,6 +497,7 @@ class MarketClassificationProductSerializer(serializers.ModelSerializer):
             "discount",
             "theme",
             "is_popular",
+            "variants",
         )
 
 
@@ -464,9 +530,11 @@ class MarketWithStoreProductsSerializer(HomeMarketSerializer):
             "name",
             "branch",
             "status",
+            "is_popular",
             "classification_id",
             "product_count",
             "products",
+            "created_at",
         )
 
     def get_products(self, market):

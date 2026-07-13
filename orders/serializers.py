@@ -253,7 +253,8 @@ class OrderPreviewSerializer(serializers.Serializer):
             variant = item["variant"]
             product = variant.product
             quantity = item["quantity"]
-            subtotal = variant.price * quantity
+            unit_price = self._product_unit_price(variant)
+            subtotal = unit_price * quantity
             group = self._market_group(market_groups, product.market)
             line = {
                 "variant_id": variant.id,
@@ -261,7 +262,7 @@ class OrderPreviewSerializer(serializers.Serializer):
                 "product_name": product.name,
                 "image": self._image_url(product.image),
                 "quantity": quantity,
-                "unit_price": self._money(variant.price),
+                "unit_price": self._money(unit_price),
                 "subtotal": self._money(subtotal),
             }
             group["selected_products"].append(line)
@@ -520,6 +521,12 @@ class OrderPreviewSerializer(serializers.Serializer):
             rounding=ROUND_HALF_UP,
         )
 
+    @classmethod
+    def _product_unit_price(cls, variant):
+        discount = variant.product.discount or Decimal("0.00")
+        discount_amount = cls._percentage_amount(variant.price, discount)
+        return max(variant.price - discount_amount, Decimal("0.00"))
+
     def _image_url(self, image):
         if not image:
             return None
@@ -564,7 +571,8 @@ class OrderPreviewSerializer(serializers.Serializer):
             if variant is None:
                 raise serializers.ValidationError({"offers": f"المنتج {product.name} لا يحتوي على خيار صالح للطلب."})
 
-            subtotal = variant.price
+            unit_price = self._product_unit_price(variant)
+            subtotal = unit_price
             group["offer_products_subtotal"] += subtotal
             group["added_products_subtotal"] += subtotal
             group["products"].append(
@@ -574,7 +582,7 @@ class OrderPreviewSerializer(serializers.Serializer):
                     "image": self._image_url(product.image),
                     "variant_id": variant.id,
                     "quantity": 1,
-                    "unit_price": self._money(variant.price),
+                    "unit_price": self._money(unit_price),
                     "subtotal": self._money(subtotal),
                     "is_selected": False,
                 }
@@ -732,7 +740,8 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
             variant = item["variant"]
             product = variant.product
             quantity = item["quantity"]
-            subtotal = variant.price * quantity
+            unit_price = self._product_unit_price(variant)
+            subtotal = unit_price * quantity
             group = self._create_group(
                 groups,
                 product.market,
@@ -745,7 +754,7 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
                 {
                     "variant": variant,
                     "quantity": quantity,
-                    "unit_price": variant.price,
+                    "unit_price": unit_price,
                 }
             )
             group["products_subtotal"] += subtotal
@@ -786,13 +795,14 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
                 variant = product.variants.order_by("id").first()
                 if variant is None:
                     raise serializers.ValidationError({"offers": f"المنتج {product.name} لا يحتوي على خيار صالح للطلب."})
-                offer_group["offer_products_subtotal"] += variant.price
-                group["products_subtotal"] += variant.price
+                unit_price = self._product_unit_price(variant)
+                offer_group["offer_products_subtotal"] += unit_price
+                group["products_subtotal"] += unit_price
                 group["items"].append(
                     {
                         "variant": variant,
                         "quantity": 1,
-                        "unit_price": variant.price,
+                        "unit_price": unit_price,
                     }
                 )
 
@@ -1955,17 +1965,18 @@ class AdminOrderCreateSerializer(OrderSerializer):
         for item in items:
             variant = item["variant"]
             quantity = item["quantity"]
+            unit_price = OrderPreviewSerializer._product_unit_price(variant)
             priced_item = {
                 "variant": variant,
                 "quantity": quantity,
-                "unit_price": variant.price,
+                "unit_price": unit_price,
             }
             priced_items.append(priced_item)
             selected_lines_by_product.setdefault(variant.product_id, []).append(
                 {
                     "variant": variant,
                     "quantity": quantity,
-                    "subtotal": variant.price * quantity,
+                    "subtotal": unit_price * quantity,
                 }
             )
 
@@ -1984,11 +1995,12 @@ class AdminOrderCreateSerializer(OrderSerializer):
                 variant = product.variants.order_by("id").first()
                 if variant is None:
                     continue
-                subtotal = variant.price
+                unit_price = OrderPreviewSerializer._product_unit_price(variant)
+                subtotal = unit_price
                 priced_item = {
                     "variant": variant,
                     "quantity": 1,
-                    "unit_price": variant.price,
+                    "unit_price": unit_price,
                 }
                 priced_items.append(priced_item)
                 selected_lines_by_product.setdefault(product.id, []).append(

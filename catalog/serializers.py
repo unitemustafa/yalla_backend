@@ -1,6 +1,5 @@
 import json
 import hashlib
-import copy
 
 from django.db import transaction
 from rest_framework import serializers
@@ -453,17 +452,25 @@ class AdminProductSerializer(serializers.ModelSerializer):
 
     def to_internal_value(self, data):
         if hasattr(data, "getlist"):
-            data = copy.copy(data)
+            uploads = data.getlist("images")
+            normalized_data = {
+                key: data.get(key)
+                for key in data.keys()
+                if key != "images"
+            }
+            if "additions" in data:
+                normalized_data["additions"] = data.getlist("additions")
+            if uploads:
+                normalized_data["image_uploads"] = uploads
+            data = normalized_data
         else:
             data = dict(data)
-        if hasattr(data, "getlist"):
-            uploads = data.getlist("images")
-            if uploads:
-                data.setlist("image_uploads", uploads)
-        elif isinstance(data.get("images"), (list, tuple)):
+        if isinstance(data.get("images"), (list, tuple)):
             data["image_uploads"] = list(data["images"])
         for key in ("attributes", "variants", "attribute_values", "additions"):
             value = data.get(key)
+            if key == "additions" and isinstance(value, list) and len(value) == 1:
+                value = value[0]
             if isinstance(value, str):
                 stripped = value.strip()
                 if stripped.startswith("[") or stripped.startswith("{"):
@@ -473,6 +480,8 @@ class AdminProductSerializer(serializers.ModelSerializer):
                         raise serializers.ValidationError(
                             {key: "Invalid JSON payload."}
                         )
+                elif key == "additions":
+                    data[key] = [value]
         return super().to_internal_value(data)
 
     def validate(self, attrs):
