@@ -16,16 +16,25 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .models import CourierProfile, OneTimePassword
+from .client_sessions import (
+    access_expires_in,
+    apply_new_client_session,
+    client_access_token,
+    client_session_metadata,
+    sync_outstanding_token,
+)
 from .serializers import (
     AdminUserDetailSerializer,
     AdminUserSerializer,
     AdminUserWriteSerializer,
     AdminLoginSerializer,
+    ClientLoginSerializer,
     EmailOTPSerializer,
     EmailTokenRefreshSerializer,
     ForgotPasswordSerializer,
     LoginSerializer,
     LogoutSerializer,
+    RepresentativeLoginSerializer,
     RegisterSerializer,
     ResetPasswordSerializer,
     UserUpdateSerializer,
@@ -67,31 +76,46 @@ class IsClientRole(BasePermission):
 
 
 def token_payload(user, request=None, admin_session_lifetime=None, remember=False):
+    now = timezone.now()
     refresh = RefreshToken.for_user(user)
     refresh["auth_token_version"] = user.auth_token_version
-    if admin_session_lifetime is not None:
+    is_mobile_app_session = user.role in {
+        User.Role.CLIENT,
+        User.Role.REPRESENTATIVE,
+    }
+    if is_mobile_app_session:
+        apply_new_client_session(refresh, remember=remember, now=now)
+    elif admin_session_lifetime is not None:
         admin_session_exp = int(
-            (timezone.now() + admin_session_lifetime).timestamp()
+            (now + admin_session_lifetime).timestamp()
         )
         refresh["admin_session_exp"] = admin_session_exp
         refresh["admin_remember"] = bool(remember)
         refresh.set_exp(lifetime=admin_session_lifetime)
 
-    access = refresh.access_token
-    if admin_session_lifetime is not None:
+    access = (
+        client_access_token(refresh, now=now)
+        if is_mobile_app_session
+        else refresh.access_token
+    )
+    if admin_session_lifetime is not None and not is_mobile_app_session:
         access.set_exp(
+            from_time=now,
             lifetime=min(
                 admin_session_lifetime,
                 settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"],
             )
         )
-    refresh_value = str(refresh)
-    return {
+    sync_outstanding_token(refresh, user=user)
+    payload = {
         "accessToken": str(access),
-        "refreshToken": refresh_value,
-        "expiresIn": int(settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"].total_seconds()),
+        "refreshToken": str(refresh),
+        "expiresIn": access_expires_in(access, now=now),
         "user": UserSerializer(user, context={"request": request}).data,
     }
+    if is_mobile_app_session:
+        payload["session"] = client_session_metadata(refresh, access)
+    return payload
 
 
 def update_successful_login(user):
@@ -274,16 +298,21 @@ class LoginView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data["user"]
+        remember = serializer.validated_data.get("remember", False)
         update_successful_login(user)
-        return Response(token_payload(user, request=request))
+        return Response(
+            token_payload(user, request=request, remember=remember)
+        )
 
 
 class ClientLoginView(LoginView):
     role = User.Role.CLIENT
+    serializer_class = ClientLoginSerializer
 
 
 class RepresentativeLoginView(LoginView):
     role = User.Role.REPRESENTATIVE
+    serializer_class = RepresentativeLoginSerializer
 
 
 class AdminLoginView(LoginView):

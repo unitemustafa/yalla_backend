@@ -15,6 +15,7 @@ from .views import (
     ProductLikeListView,
     ProductLikeToggleView,
     ProductListCreateView,
+    ProductSendNotificationView,
     ProductImageCollectionView,
     ProductImageDetailView,
     ProductImageReorderView,
@@ -83,6 +84,11 @@ urlpatterns = [
         "products/<int:product_id>/",
         ProductDetailView.as_view(),
         name="product-detail",
+    ),
+    path(
+        "products/<int:product_id>/send-notification/",
+        ProductSendNotificationView.as_view(),
+        name="product-send-notification",
     ),
     path(
         "products/<int:product_id>/images/",

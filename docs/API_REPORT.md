@@ -1,7 +1,8 @@
 # Yalla Backend API Report
 
-آخر تحقق: 2026-07-05  
-مصدر التحقق: الكود الحالي في هذا المستودع مع `config.test_settings` وبيانات `seed_demo_data --reset --yes-delete-all --no-media`.  
+آخر تحقق: 2026-07-13
+
+مصدر التحقق: الكود الحالي، اختبارات بوقت متحكم فيه، وطلبات `curl` فعلية على خادم محلي بقاعدة SQLite مؤقتة وحسابات عميل مخصصة للاختبار.
 الهدف من هذا الملف: مرجع ربط واضح للعميل، لوحة الإدارة، والمندوب. الأمثلة مأخوذة من استجابات فعلية، لكن قيم `id` والتواريخ أمثلة seed وقد تختلف بعد إعادة إنشاء البيانات.
 
 ## قواعد عامة
@@ -204,43 +205,267 @@ Response `200`:
 
 ### Client login
 
-Request:
+المسار الفعلي هو `POST /api/v1/auth/login/client/` ويعمل أيضاً بدون slash أخير. يقبل `identifier` كبريد أو username أو هاتف، ويقبل `email` للتوافق. اسم حقل الاختيار هو `remember`؛ القيمة المفقودة تُعامل كـ `false`.
+
+Request مؤقت:
 
 ```json
 {
-  "email": "seed.amina@yalla.seed",
-  "password": "SeedPass1!"
+  "identifier": "<test-identifier>",
+  "password": "<redacted>",
+  "remember": false
 }
+```
+
+Response `200` الفعلي بعد تنقيح الأسرار والهوية:
+
+```json
+{
+  "accessToken": "<redacted>",
+  "refreshToken": "<redacted>",
+  "expiresIn": 900,
+  "session": {
+    "mode": "temporary",
+    "remember": false,
+    "startedAt": "2026-07-13T10:08:25Z",
+    "absoluteExpiresAt": "2026-07-13T18:08:25Z",
+    "accessExpiresAt": "2026-07-13T10:23:25Z",
+    "refreshExpiresAt": "2026-07-13T18:08:25Z"
+  },
+  "user": {
+    "id": "<redacted>",
+    "email": "<redacted>",
+    "role": "client",
+    "is_active": true
+  }
+}
+```
+
+Request دائم:
+
+```json
+{
+  "identifier": "<test-identifier>",
+  "password": "<redacted>",
+  "remember": true
+}
+```
+
+Response `200` الفعلي المنقح:
+
+```json
+{
+  "accessToken": "<redacted>",
+  "refreshToken": "<redacted>",
+  "expiresIn": 900,
+  "session": {
+    "mode": "persistent",
+    "remember": true,
+    "startedAt": "2026-07-13T10:08:26Z",
+    "absoluteExpiresAt": null,
+    "accessExpiresAt": "2026-07-13T10:23:26Z",
+    "refreshExpiresAt": "2026-07-20T10:08:26Z"
+  },
+  "user": {
+    "id": "<redacted>",
+    "email": "<redacted>",
+    "role": "client",
+    "is_active": true
+  }
+}
+```
+
+### Mobile app session contract
+
+- الـ access token قصير العمر: 15 دقيقة كحد أقصى.
+- `remember=false` أو غياب الحقل ينشئ جلسة مؤقتة بموعد نهائي مطلق بعد 8 ساعات من `startedAt`.
+- كل refresh للجلسة المؤقتة يحافظ على نفس `startedAt` و`absoluteExpiresAt`؛ لا يمدد الثماني ساعات. عند قرب الموعد النهائي تُقصّر صلاحية access كي لا تتجاوزه.
+- `remember=true` ينشئ جلسة دائمة بنافذة خمول 7 أيام. refresh ناجح بسبب استخدام التطبيق يدوّر refresh token ويجعل `refreshExpiresAt` الجديد بعد 7 أيام من لحظة التحديث.
+- refresh token القديم يدخل blacklist فور التدوير ولا يمكن إعادة استخدامه.
+- لا يوجد refresh خلفي دوري لإبقاء تطبيق غير مستخدم مسجلاً.
+- السياسة تطبق على دخول `client` و`representative` من تطبيقات الهاتف. سلوك admin بقي منفصلاً كما كان.
+- توكن عميل أو مندوب قديم بلا session claims يعامل مؤقتاً بمهلة 8 ساعات من `iat` لأن اختيار الجلسة الأصلي لا يمكن استعادته بأمان.
+
+Refresh request الفعلي:
+
+```http
+POST /api/v1/auth/refresh/
+Content-Type: application/json
+
+{"refreshToken":"<redacted>"}
+```
+
+Response مؤقت فعلي منقح؛ لاحظ ثبات الموعد المطلق:
+
+```json
+{
+  "accessToken": "<redacted>",
+  "refreshToken": "<redacted>",
+  "expiresIn": 900,
+  "session": {
+    "mode": "temporary",
+    "remember": false,
+    "startedAt": "2026-07-13T10:08:25Z",
+    "absoluteExpiresAt": "2026-07-13T18:08:25Z",
+    "accessExpiresAt": "2026-07-13T10:23:25Z",
+    "refreshExpiresAt": "2026-07-13T18:08:25Z"
+  }
+}
+```
+
+Response دائم فعلي منقح:
+
+```json
+{
+  "accessToken": "<redacted>",
+  "refreshToken": "<redacted>",
+  "expiresIn": 900,
+  "session": {
+    "mode": "persistent",
+    "remember": true,
+    "startedAt": "2026-07-13T10:08:26Z",
+    "absoluteExpiresAt": null,
+    "accessExpiresAt": "2026-07-13T10:23:26Z",
+    "refreshExpiresAt": "2026-07-20T10:08:26Z"
+  }
+}
+```
+
+إعادة استخدام refresh قديم بعد rotation أو logout ترجع فعلياً `401`:
+
+```json
+{
+  "detail": "Token is blacklisted",
+  "code": "token_not_valid"
+}
+```
+
+الجلسة التي تجاوزت نافذة الخمول/الموعد المطلق ترجع `401` بالشكل المثبت في اختبارات الوقت المتحكم فيه:
+
+```json
+{
+  "code": "session_expired",
+  "detail": "Session expired. Please login again."
+}
+```
+
+الحساب غير النشط له الأولوية حتى لو كان refresh token قديماً ومدرجاً في blacklist. طلب `curl` الفعلي رجع `403`:
+
+```json
+{
+  "code": "account_inactive",
+  "detail": "تم إيقاف حسابك. تواصل مع الدعم."
+}
+```
+
+`GET /api/v1/auth/me/` يرجع كائن المستخدم مباشرة، وليس داخل مفتاح `user`. مثال منقح:
+
+```json
+{
+  "id": "<redacted>",
+  "email": "<redacted>",
+  "first_name": "<redacted>",
+  "last_name": "<redacted>",
+  "role": "client",
+  "is_active": true
+}
+```
+
+Logout request الفعلي:
+
+```http
+POST /api/v1/auth/logout/
+Authorization: Bearer <redacted>
+Content-Type: application/json
+
+{"refreshToken":"<redacted>"}
 ```
 
 Response `200`:
 
 ```json
-{
-  "accessToken": "<accessToken>",
-  "refreshToken": "<refreshToken>",
-  "expiresIn": 900,
-  "user": {
-    "id": "2",
-    "first_name": "أمينة",
-    "last_name": "حسن",
-    "username": "seed_amina",
-    "email": "seed.amina@yalla.seed",
-    "phone": "+201001000002",
-    "gender": "",
-    "birth_date": null,
-    "avatar_url": null,
-    "username_changed_at": null,
-    "role": "client",
-    "has_password": true,
-    "courier_profile": null
-  }
-}
+{"detail":"Logout successful."}
+```
+
+الـ logout يضع refresh الحالي في blacklist. access المنسوخ قبل logout يبقى صالحاً حتى انتهاء حدّه القصير (15 دقيقة كحد أقصى)، وهو سلوك JWT الحالي المقصود؛ تطبيق Flutter يمسحه محلياً فوراً.
+
+### Flutter session handling
+
+- Android وiOS: الجلسة الدائمة فقط تُكتب في `flutter_secure_storage`. الجلسة المؤقتة تبقى في الذاكرة، لذلك موت process ينهيها.
+- Web: الجلسة المؤقتة تستخدم `window.sessionStorage`، لا persistent local storage؛ إغلاق tab/window ينهيها. الجلسة الدائمة تستخدم مخزن التوكن الآمن الدائم الحالي.
+- كلمة المرور وcheckbox لا يتم تخزينهما.
+- عند startup تستعاد الجلسة الدائمة، يُفحص deadline، يحدث access عند الحاجة، ثم يُتحقق من المستخدم عبر `/auth/me/`. الجلسة المؤقتة لا تستعاد بعد mobile process restart.
+- قبل كل طلب محمي يفحص العميل انتهاء access بهامش دقيقة. كما يعالج `401` الحقيقي، يحدّث مرة، ثم يعيد الطلب الأصلي مرة واحدة فقط.
+- refresh متزامن single-flight: الطلبات المتوازية تنتظر نفس العملية، ثم تستخدم نفس access الجديد. حفظ access وrefresh المدورين يتم بعملية store واحدة.
+- عند resume لا يحدث refresh إلا بسبب استخدام foreground؛ يفحص deadline ثم يستدعي مسار التحقق الحالي من الحساب.
+- عند deadline المؤقت يمسح التوكنات والحالة الخاصة، يمسح protected navigation stack، ويعرض رسالة انتهاء الجلسة العربية.
+- logout يحاول إلغاء جهاز FCM والـ backend refresh، لكنه يكمل المسح المحلي والتنقل للدخول حتى عند فشل الشبكة.
+
+### Sanitized curl commands used on 2026-07-13
+
+القيم أتت من متغيرات shell مؤقتة؛ لم تُكتب credentials أو JWTs في المصدر أو هذا التقرير:
+
+```bash
+curl -sS -X POST "$BASE_URL/api/v1/auth/login/client/" \
+  -H 'Content-Type: application/json' \
+  --data '{"identifier":"<redacted>","password":"<redacted>"}'
+
+curl -sS -X POST "$BASE_URL/api/v1/auth/login/client/" \
+  -H 'Content-Type: application/json' \
+  --data '{"identifier":"<redacted>","password":"<redacted>","remember":false}'
+
+curl -sS -X POST "$BASE_URL/api/v1/auth/login/client/" \
+  -H 'Content-Type: application/json' \
+  --data '{"identifier":"<redacted>","password":"<redacted>","remember":true}'
+
+curl -sS -X POST "$BASE_URL/api/v1/auth/refresh/" \
+  -H 'Content-Type: application/json' \
+  --data '{"refreshToken":"<redacted>"}'
+
+curl -sS "$BASE_URL/api/v1/auth/me/" \
+  -H 'Authorization: Bearer <redacted>'
+
+curl -sS -X POST "$BASE_URL/api/v1/auth/logout/" \
+  -H 'Authorization: Bearer <redacted>' \
+  -H 'Content-Type: application/json' \
+  --data '{"refreshToken":"<redacted>"}'
+
+curl -sS -X POST "$BASE_URL/api/v1/auth/login/representative/" \
+  -H 'Content-Type: application/json' \
+  --data '{"identifier":"<redacted>","password":"<redacted>","remember":true}'
 ```
 
 ### Courier login
 
-Response يحتوي `courier_profile` لأن الدور `representative`:
+المسار الفعلي هو `POST /api/v1/auth/login/representative/`. يقبل نفس `identifier` وحقل `remember`، والقيمة المفقودة آمنة وتساوي `false`.
+
+التحقق الفعلي المنقح في 2026-07-13 أعاد للجلسة الدائمة:
+
+```json
+{
+  "accessToken": "<redacted>",
+  "refreshToken": "<redacted>",
+  "expiresIn": 900,
+  "session": {
+    "mode": "persistent",
+    "remember": true,
+    "startedAt": "2026-07-13T11:06:20Z",
+    "absoluteExpiresAt": null,
+    "accessExpiresAt": "2026-07-13T11:21:20Z",
+    "refreshExpiresAt": "2026-07-20T11:06:20Z"
+  },
+  "user": {
+    "id": "<redacted>",
+    "email": "<redacted>",
+    "role": "representative",
+    "is_active": true
+  }
+}
+```
+
+غياب `remember` و`remember=false` أعادا فعلياً `mode=temporary` مع `absoluteExpiresAt` بعد 8 ساعات. تدوير refresh غيّر access وrefresh معاً، وحافظ على الموعد المطلق للمؤقت. إعادة استخدام القديم أو refresh بعد logout أعادت `401 token_not_valid`.
+
+Response الكامل يحتوي أيضاً `courier_profile` لأن الدور `representative`:
 
 ```json
 {
@@ -1558,7 +1783,10 @@ Response shape:
 
 ## Integration Checklist
 
-- خزّن `accessToken` وابعثه في `Authorization` لكل endpoint محمي.
+- أرسل `remember` صراحة في client login، مع اعتبار القيمة الافتراضية `false`.
+- خزّن `accessToken`, `refreshToken`, و`session` معاً فقط عندما `session.remember=true`؛ المؤقت يتبع سياسة الذاكرة/sessionStorage أعلاه.
+- استبدل access وrefresh معاً بعد كل rotation، ولا تعاود استخدام refresh القديم.
+- ابعث `accessToken` في `Authorization` لكل endpoint محمي، وحدّثه تلقائياً قبل الانتهاء أو بعد `401` مرة واحدة.
 - لا تعرض Home أو Offers للعميل قبل اختيار `market_region`.
 - عند `general` أنشئ/استخدم عنواناً عاماً يدوياً فقط، ولا ترسل `service_city_id` في preview/create.
 - لا تعتبر `manual_city="القاهرة"` مدينة خدمة؛ هي نص فقط في الطلب العام.

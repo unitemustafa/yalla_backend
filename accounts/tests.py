@@ -168,6 +168,7 @@ class AuthenticationAPITests(APITestCase):
         self.assertIn("accessToken", verify_response.data)
         self.assertIn("refreshToken", verify_response.data)
         self.assertIn("expiresIn", verify_response.data)
+        self.assertEqual(verify_response.data["session"]["mode"], "temporary")
         self.assertTrue(User.objects.get(pk=user.pk).is_active)
 
     def test_registration_rejects_duplicate_active_email(self):
@@ -267,6 +268,7 @@ class AuthenticationAPITests(APITestCase):
         self.assertIn("expiresIn", response.data)
         self.assertNotIn("access", response.data)
         self.assertNotIn("refresh", response.data)
+        self.assertEqual(response.data["session"]["mode"], "temporary")
 
     def test_role_specific_login_endpoints_require_matching_role(self):
         client = self.create_active_user(
@@ -482,9 +484,13 @@ class AuthenticationAPITests(APITestCase):
         self.assertNotIn(
             "admin_session_exp", RefreshToken(client_response.data["refreshToken"])
         )
+        self.assertEqual(client_response.data["session"]["mode"], "temporary")
         self.assertNotIn(
             "admin_session_exp",
             RefreshToken(representative_response.data["refreshToken"]),
+        )
+        self.assertEqual(
+            representative_response.data["session"]["mode"], "temporary"
         )
 
     def test_admin_user_crud_requires_authentication(self):

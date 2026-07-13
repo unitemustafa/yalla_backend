@@ -2,7 +2,11 @@ from django.contrib.auth import get_user_model
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.settings import api_settings
 
-from .exceptions import AccountInactive
+from .client_sessions import (
+    client_session_claims,
+    validate_client_session_deadline,
+)
+from .exceptions import AccountInactive, InvalidSession
 
 User = get_user_model()
 
@@ -20,17 +24,22 @@ def token_user(validated_token):
         raise AuthenticationFailed("User not found.", code="user_not_found") from exc
 
 
-def validate_client_token_state(validated_token, user=None):
+def validate_client_token_state(
+    validated_token,
+    user=None,
+    *,
+    validate_session_deadline=True,
+):
     user = user or token_user(validated_token)
     if user.role not in {User.Role.CLIENT, User.Role.REPRESENTATIVE}:
         return user
-    if user.role == User.Role.CLIENT and (
-        user.deleted_at is not None or not user.is_active
-    ):
+    if user.deleted_at is not None or not user.is_active:
         raise AccountInactive()
     try:
         token_version = int(validated_token.get("auth_token_version", 0))
     except (TypeError, ValueError) as exc:
+        if user.role == User.Role.CLIENT:
+            raise InvalidSession() from exc
         raise AuthenticationFailed("Token is invalid.", code="token_not_valid") from exc
     if token_version != user.auth_token_version:
         if user.role == User.Role.REPRESENTATIVE:
@@ -38,5 +47,10 @@ def validate_client_token_state(validated_token, user=None):
                 "Password changed. Please login again.",
                 code="password_changed",
             )
-        raise AuthenticationFailed("Token is invalid.", code="token_not_valid")
+        raise InvalidSession()
+    if user.role in {User.Role.CLIENT, User.Role.REPRESENTATIVE}:
+        if validate_session_deadline:
+            validate_client_session_deadline(validated_token)
+        else:
+            client_session_claims(validated_token)
     return user

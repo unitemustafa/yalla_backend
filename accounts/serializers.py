@@ -2,6 +2,8 @@ import re
 from datetime import timedelta
 from pathlib import Path
 
+import jwt
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.validators import UnicodeUsernameValidator
@@ -14,16 +16,29 @@ from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.exceptions import PermissionDenied
-from rest_framework_simplejwt.exceptions import TokenBackendError, TokenError
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.state import token_backend
+from rest_framework_simplejwt.token_blacklist.models import (
+    BlacklistedToken,
+    OutstandingToken,
+)
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from locations.models import ServiceCity
 from orders.models import Order
 
 from .courier_rules import active_assigned_orders_for_user
-from .exceptions import AccountInactive
+from .client_sessions import (
+    access_expires_in,
+    apply_rotated_client_session,
+    client_access_token,
+    client_session_claims,
+    client_session_metadata,
+    sync_outstanding_token,
+)
+from .exceptions import AccountInactive, SessionExpired
 from .models import CourierProfile, OneTimePassword
 from .token_security import validate_client_token_state
 from .services import normalize_email, verify_otp
@@ -414,7 +429,13 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             raise AuthenticationFailed("Invalid email or password.")
         expected_role = self.context.get("expected_role")
         if user.deleted_at is not None or not user.is_active:
-            if user.role == User.Role.CLIENT or expected_role == User.Role.CLIENT:
+            if user.role in {
+                User.Role.CLIENT,
+                User.Role.REPRESENTATIVE,
+            } or expected_role in {
+                User.Role.CLIENT,
+                User.Role.REPRESENTATIVE,
+            }:
                 raise AccountInactive()
             raise serializers.ValidationError("Account is inactive.")
         if expected_role and user.role != expected_role:
@@ -465,6 +486,18 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             "code": "representative_account_required",
             "detail": "This login is only for representative accounts.",
         }
+
+
+class ClientLoginSerializer(LoginSerializer):
+    """Client-only session choice; omitted values are temporary by default."""
+
+    remember = serializers.BooleanField(required=False, default=False)
+
+
+class RepresentativeLoginSerializer(LoginSerializer):
+    """Courier-app session choice; omitted values are temporary by default."""
+
+    remember = serializers.BooleanField(required=False, default=False)
 
 
 class AdminLoginSerializer(LoginSerializer):
@@ -1045,17 +1078,36 @@ class EmailTokenRefreshSerializer(
         try:
             token = RefreshToken(refresh)
         except TokenError:
-            # A dashboard token's normal JWT expiry is deliberately the same as
-            # its absolute session expiry. Decode only to tailor that expired
-            # dashboard response; non-admin tokens retain Simple JWT's behavior.
+            payload, user, outstanding = _decode_known_refresh(refresh)
             try:
-                payload = token_backend.decode(refresh, verify=False)
-            except (TokenBackendError, TokenError):
+                is_expired = int(payload["exp"]) <= int(
+                    timezone.now().timestamp()
+                )
+            except (KeyError, TypeError, ValueError):
+                raise
+            if user.role in {User.Role.CLIENT, User.Role.REPRESENTATIVE}:
+                validate_client_token_state(
+                    payload,
+                    user=user,
+                    validate_session_deadline=False,
+                )
+                if BlacklistedToken.objects.filter(token=outstanding).exists():
+                    raise
+                if is_expired:
+                    raise SessionExpired()
+                raise
+            if not is_expired:
                 raise
             if payload.get("admin_session_exp") is not None:
                 raise AuthenticationFailed("Session expired. Please login again.")
             raise
-        validate_client_token_state(token)
+
+        user = validate_client_token_state(token)
+        app_session_claims = (
+            client_session_claims(token)
+            if user.role in {User.Role.CLIENT, User.Role.REPRESENTATIVE}
+            else None
+        )
         admin_session_exp = token.get("admin_session_exp")
         if admin_session_exp is not None:
             try:
@@ -1066,10 +1118,33 @@ class EmailTokenRefreshSerializer(
                 raise AuthenticationFailed("Session expired. Please login again.")
 
         data = super().validate({"refresh": refresh})
+        now = timezone.now()
+        if app_session_claims is not None:
+            rotated_refresh = RefreshToken(
+                data.get("refresh", refresh), verify=False
+            )
+            apply_rotated_client_session(
+                rotated_refresh,
+                app_session_claims,
+                now=now,
+            )
+            access = client_access_token(rotated_refresh, now=now)
+            data["access"] = str(access)
+            data["refresh"] = str(rotated_refresh)
+            sync_outstanding_token(rotated_refresh, user=user)
+            return {
+                "accessToken": data["access"],
+                "refreshToken": data["refresh"],
+                "expiresIn": access_expires_in(access, now=now),
+                "session": client_session_metadata(rotated_refresh, access),
+            }
+
         if admin_session_exp is not None:
             # Simple JWT normally resets the rotated refresh expiry to the global
             # 30-day lifetime. Restore the dashboard's original absolute expiry.
-            rotated_refresh = RefreshToken(data.get("refresh", refresh))
+            rotated_refresh = RefreshToken(
+                data.get("refresh", refresh), verify=False
+            )
             rotated_refresh["admin_session_exp"] = admin_session_exp
             rotated_refresh["admin_remember"] = bool(token.get("admin_remember"))
             rotated_refresh["exp"] = admin_session_exp
@@ -1086,7 +1161,44 @@ class EmailTokenRefreshSerializer(
             )
             data["access"] = str(access)
             data["refresh"] = str(rotated_refresh)
+            sync_outstanding_token(rotated_refresh, user=user)
         return {
             "accessToken": data["access"],
             "refreshToken": data.get("refresh", refresh),
         }
+
+
+def _decode_known_refresh(raw_refresh):
+    try:
+        payload = jwt.decode(
+            raw_refresh,
+            token_backend.get_verifying_key(raw_refresh),
+            algorithms=[token_backend.algorithm],
+            audience=token_backend.audience,
+            issuer=token_backend.issuer,
+            leeway=token_backend.get_leeway(),
+            options={
+                "verify_exp": False,
+                "verify_aud": token_backend.audience is not None,
+            },
+        )
+    except jwt.PyJWTError as exc:
+        raise TokenError("Token is invalid") from exc
+
+    user_id = payload.get(api_settings.USER_ID_CLAIM)
+    jti = payload.get(api_settings.JTI_CLAIM)
+    if (
+        payload.get(api_settings.TOKEN_TYPE_CLAIM) != RefreshToken.token_type
+        or user_id is None
+        or jti is None
+    ):
+        raise TokenError("Token is invalid")
+
+    outstanding = (
+        OutstandingToken.objects.select_related("user")
+        .filter(jti=jti, user_id=user_id)
+        .first()
+    )
+    if outstanding is None or outstanding.user is None:
+        raise TokenError("Token is invalid")
+    return payload, outstanding.user, outstanding

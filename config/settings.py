@@ -163,8 +163,12 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": True,
 }
 
+# Client and representative mobile sessions use per-token lifetimes enforced
+# by the accounts JWT helpers.
+CLIENT_REMEMBERED_SESSION_LIFETIME = timedelta(days=7)
+CLIENT_TEMPORARY_SESSION_LIFETIME = timedelta(hours=8)
+
 # These lifetimes apply only to tokens issued by the dashboard admin login.
-# Client and representative refresh tokens retain the general Simple JWT lifetime.
 ADMIN_REMEMBER_SESSION_LIFETIME = timedelta(days=7)
 ADMIN_TEMPORARY_SESSION_LIFETIME = timedelta(hours=8)
 

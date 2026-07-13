@@ -40,6 +40,7 @@ class DeviceTokenSerializer(serializers.Serializer):
 class NotificationSerializer(serializers.ModelSerializer):
     order_id = serializers.IntegerField(read_only=True)
     offer_id = serializers.IntegerField(read_only=True)
+    product_id = serializers.IntegerField(read_only=True)
     offer = serializers.SerializerMethodField()
 
     def get_offer(self, instance):
@@ -79,6 +80,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             "message",
             "order_id",
             "offer_id",
+            "product_id",
             "offer",
             "data",
             "is_read",

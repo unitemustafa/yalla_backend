@@ -1,6 +1,6 @@
 from django.db.models import ProtectedError
 
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.generics import get_object_or_404
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import BasePermission, IsAuthenticated
@@ -503,6 +503,33 @@ class ProductDetailView(APIView):
         return Response(
             {"details": "Deleted Successfully"},
             status=status.HTTP_204_NO_CONTENT,
+        )
+
+
+class ProductSendNotificationView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request, product_id):
+        get_object_or_404(Product, id=product_id)
+        request_id = serializers.UUIDField().run_validation(
+            request.data.get("request_id")
+        )
+        from notifications.product_services import dispatch_product_notifications
+
+        dispatch = dispatch_product_notifications(
+            product_id,
+            request_id,
+            request.user.id,
+        )
+        return Response(
+            {
+                "dispatch_id": dispatch.id,
+                "request_id": str(dispatch.request_id),
+                "status": dispatch.status,
+                "recipient_count": dispatch.recipient_count,
+                "notification_count": dispatch.notification_count,
+                "sent_at": dispatch.completed_at,
+            }
         )
 
 
