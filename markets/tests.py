@@ -1416,6 +1416,7 @@ class HomeAPITests(APITestCase):
         busiest_market_payload = all_by_name["Busiest local"]["markets"][0]
         self.assertEqual(busiest_market_payload["id"], busiest_market.id)
         self.assertTrue(busiest_market_payload["is_popular"])
+        self.assertIn("image", busiest_market_payload)
         self.assertIn("product_count", busiest_market_payload)
         self.assertIn("products", busiest_market_payload)
         self.assertNotIn("delivery_areas", busiest_market_payload)

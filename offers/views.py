@@ -33,6 +33,15 @@ class OfferListCreateView(APIView):
                 "service_cities",
                 "products__market",
                 "products__images",
+                "items__variant__product__market__classification",
+                "items__variant__product__market__service_cities",
+                "items__variant__product__market__delivery_areas",
+                "items__variant__product__attributes__options",
+                "items__variant__product__images",
+                "items__variant__attribute_values__attribute",
+                "items__variant__attribute_values__option",
+                "items__variant__attribute_values__product_attribute",
+                "items__variant__attribute_values__product_attribute_option",
             )
             .order_by("-announcement_priority", "-created_at", "-id")
         )
@@ -64,6 +73,15 @@ class OfferListCreateView(APIView):
                 "products__market__delivery_areas",
                 "products__variants",
                 "products__images",
+                "items__variant__product__market__classification",
+                "items__variant__product__market__service_cities",
+                "items__variant__product__market__delivery_areas",
+                "items__variant__product__attributes__options",
+                "items__variant__product__images",
+                "items__variant__attribute_values__attribute",
+                "items__variant__attribute_values__option",
+                "items__variant__attribute_values__product_attribute",
+                "items__variant__attribute_values__product_attribute_option",
             )
             .order_by("-announcement_priority", "-created_at", "-id")
         )
@@ -112,6 +130,15 @@ class OfferDetailView(APIView):
                 "service_cities",
                 "products__market",
                 "products__images",
+                "items__variant__product__market__classification",
+                "items__variant__product__market__service_cities",
+                "items__variant__product__market__delivery_areas",
+                "items__variant__product__attributes__options",
+                "items__variant__product__images",
+                "items__variant__attribute_values__attribute",
+                "items__variant__attribute_values__option",
+                "items__variant__attribute_values__product_attribute",
+                "items__variant__attribute_values__product_attribute_option",
             )
         )
 
@@ -135,6 +162,15 @@ class OfferDetailView(APIView):
                     "products__market__delivery_areas",
                     "products__variants",
                     "products__images",
+                    "items__variant__product__market__classification",
+                    "items__variant__product__market__service_cities",
+                    "items__variant__product__market__delivery_areas",
+                    "items__variant__product__attributes__options",
+                    "items__variant__product__images",
+                    "items__variant__attribute_values__attribute",
+                    "items__variant__attribute_values__option",
+                    "items__variant__attribute_values__product_attribute",
+                    "items__variant__attribute_values__product_attribute_option",
                 ),
                 id=offer_id,
             )

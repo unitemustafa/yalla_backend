@@ -1502,6 +1502,83 @@ class AuthenticationAPITests(APITestCase):
         self.assertIsNone(profile.delivery_area_id)
         self.assertFalse(profile.is_available)
 
+    def test_admin_can_create_representative_with_avatar_in_one_multipart_request(self):
+        city = ServiceCity.objects.create(name="Multipart Courier City")
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="multipart_courier_admin",
+            email="multipart-courier-admin@example.com",
+            phone="+213555000063",
+        )
+        refresh = RefreshToken.for_user(admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            f"{AUTH_BASE}/users/",
+            {
+                "first_name": "Photo",
+                "last_name": "Courier",
+                "username": "multipart_photo_courier",
+                "email": "multipart-photo-courier@example.com",
+                "phone": "+213555000064",
+                "password": self.password,
+                "role": User.Role.REPRESENTATIVE,
+                "is_active": "true",
+                "is_staff": "false",
+                "is_superuser": "false",
+                "courier_profile.vehicle_type": "Motorcycle",
+                "courier_profile.plate_number": "PHOTO-1",
+                "courier_profile.service_city": str(city.id),
+                "courier_profile.max_active_orders": "1",
+                "courier_profile.is_available": "true",
+                "avatar_image": profile_image_file("courier-avatar.png"),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        courier = User.objects.get(username="multipart_photo_courier")
+        self.assertTrue(courier.avatar_image.name.startswith("avatars/"))
+        self.assertEqual(courier.courier_profile.service_city_id, city.id)
+
+    def test_oversized_avatar_rejects_entire_representative_creation(self):
+        city = ServiceCity.objects.create(name="Rejected Avatar Courier City")
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="rejected_avatar_admin",
+            email="rejected-avatar-admin@example.com",
+            phone="+213555000065",
+        )
+        refresh = RefreshToken.for_user(admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            f"{AUTH_BASE}/users/",
+            {
+                "first_name": "Rejected",
+                "last_name": "Courier",
+                "username": "rejected_avatar_courier",
+                "email": "rejected-avatar-courier@example.com",
+                "phone": "+213555000066",
+                "password": self.password,
+                "role": User.Role.REPRESENTATIVE,
+                "is_active": "true",
+                "courier_profile.vehicle_type": "Motorcycle",
+                "courier_profile.plate_number": "REJECT-1",
+                "courier_profile.service_city": str(city.id),
+                "courier_profile.max_active_orders": "1",
+                "courier_profile.is_available": "true",
+                "avatar_image": oversized_profile_image_file(),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("avatar_image", response.data)
+        self.assertFalse(
+            User.objects.filter(username="rejected_avatar_courier").exists()
+        )
+
     def test_admin_can_update_courier_availability_without_resending_service_city(self):
         city = ServiceCity.objects.create(name="Inactive courier city")
         representative = self.create_active_user(

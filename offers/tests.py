@@ -2,6 +2,7 @@ from datetime import timedelta
 from decimal import Decimal
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+import json
 import uuid
 
 from django.contrib.auth import get_user_model
@@ -12,7 +13,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from catalog.models import CategoryClassification, Product, ProductCategory
+from catalog.models import CategoryClassification, Product, ProductCategory, ProductVariant
 from locations.models import ServiceCity
 from markets.models import Market, MarketClassification
 from orders.models import Order, OrderOffer
@@ -93,6 +94,16 @@ class OfferAPITests(APITestCase):
             category=self.category,
             name="Burger",
             description="Burger",
+        )
+        self.variant = ProductVariant.objects.create(
+            product=self.product,
+            price=Decimal("100.00"),
+            sku="BURGER-SMALL",
+        )
+        self.second_variant = ProductVariant.objects.create(
+            product=self.product,
+            price=Decimal("400.00"),
+            sku="BURGER-LARGE",
         )
         self.second_product = Product.objects.create(
             market=self.market,
@@ -487,6 +498,39 @@ class OfferAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("product_ids", response.data)
 
+    def test_admin_offer_items_keep_the_selected_variant_and_quantity(self):
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(
+                product_ids=[self.product.id],
+                items=[
+                    {
+                        "variant_id": self.second_variant.id,
+                        "quantity": 3,
+                    }
+                ],
+            ),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(response.data["items"][0]["variant_id"], self.second_variant.id)
+        self.assertEqual(response.data["items"][0]["product_id"], self.product.id)
+        self.assertEqual(response.data["items"][0]["quantity"], 3)
+        self.assertEqual(response.data["items"][0]["price"], "400.00")
+
+        offer_id = response.data["id"]
+        self.authenticate(self.client_user)
+        client_response = self.client.get(f"{OFFERS_BASE}/")
+
+        self.assertEqual(client_response.status_code, status.HTTP_200_OK, client_response.data)
+        client_offer = next(item for item in client_response.data if item["id"] == offer_id)
+        self.assertEqual(client_offer["products"][0]["offer_variant_id"], self.second_variant.id)
+        self.assertEqual(client_offer["products"][0]["offer_quantity"], 3)
+        self.assertEqual(client_offer["products"][0]["variants"][0]["id"], self.second_variant.id)
+
     def test_admin_can_create_all_supported_offer_types(self):
         self.authenticate(self.admin)
 
@@ -527,6 +571,9 @@ class OfferAPITests(APITestCase):
                     **self.offer_payload(),
                     "service_city_ids": f"[{self.city.id}]",
                     "product_ids": f"[{self.product.id}]",
+                    "items": json.dumps(
+                        [{"variant_id": self.second_variant.id, "quantity": 2}]
+                    ),
                     "active_days": '["saturday","sunday"]',
                     "image": image,
                 },
@@ -539,6 +586,8 @@ class OfferAPITests(APITestCase):
                 set(create_response.data["service_city_ids"]),
                 {self.city.id},
             )
+            self.assertEqual(create_response.data["items"][0]["variant_id"], self.second_variant.id)
+            self.assertEqual(create_response.data["items"][0]["quantity"], 2)
             offer_id = create_response.data["id"]
 
             replacement = SimpleUploadedFile(

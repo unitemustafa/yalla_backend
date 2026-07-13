@@ -211,7 +211,10 @@ class AdminMarketListCreateView(APIView):
         return Response(AdminMarketSerializer(markets, many=True).data)
 
     def post(self, request):
-        serializer = AdminMarketSerializer(data=request.data)
+        serializer = AdminMarketSerializer(
+            data=request.data,
+            context={"request": request},
+        )
         serializer.is_valid(raise_exception=True)
         market = serializer.save()
         return Response(
@@ -315,7 +318,16 @@ class HomeView(APIView):
                         "market__service_cities",
                         "market__delivery_areas",
                     ),
-                )
+                ),
+                "items__variant__product__market__classification",
+                "items__variant__product__market__service_cities",
+                "items__variant__product__market__delivery_areas",
+                "items__variant__product__attributes__options",
+                "items__variant__product__images",
+                "items__variant__attribute_values__attribute",
+                "items__variant__attribute_values__option",
+                "items__variant__attribute_values__product_attribute",
+                "items__variant__attribute_values__product_attribute_option",
             )
             .order_by("-created_at", "-id")
         )

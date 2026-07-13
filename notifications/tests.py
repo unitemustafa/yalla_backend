@@ -243,6 +243,49 @@ class NotificationAPITests(APITestCase):
         self.assertEqual([item["id"] for item in response.data], [self.admin_notification.id])
         self.assertEqual(response.data[0]["order_id"], self.order.id)
 
+    def test_admin_only_sees_new_orders_and_courier_pickup_or_delivery(self):
+        hidden_notification = Notification.objects.create(
+            audience=Notification.Audience.ADMIN,
+            type=Notification.Type.COURIER_AVAILABILITY_CHANGED,
+            title="Hidden courier availability",
+            message="This must not appear in the dashboard feed.",
+        )
+        for event_name, status_value in (
+            ("courier_order_picked_up", Order.Status.PICKED_UP),
+            ("courier_order_delivered", Order.Status.DELIVERED),
+        ):
+            Notification.objects.create(
+                audience=Notification.Audience.ADMIN,
+                type=Notification.Type.ORDER_STATUS_CHANGED,
+                title=event_name,
+                message=event_name,
+                order=self.order,
+                data={"event": event_name, "status": status_value},
+            )
+        self.authenticate(self.admin)
+
+        list_response = self.client.get("/api/v1/notifications/")
+        count_response = self.client.get("/api/v1/notifications/unread-count/")
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            {item["type"] for item in list_response.data},
+            {
+                Notification.Type.NEW_ORDER_REVIEW,
+                Notification.Type.ORDER_STATUS_CHANGED,
+            },
+        )
+        self.assertEqual(
+            {
+                item["data"].get("event")
+                for item in list_response.data
+                if item["type"] == Notification.Type.ORDER_STATUS_CHANGED
+            },
+            {"courier_order_picked_up", "courier_order_delivered"},
+        )
+        self.assertEqual(count_response.data["unread_count"], 3)
+        self.assertTrue(Notification.objects.filter(pk=hidden_notification.pk).exists())
+
     def test_user_can_read_and_count_only_visible_notifications(self):
         self.authenticate(self.courier)
 
@@ -459,11 +502,12 @@ class NotificationAPITests(APITestCase):
     def test_visible_normal_notification_can_be_deleted(self):
         normal_notification = Notification.objects.create(
             audience=Notification.Audience.ADMIN,
-            type=Notification.Type.ORDER_ASSIGNED,
+            type=Notification.Type.ORDER_STATUS_CHANGED,
             title="Normal",
             message="Normal visible notification",
             order=self.order,
             is_read=True,
+            data={"event": "courier_order_picked_up"},
         )
         self.authenticate(self.admin)
 
@@ -511,19 +555,21 @@ class NotificationAPITests(APITestCase):
     def test_clear_read_deletes_only_eligible_visible_notifications(self):
         visible_read_normal = Notification.objects.create(
             audience=Notification.Audience.ADMIN,
-            type=Notification.Type.ORDER_ASSIGNED,
+            type=Notification.Type.ORDER_STATUS_CHANGED,
             title="Read normal",
             message="Read normal",
             order=self.order,
             is_read=True,
+            data={"event": "courier_order_delivered"},
         )
         visible_unread = Notification.objects.create(
             audience=Notification.Audience.ADMIN,
-            type=Notification.Type.ORDER_ASSIGNED,
+            type=Notification.Type.ORDER_STATUS_CHANGED,
             title="Unread",
             message="Unread",
             order=self.order,
             is_read=False,
+            data={"event": "courier_order_picked_up"},
         )
         visible_resolved_blocking = Notification.objects.create(
             audience=Notification.Audience.ADMIN,

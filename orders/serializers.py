@@ -64,6 +64,7 @@ class OrderPreviewOfferSerializer(serializers.Serializer):
             "service_cities",
             "products__variants",
             "products__market__service_cities",
+            "items__variant__product__market__service_cities",
         ),
         source="offer",
     )
@@ -246,8 +247,9 @@ class OrderPreviewSerializer(serializers.Serializer):
         delivery_message = self.validated_data["delivery_message"]
         items = self.validated_data.get("items", [])
         offers = self.validated_data.get("offers", [])
+        has_free_delivery = self._has_free_delivery_offer(offers)
         market_groups = {}
-        selected_lines_by_product = {}
+        selected_lines_by_variant = {}
 
         for item in items:
             variant = item["variant"]
@@ -267,7 +269,7 @@ class OrderPreviewSerializer(serializers.Serializer):
             }
             group["selected_products"].append(line)
             group["products_subtotal"] += subtotal
-            selected_lines_by_product.setdefault(product.id, []).append(
+            selected_lines_by_variant.setdefault(variant.id, []).append(
                 {
                     "line": line,
                     "subtotal": subtotal,
@@ -278,7 +280,7 @@ class OrderPreviewSerializer(serializers.Serializer):
             offer = item["offer"]
             for offer_group in self._offer_product_rows_by_market(
                 offer,
-                selected_lines_by_product,
+                selected_lines_by_variant,
             ).values():
                 group = self._market_group(market_groups, offer_group["market"])
                 group["products_subtotal"] += offer_group[
@@ -319,13 +321,16 @@ class OrderPreviewSerializer(serializers.Serializer):
                 service_city,
                 order_scope,
             )
-            delivery_price = (
-                fixed_delivery_price
-                if delivery_available
-                and delivery_type == Order.DeliveryType.FIXED_AREA
-                and not fixed_delivery_applied
-                else None
-            )
+            if delivery_available and has_free_delivery and not fixed_delivery_applied:
+                delivery_price = Decimal("0.00")
+            else:
+                delivery_price = (
+                    fixed_delivery_price
+                    if delivery_available
+                    and delivery_type == Order.DeliveryType.FIXED_AREA
+                    and not fixed_delivery_applied
+                    else None
+                )
             if delivery_price is not None:
                 fixed_delivery_applied = True
             delivery_price_total = delivery_price or Decimal("0.00")
@@ -521,11 +526,34 @@ class OrderPreviewSerializer(serializers.Serializer):
             rounding=ROUND_HALF_UP,
         )
 
+    @staticmethod
+    def _has_free_delivery_offer(offers):
+        return any(
+            item["offer"].type == Offer.OfferType.DELIVERY
+            for item in offers
+        )
+
     @classmethod
     def _product_unit_price(cls, variant):
         discount = variant.product.discount or Decimal("0.00")
         discount_amount = cls._percentage_amount(variant.price, discount)
         return max(variant.price - discount_amount, Decimal("0.00"))
+
+    @staticmethod
+    def _offer_variant_rows(offer):
+        offer_items = list(offer.items.all())
+        if offer_items:
+            return [
+                (item.variant, item.quantity)
+                for item in offer_items
+            ]
+
+        rows = []
+        for product in offer.products.all():
+            variant = product.variants.order_by("id").first()
+            if variant is not None:
+                rows.append((variant, 1))
+        return rows
 
     def _image_url(self, image):
         if not image:
@@ -534,10 +562,11 @@ class OrderPreviewSerializer(serializers.Serializer):
         url = image.url
         return request.build_absolute_uri(url) if request is not None else url
 
-    def _offer_product_rows_by_market(self, offer, selected_lines_by_product):
+    def _offer_product_rows_by_market(self, offer, selected_lines_by_variant):
         groups = {}
 
-        for product in offer.products.all():
+        for variant, offer_quantity in self._offer_variant_rows(offer):
+            product = variant.product
             group = groups.setdefault(
                 product.market_id,
                 {
@@ -547,7 +576,7 @@ class OrderPreviewSerializer(serializers.Serializer):
                     "added_products_subtotal": Decimal("0.00"),
                 },
             )
-            selected_lines = selected_lines_by_product.get(product.id, [])
+            selected_lines = selected_lines_by_variant.get(variant.id, [])
             if selected_lines:
                 for selected_line in selected_lines:
                     line = selected_line["line"]
@@ -567,12 +596,8 @@ class OrderPreviewSerializer(serializers.Serializer):
                     )
                 continue
 
-            variant = product.variants.order_by("id").first()
-            if variant is None:
-                raise serializers.ValidationError({"offers": f"المنتج {product.name} لا يحتوي على خيار صالح للطلب."})
-
             unit_price = self._product_unit_price(variant)
-            subtotal = unit_price
+            subtotal = unit_price * offer_quantity
             group["offer_products_subtotal"] += subtotal
             group["added_products_subtotal"] += subtotal
             group["products"].append(
@@ -581,7 +606,7 @@ class OrderPreviewSerializer(serializers.Serializer):
                     "product_name": product.name,
                     "image": self._image_url(product.image),
                     "variant_id": variant.id,
-                    "quantity": 1,
+                    "quantity": offer_quantity,
                     "unit_price": self._money(unit_price),
                     "subtotal": self._money(subtotal),
                     "is_selected": False,
@@ -662,6 +687,9 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
         delivery_area = self.validated_data["delivery_area"]
         delivery_type = self.validated_data["delivery_type"]
         delivery_price = self.validated_data["delivery_price"]
+        has_free_delivery = self._has_free_delivery_offer(
+            self.validated_data.get("offers", [])
+        )
         payment_method = self.validated_data["payment_method"].strip()
         description = self.validated_data.get("description", "").strip()
         delivery_note = self.validated_data.get("delivery_note", "").strip()
@@ -679,7 +707,11 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
             Decimal("0.00"),
         )
         parent_delivery_price = (
-            delivery_price if delivery_type == Order.DeliveryType.FIXED_AREA else None
+            Decimal("0.00")
+            if has_free_delivery
+            else delivery_price
+            if delivery_type == Order.DeliveryType.FIXED_AREA
+            else None
         )
         total = subtotal - discount + (parent_delivery_price or Decimal("0.00"))
         first_group = order_groups[sorted_market_ids[0]]
@@ -734,7 +766,7 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
         delivery_price,
     ):
         groups = {}
-        selected_lines_by_product = {}
+        selected_lines_by_variant = {}
 
         for item in items:
             variant = item["variant"]
@@ -758,7 +790,7 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
                 }
             )
             group["products_subtotal"] += subtotal
-            selected_lines_by_product.setdefault(product.id, []).append(
+            selected_lines_by_variant.setdefault(variant.id, []).append(
                 {
                     "variant": variant,
                     "quantity": quantity,
@@ -769,7 +801,8 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
         for item in offers:
             offer = item["offer"]
             offer_groups = {}
-            for product in offer.products.all():
+            for variant, offer_quantity in self._offer_variant_rows(offer):
+                product = variant.product
                 group = self._create_group(
                     groups,
                     product.market,
@@ -785,23 +818,21 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
                         "offer_products_subtotal": Decimal("0.00"),
                     },
                 )
-                selected_lines = selected_lines_by_product.get(product.id, [])
+                selected_lines = selected_lines_by_variant.get(variant.id, [])
                 if selected_lines:
                     offer_group["offer_products_subtotal"] += sum(
                         line["subtotal"] for line in selected_lines
                     )
                     continue
 
-                variant = product.variants.order_by("id").first()
-                if variant is None:
-                    raise serializers.ValidationError({"offers": f"المنتج {product.name} لا يحتوي على خيار صالح للطلب."})
                 unit_price = self._product_unit_price(variant)
-                offer_group["offer_products_subtotal"] += unit_price
-                group["products_subtotal"] += unit_price
+                subtotal = unit_price * offer_quantity
+                offer_group["offer_products_subtotal"] += subtotal
+                group["products_subtotal"] += subtotal
                 group["items"].append(
                     {
                         "variant": variant,
-                        "quantity": 1,
+                        "quantity": offer_quantity,
                         "unit_price": unit_price,
                     }
                 )
@@ -877,8 +908,18 @@ class OrderItemSerializer(serializers.ModelSerializer):
     def get_variant_name(self, instance):
         values = []
         for value in instance.variant.attribute_values.all():
-            attribute_name = getattr(value.attribute, "name", "")
-            option_value = getattr(value.option, "value", "")
+            attribute = (
+                value.product_attribute
+                if value.product_attribute_id
+                else value.attribute
+            )
+            option = (
+                value.product_attribute_option
+                if value.product_attribute_option_id
+                else value.option
+            )
+            attribute_name = getattr(attribute, "name", "")
+            option_value = getattr(option, "value", "")
             if attribute_name and option_value:
                 values.append(f"{attribute_name}: {option_value}")
             elif option_value:
@@ -1924,6 +1965,7 @@ class AdminOrderCreateSerializer(OrderSerializer):
     def create(self, validated_data):
         items = validated_data.pop("items", [])
         offers = validated_data.pop("order_offers", [])
+        has_free_delivery = OrderPreviewSerializer._has_free_delivery_offer(offers)
         items, offers = self._server_priced_lines(items, offers)
         if items:
             validated_data["market"] = items[0]["variant"].product.market
@@ -1937,7 +1979,12 @@ class AdminOrderCreateSerializer(OrderSerializer):
             item.get("discount_amount", Decimal("0.00"))
             for item in offers
         )
-        delivery_price = validated_data.get("delivery_price")
+        delivery_price = (
+            Decimal("0.00")
+            if has_free_delivery
+            else validated_data.get("delivery_price")
+        )
+        validated_data["delivery_price"] = delivery_price
         delivery_total = delivery_price or Decimal("0.00")
         total = subtotal + delivery_total - discount
 
@@ -1960,7 +2007,7 @@ class AdminOrderCreateSerializer(OrderSerializer):
 
     def _server_priced_lines(self, items, offers):
         priced_items = []
-        selected_lines_by_product = {}
+        selected_lines_by_variant = {}
 
         for item in items:
             variant = item["variant"]
@@ -1972,7 +2019,7 @@ class AdminOrderCreateSerializer(OrderSerializer):
                 "unit_price": unit_price,
             }
             priced_items.append(priced_item)
-            selected_lines_by_product.setdefault(variant.product_id, []).append(
+            selected_lines_by_variant.setdefault(variant.id, []).append(
                 {
                     "variant": variant,
                     "quantity": quantity,
@@ -1984,29 +2031,27 @@ class AdminOrderCreateSerializer(OrderSerializer):
         for offer_item in offers:
             offer = offer_item["offer"]
             offer_products_subtotal = Decimal("0.00")
-            for product in offer.products.prefetch_related("variants").all():
-                selected_lines = selected_lines_by_product.get(product.id, [])
+            for variant, offer_quantity in OrderPreviewSerializer._offer_variant_rows(offer):
+                product = variant.product
+                selected_lines = selected_lines_by_variant.get(variant.id, [])
                 if selected_lines:
                     offer_products_subtotal += sum(
                         line["subtotal"] for line in selected_lines
                     )
                     continue
 
-                variant = product.variants.order_by("id").first()
-                if variant is None:
-                    continue
                 unit_price = OrderPreviewSerializer._product_unit_price(variant)
-                subtotal = unit_price
+                subtotal = unit_price * offer_quantity
                 priced_item = {
                     "variant": variant,
-                    "quantity": 1,
+                    "quantity": offer_quantity,
                     "unit_price": unit_price,
                 }
                 priced_items.append(priced_item)
-                selected_lines_by_product.setdefault(product.id, []).append(
+                selected_lines_by_variant.setdefault(variant.id, []).append(
                     {
                         "variant": variant,
-                        "quantity": 1,
+                        "quantity": offer_quantity,
                         "subtotal": subtotal,
                     }
                 )

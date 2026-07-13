@@ -698,6 +698,11 @@ class AdminProductSerializer(serializers.ModelSerializer):
         product.additions.set(additions)
         if uploads:
             add_product_images(product.id, uploads, primary_image_index)
+        from notifications.market_services import (
+            schedule_pending_market_notification_for_product,
+        )
+
+        schedule_pending_market_notification_for_product(product.id)
         return product
 
     @transaction.atomic
@@ -724,6 +729,11 @@ class AdminProductSerializer(serializers.ModelSerializer):
         elif legacy_image is None:
             clear_primary_product_image(instance.id)
             instance.refresh_from_db(fields=("image", "updated_at"))
+        from notifications.market_services import (
+            schedule_pending_market_notification_for_product,
+        )
+
+        schedule_pending_market_notification_for_product(instance.id)
         return instance
 
     def _replace_product_attribute_values(self, product, attribute_values):

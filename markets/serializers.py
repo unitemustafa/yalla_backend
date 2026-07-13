@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import serializers
 
 from catalog.models import (
@@ -164,6 +165,11 @@ class HomeMarketClassificationSerializer(serializers.ModelSerializer):
 
 
 class AdminMarketSerializer(serializers.ModelSerializer):
+    send_notification = serializers.BooleanField(
+        write_only=True,
+        required=False,
+        default=False,
+    )
     classification_id = serializers.PrimaryKeyRelatedField(
         queryset=MarketClassification.objects.all(),
         source="classification",
@@ -208,6 +214,7 @@ class AdminMarketSerializer(serializers.ModelSerializer):
             "scope",
             "status",
             "is_popular",
+            "send_notification",
             "service_cities",
             "service_city_ids",
             "delivery_areas",
@@ -291,15 +298,30 @@ class AdminMarketSerializer(serializers.ModelSerializer):
             )
         return attrs
 
+    @transaction.atomic
     def create(self, validated_data):
+        send_notification = validated_data.pop("send_notification", False)
         delivery_areas = validated_data.pop("delivery_areas", [])
         service_cities = validated_data.pop("service_cities", [])
         market = Market.objects.create(**validated_data)
         market.service_cities.set(service_cities)
         market.delivery_areas.set(delivery_areas)
+        if send_notification:
+            from notifications.market_services import (
+                create_market_notification_intent,
+            )
+
+            request = self.context.get("request")
+            requested_by_id = (
+                request.user.id
+                if request is not None and request.user.is_authenticated
+                else None
+            )
+            create_market_notification_intent(market, requested_by_id)
         return market
 
     def update(self, instance, validated_data):
+        validated_data.pop("send_notification", None)
         delivery_areas = validated_data.pop("delivery_areas", None)
         service_cities = validated_data.pop("service_cities", None)
         instance = super().update(instance, validated_data)
@@ -528,6 +550,7 @@ class MarketWithStoreProductsSerializer(HomeMarketSerializer):
         fields = (
             "id",
             "name",
+            "image",
             "branch",
             "status",
             "is_popular",
@@ -585,7 +608,7 @@ class HomeOfferSerializer(serializers.ModelSerializer):
     markets = serializers.SerializerMethodField()
     market_names_summary = serializers.SerializerMethodField()
     market = HomeMarketSerializer(read_only=True)
-    products = HomeProductSerializer(many=True, read_only=True)
+    products = serializers.SerializerMethodField()
     service_cities = ServiceCitySummarySerializer(many=True, read_only=True)
 
     class Meta:
@@ -620,6 +643,34 @@ class HomeOfferSerializer(serializers.ModelSerializer):
     def _markets(self, instance):
         values = {product.market_id: product.market for product in instance.products.all() if product.market_id}
         return [values[key] for key in sorted(values)]
+
+    def get_products(self, instance):
+        offer_items = list(instance.items.all())
+        if not offer_items:
+            return HomeProductSerializer(
+                instance.products.all(),
+                many=True,
+                context=self.context,
+            ).data
+
+        products = []
+        for item in offer_items:
+            product_data = dict(
+                HomeProductSerializer(
+                    item.variant.product,
+                    context=self.context,
+                ).data
+            )
+            product_data["variants"] = [
+                ProductDetailVariantSerializer(
+                    item.variant,
+                    context=self.context,
+                ).data
+            ]
+            product_data["offer_variant_id"] = item.variant_id
+            product_data["offer_quantity"] = item.quantity
+            products.append(product_data)
+        return products
 
     def get_markets(self, instance):
         return [{"id": market.id, "name": market.name, "branch": market.branch} for market in self._markets(instance)]

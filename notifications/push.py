@@ -184,7 +184,12 @@ def _send_tokens(
     )
 
 
-def send_notification_push(notification_id):
+def send_notification_push(
+    notification_id,
+    *,
+    high_priority=False,
+    android_channel_id=None,
+):
     try:
         notification = Notification.objects.select_related("recipient").get(
             pk=notification_id,
@@ -207,6 +212,8 @@ def send_notification_push(notification_id):
             data,
             title=notification.title,
             message=notification.message,
+            high_priority=high_priority,
+            android_channel_id=android_channel_id,
         )
     except FirebaseConfigurationError:
         raise

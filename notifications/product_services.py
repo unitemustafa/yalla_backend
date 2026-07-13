@@ -63,6 +63,8 @@ def _active_market_cities(market):
 def _dispatch_validation_message(product):
     if not product.is_available:
         return "خلّي المنتج متاح للبيع الأول علشان تقدر تبعت الإشعار."
+    if not product.variants.exists():
+        return "أضف سعرًا واحدًا على الأقل للمنتج قبل إرسال الإشعار."
     if product.market.status != Market.Status.ACTIVE:
         return "لا يمكن إرسال الإشعار لأن المحل غير نشط."
     if (
@@ -79,17 +81,13 @@ def _product_recipients(product):
     clients = User.objects.filter(
         role=User.Role.CLIENT,
         is_active=True,
+        is_staff=False,
+        is_superuser=False,
         deleted_at__isnull=True,
     )
 
     if market.scope == Market.Scope.GENERAL:
         audience = Q(market_region_mode=User.MarketRegionMode.GENERAL)
-        if active_cities:
-            audience |= Q(
-                market_region_mode=User.MarketRegionMode.SERVICE_CITY,
-                market_region_service_city_id__in=active_cities,
-                market_region_service_city__is_active=True,
-            )
     else:
         audience = Q(
             market_region_mode=User.MarketRegionMode.SERVICE_CITY,
@@ -243,7 +241,11 @@ def dispatch_product_notifications(product_id, request_id, requested_by_id=None)
             if created_notification_ids:
                 transaction.on_commit(
                     lambda ids=tuple(created_notification_ids): [
-                        send_notification_push(notification_id)
+                        send_notification_push(
+                            notification_id,
+                            high_priority=True,
+                            android_channel_id="product_updates",
+                        )
                         for notification_id in ids
                     ]
                 )

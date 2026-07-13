@@ -14,13 +14,15 @@ from catalog.models import (
     CategoryClassification,
     CategoryOption,
     Product,
+    ProductAttribute,
+    ProductAttributeOption,
     ProductCategory,
     ProductVariant,
     VariantAttributeValue,
 )
 from locations.models import Address, DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
-from offers.models import Offer
+from offers.models import Offer, OfferItem
 from notifications.models import Notification
 
 from .models import Order, OrderEvent, OrderItem, OrderMarketSection, OrderOffer
@@ -452,6 +454,33 @@ class OrderAPITests(APITestCase):
         self.assertEqual(detail_response.data["allowed_statuses"], [Order.Status.CANCELLED])
         self.assertEqual(update_response.data["description"], "Updated description")
 
+    def test_order_detail_serializes_product_scoped_variant_attributes(self):
+        color_attribute = ProductAttribute.objects.create(
+            product=self.product,
+            name="Color",
+        )
+        green_option = ProductAttributeOption.objects.create(
+            attribute=color_attribute,
+            value="Green",
+        )
+        self.variant.attribute_values.all().delete()
+        VariantAttributeValue.objects.create(
+            variant=self.variant,
+            product_attribute=color_attribute,
+            product_attribute_option=green_option,
+        )
+
+        create_response = self.create_order()
+        order_id = create_response.data["id"]
+        detail_response = self.client.get(f"{ORDERS_BASE}/{order_id}/")
+
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_response.data["items"][0]["variant_name"], "Color: Green")
+        self.assertEqual(
+            detail_response.data["market_sections"][0]["items"][0]["variant_name"],
+            "Color: Green",
+        )
+
     def test_order_list_discount_without_order_offer_is_not_an_offer(self):
         payload = self.payload()
         payload["offers"] = []
@@ -490,6 +519,20 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.data["offers"][0]["discount_amount"], "100.00")
         self.assertEqual(response.data["subtotal_price"], "1000.00")
         self.assertEqual(response.data["discount"], "100.00")
+
+    def test_admin_create_applies_free_delivery_offer(self):
+        self.offer.type = Offer.OfferType.DELIVERY
+        self.offer.discount = Decimal("0.00")
+        self.offer.save(update_fields=["type", "discount"])
+
+        response = self.client.post(f"{ORDERS_BASE}/", self.payload(), format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(response.data["subtotal_price"], "1000.00")
+        self.assertEqual(response.data["discount"], "0.00")
+        self.assertEqual(response.data["delivery_price"], "0.00")
+        self.assertEqual(response.data["total_price"], "1000.00")
+        self.assertEqual(response.data["offers"][0]["discount_amount"], "0.00")
 
     def test_admin_create_does_not_require_selected_market_region(self):
         self.customer.market_region_mode = None
@@ -1580,6 +1623,70 @@ class OrderAPITests(APITestCase):
             first_market["selected_offers"][0]["products"][0]["is_selected"]
         )
 
+    def test_preview_offer_uses_its_exact_variant_and_quantity(self):
+        selected_variant = ProductVariant.objects.create(
+            product=self.product,
+            price=Decimal("900.00"),
+            sku="BURGER-PREMIUM",
+        )
+        OfferItem.objects.create(
+            offer=self.offer,
+            variant=selected_variant,
+            quantity=2,
+        )
+        self.authenticate_customer()
+
+        response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            {"offers": [{"offer_id": self.offer.id}]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        selected_offer = response.data["market_groups"][0]["selected_offers"][0]
+        self.assertEqual(selected_offer["offer_products_subtotal"], "1800.00")
+        self.assertEqual(selected_offer["discount_amount"], "180.00")
+        self.assertEqual(selected_offer["products"][0]["variant_id"], selected_variant.id)
+        self.assertEqual(selected_offer["products"][0]["quantity"], 2)
+
+    def test_delivery_offer_waives_delivery_in_preview_and_client_order(self):
+        self.offer.type = Offer.OfferType.DELIVERY
+        self.offer.discount = Decimal("0.00")
+        self.offer.save(update_fields=["type", "discount"])
+        self.authenticate_customer()
+        payload = {
+            "address_id": self.address.id,
+            "payment_method": "cash_on_delivery",
+            "offers": [{"offer_id": self.offer.id}],
+        }
+
+        preview_response = self.client.post(
+            f"{ORDERS_BASE}/preview/",
+            payload,
+            format="json",
+        )
+        create_response = self.client.post(
+            f"{ORDERS_BASE}/create/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(preview_response.status_code, status.HTTP_200_OK, preview_response.data)
+        preview_market = preview_response.data["market_groups"][0]
+        self.assertEqual(preview_market["delivery_price"], "0.00")
+        self.assertEqual(preview_market["pricing"]["delivery_price"], "0.00")
+        self.assertEqual(preview_market["pricing"]["market_total"], "500.00")
+        self.assertEqual(preview_response.data["summary"]["delivery_total"], "0.00")
+        self.assertEqual(preview_response.data["summary"]["grand_total"], "500.00")
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+        created_order = create_response.data[0]
+        self.assertEqual(created_order["subtotal_price"], "500.00")
+        self.assertEqual(created_order["discount"], "0.00")
+        self.assertEqual(created_order["delivery_price"], "0.00")
+        self.assertEqual(created_order["total_price"], "500.00")
+        self.assertEqual(created_order["offers"][0]["discount_amount"], "0.00")
+
     def test_client_create_order_creates_one_parent_order_with_market_sections(self):
         token = RefreshToken.for_user(self.customer).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
@@ -2366,3 +2473,12 @@ class OrderAPITests(APITestCase):
             self.assertEqual(status_response.data["status"], next_status)
         order.refresh_from_db()
         self.assertIsNotNone(order.delivered_at)
+        admin_status_notifications = Notification.objects.filter(
+            audience=Notification.Audience.ADMIN,
+            type=Notification.Type.ORDER_STATUS_CHANGED,
+            order=order,
+        ).order_by("id")
+        self.assertEqual(
+            [item.data["event"] for item in admin_status_notifications],
+            ["courier_order_picked_up", "courier_order_delivered"],
+        )

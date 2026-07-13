@@ -176,10 +176,14 @@ class ProductNotificationAPITests(APITestCase):
         self.assertFalse(
             Notification.objects.filter(recipient=self.inactive_client).exists()
         )
-        send_push.assert_called_once_with(notification.id)
+        send_push.assert_called_once_with(
+            notification.id,
+            high_priority=True,
+            android_channel_id="product_updates",
+        )
 
     @patch("notifications.product_services.send_notification_push")
-    def test_general_product_includes_general_and_matching_city_clients(
+    def test_general_product_notifies_general_clients_only(
         self,
         send_push,
     ):
@@ -192,10 +196,23 @@ class ProductNotificationAPITests(APITestCase):
         notifications = Notification.objects.filter(product=self.general_product)
         self.assertEqual(
             set(notifications.values_list("recipient_id", flat=True)),
-            {self.city_client.id, self.general_client.id},
+            {self.general_client.id},
         )
-        self.assertEqual(response.data["notification_count"], 2)
-        self.assertEqual(send_push.call_count, 2)
+        self.assertEqual(response.data["notification_count"], 1)
+        self.assertEqual(send_push.call_count, 1)
+
+    def test_dispatch_rejects_product_without_price(self):
+        self.product.variants.all().delete()
+        self.authenticate(self.admin)
+
+        response = self.send_notification(self.product)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "أضف سعرًا واحدًا على الأقل للمنتج قبل إرسال الإشعار.",
+        )
+        self.assertFalse(Notification.objects.filter(product=self.product).exists())
 
     def test_product_save_does_not_send_without_explicit_dispatch(self):
         self.authenticate(self.admin)

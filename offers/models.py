@@ -103,3 +103,29 @@ class Offer(models.Model):
 
     def can_send_notification(self, now=None):
         return self.is_currently_visible(now) and self.has_active_markets()
+
+
+class OfferItem(models.Model):
+    offer = models.ForeignKey(
+        Offer,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    variant = models.ForeignKey(
+        "catalog.ProductVariant",
+        on_delete=models.PROTECT,
+        related_name="offer_items",
+    )
+    quantity = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        ordering = ("id",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("offer", "variant"),
+                name="unique_offer_variant",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.offer} - {self.variant} x{self.quantity}"

@@ -514,7 +514,29 @@ class ProductSendNotificationView(APIView):
         request_id = serializers.UUIDField().run_validation(
             request.data.get("request_id")
         )
+        from notifications.market_services import (
+            completed_market_dispatch_for_product,
+        )
         from notifications.product_services import dispatch_product_notifications
+
+        market_dispatch = completed_market_dispatch_for_product(product_id)
+        if market_dispatch is not None:
+            return Response(
+                {
+                    "dispatch_id": market_dispatch.id,
+                    "request_id": str(request_id),
+                    "status": market_dispatch.status,
+                    "recipient_count": market_dispatch.recipient_count,
+                    "notification_count": market_dispatch.notification_count,
+                    "sent_at": market_dispatch.completed_at,
+                    "suppressed_by_market_notification": True,
+                    "market_name": (
+                        market_dispatch.market.name
+                        if market_dispatch.market is not None
+                        else ""
+                    ),
+                }
+            )
 
         dispatch = dispatch_product_notifications(
             product_id,
@@ -529,6 +551,7 @@ class ProductSendNotificationView(APIView):
                 "recipient_count": dispatch.recipient_count,
                 "notification_count": dispatch.notification_count,
                 "sent_at": dispatch.completed_at,
+                "suppressed_by_market_notification": False,
             }
         )
 

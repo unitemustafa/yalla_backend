@@ -41,7 +41,10 @@ from notifications.courier_services import (
     notify_courier_order_cancelled,
     notify_courier_order_unassigned,
 )
-from notifications.order_services import schedule_order_lifecycle_notification
+from notifications.order_services import (
+    create_admin_courier_order_status_notification,
+    schedule_order_lifecycle_notification,
+)
 
 User = get_user_model()
 
@@ -160,6 +163,8 @@ def order_queryset():
             "items__variant__product",
             "items__variant__attribute_values__attribute",
             "items__variant__attribute_values__option",
+            "items__variant__attribute_values__product_attribute",
+            "items__variant__attribute_values__product_attribute_option",
             "items__section",
             "order_offers__offer",
             "order_offers__section",
@@ -168,6 +173,8 @@ def order_queryset():
             "market_sections__items__variant__product",
             "market_sections__items__variant__attribute_values__attribute",
             "market_sections__items__variant__attribute_values__option",
+            "market_sections__items__variant__attribute_values__product_attribute",
+            "market_sections__items__variant__attribute_values__product_attribute_option",
             "market_sections__offers__offer",
             Prefetch(
                 "history_events",
@@ -999,6 +1006,7 @@ class CourierOrderStatusView(APIView):
             from_status=old_status,
             to_status=new_status,
         )
+        create_admin_courier_order_status_notification(order, event, new_status)
         schedule_order_lifecycle_notification(
             order,
             event,

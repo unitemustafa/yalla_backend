@@ -15,6 +15,12 @@ from .serializers import (
 )
 
 
+ADMIN_DASHBOARD_ORDER_EVENTS = (
+    "courier_order_picked_up",
+    "courier_order_delivered",
+)
+
+
 def parse_bool(value):
     if value is None:
         return None
@@ -28,7 +34,17 @@ def parse_bool(value):
 
 def visible_notifications(user):
     if user.role == User.Role.ADMIN:
-        return Notification.objects.filter(audience=Notification.Audience.ADMIN)
+        return Notification.objects.filter(
+            Q(
+                audience=Notification.Audience.ADMIN,
+                type=Notification.Type.NEW_ORDER_REVIEW,
+            )
+            | Q(
+                audience=Notification.Audience.ADMIN,
+                type=Notification.Type.ORDER_STATUS_CHANGED,
+                data__event__in=ADMIN_DASHBOARD_ORDER_EVENTS,
+            )
+        )
     audience = (
         Notification.Audience.COURIER
         if user.role == User.Role.REPRESENTATIVE

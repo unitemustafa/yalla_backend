@@ -78,6 +78,46 @@ class DeliveryAreaNotificationDispatch(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
 
 
+class MarketNotificationDispatch(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    market = models.OneToOneField(
+        "markets.Market",
+        on_delete=models.SET_NULL,
+        related_name="notification_dispatch",
+        null=True,
+        blank=True,
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="market_notification_dispatches",
+        null=True,
+        blank=True,
+    )
+    trigger_product = models.ForeignKey(
+        "catalog.Product",
+        on_delete=models.SET_NULL,
+        related_name="market_notification_dispatches",
+        null=True,
+        blank=True,
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    recipient_count = models.PositiveIntegerField(default=0)
+    notification_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True)
+
+
 class Notification(models.Model):
     class Audience(models.TextChoices):
         ADMIN = "admin", "Admin"
@@ -99,6 +139,7 @@ class Notification(models.Model):
         ACCOUNT_DISABLED = "account_disabled", "Account Disabled"
         ACCOUNT_RESTORED = "account_restored", "Account Restored"
         DELIVERY_AREA_CREATED = "delivery_area_created", "Delivery Area Created"
+        MARKET_CREATED = "market_created", "Market Created"
         COURIER_AVAILABILITY_CHANGED = (
             "courier_availability_changed",
             "Courier Availability Changed",
@@ -159,6 +200,13 @@ class Notification(models.Model):
         blank=True,
         null=True,
     )
+    market_dispatch = models.ForeignKey(
+        MarketNotificationDispatch,
+        on_delete=models.PROTECT,
+        related_name="notifications",
+        blank=True,
+        null=True,
+    )
     data = models.JSONField(default=dict, blank=True)
     recipient = models.ForeignKey(
         "accounts.User",
@@ -201,6 +249,11 @@ class Notification(models.Model):
                 fields=["delivery_area_dispatch", "recipient"],
                 condition=models.Q(delivery_area_dispatch__isnull=False),
                 name="notifications_area_dispatch_recipient_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["market_dispatch", "recipient"],
+                condition=models.Q(market_dispatch__isnull=False),
+                name="notifications_market_dispatch_recipient_unique",
             ),
         ]
 

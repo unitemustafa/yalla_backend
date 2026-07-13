@@ -62,6 +62,57 @@ def _notification_type(event_type):
     }.get(event_type, Notification.Type.ORDER_STATUS_CHANGED)
 
 
+ADMIN_COURIER_STATUS_EVENTS = {
+    Order.Status.PICKED_UP: (
+        "courier_order_picked_up",
+        "المندوب استلم الطلب",
+        "المندوب {courier} استلم الطلب #{order_id} من المحلات.",
+    ),
+    Order.Status.DELIVERED: (
+        "courier_order_delivered",
+        "تم تسليم الطلب",
+        "المندوب {courier} سلّم الطلب #{order_id} للعميل.",
+    ),
+}
+
+
+def create_admin_courier_order_status_notification(order, event, new_status):
+    content = ADMIN_COURIER_STATUS_EVENTS.get(new_status)
+    if content is None:
+        return None
+
+    event_name, title, message_template = content
+    courier = order.assigned_representative
+    courier_name = (
+        courier.get_full_name().strip() or courier.username
+        if courier is not None
+        else "المندوب"
+    )
+    notification, _ = Notification.objects.get_or_create(
+        audience=Notification.Audience.ADMIN,
+        order_event=event,
+        defaults={
+            "type": Notification.Type.ORDER_STATUS_CHANGED,
+            "title": title,
+            "message": message_template.format(
+                courier=courier_name,
+                order_id=order.id,
+            ),
+            "order": order,
+            "is_blocking": False,
+            "is_resolved": False,
+            "data": {
+                "event": event_name,
+                "action": "open_order",
+                "order_id": order.id,
+                "status": new_status,
+                "courier_id": courier.id if courier is not None else None,
+            },
+        },
+    )
+    return notification
+
+
 @transaction.atomic
 def create_order_lifecycle_notification(
     order_id,
