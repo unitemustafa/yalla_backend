@@ -1,8 +1,12 @@
+import logging
+import uuid
+
 from django.db.models import ProtectedError
 
 from rest_framework import serializers, status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import get_object_or_404
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,7 +20,11 @@ from markets.region import (
 from markets.serializers import HomeOfferSerializer
 
 from .models import Offer
-from .serializers import AdminOfferSerializer
+from .images import OfferImageStorageError, replace_offer_image
+from .serializers import AdminOfferSerializer, OfferImageUploadSerializer
+
+
+logger = logging.getLogger(__name__)
 
 
 class OfferListCreateView(APIView):
@@ -189,6 +197,8 @@ class OfferDetailView(APIView):
 
     def patch(self, request, offer_id):
         self._require_admin(request)
+        if request.FILES.get("image") and set(request.data.keys()) == {"image"}:
+            return update_offer_image_response(request, offer_id)
         offer = self.get_offer(offer_id)
         serializer = AdminOfferSerializer(
             offer,
@@ -225,6 +235,48 @@ class OfferDetailView(APIView):
     def _require_admin(request):
         if request.user.role != User.Role.ADMIN:
             raise PermissionDenied("Only admin users can manage offers.")
+
+
+class OfferImageUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, offer_id):
+        if request.user.role != User.Role.ADMIN:
+            raise PermissionDenied("Only admin users can manage offers.")
+        return update_offer_image_response(request, offer_id)
+
+
+def update_offer_image_response(request, offer_id):
+    offer = get_object_or_404(Offer, id=offer_id)
+    serializer = OfferImageUploadSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    request_id = str(uuid.uuid4())
+    try:
+        replace_offer_image(offer.id, serializer.validated_data["image"])
+    except OfferImageStorageError:
+        logger.exception(
+            "Offer image storage failed offer_id=%s request_id=%s",
+            offer.id,
+            request_id,
+        )
+        return Response(
+            {
+                "detail": "تعذر رفع صورة العرض إلى خدمة الصور. حاول مرة أخرى.",
+                "code": "offer_image_storage_unavailable",
+                "request_id": request_id,
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    offer = OfferDetailView().get_queryset().get(id=offer.id)
+    return Response(
+        AdminOfferSerializer(
+            offer,
+            context={"request": request},
+        ).data,
+        status=status.HTTP_200_OK,
+    )
 
 
 class OfferSendNotificationView(APIView):

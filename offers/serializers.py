@@ -11,6 +11,7 @@ from locations.models import ServiceCity
 from markets.models import Market
 from markets.serializers import AdminMarketSerializer, ServiceCitySummarySerializer
 
+from .images import validate_offer_image_upload
 from .models import Offer, OfferItem
 
 
@@ -579,3 +580,9 @@ class AdminOfferSerializer(serializers.ModelSerializer):
         if service_cities is not None:
             instance.service_cities.set(service_cities)
         return instance
+
+
+class OfferImageUploadSerializer(serializers.Serializer):
+    image = serializers.ImageField(
+        validators=[validate_offer_image_upload],
+    )

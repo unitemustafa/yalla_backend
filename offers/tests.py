@@ -1,5 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
+from io import BytesIO
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 import json
@@ -9,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.utils import timezone
+from PIL import Image
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -23,6 +25,17 @@ from .models import Offer
 
 User = get_user_model()
 OFFERS_BASE = "/api/v1/offers"
+
+
+def offer_image_upload(name="offer.png", image_format="PNG", color="blue"):
+    content = BytesIO()
+    Image.new("RGB", (2, 2), color=color).save(content, format=image_format)
+    mime_type = (
+        "image/jpeg"
+        if image_format == "JPEG"
+        else f"image/{image_format.lower()}"
+    )
+    return SimpleUploadedFile(name, content.getvalue(), content_type=mime_type)
 
 
 class OfferAPITests(APITestCase):
@@ -618,6 +631,92 @@ class OfferAPITests(APITestCase):
             self.assertTrue(update_response.data["show_in_general"])
             self.assertEqual(update_response.data["service_city_ids"], [])
             self.assertTrue(update_response.data["image"])
+
+    @patch("notifications.offer_services.send_notifications_push")
+    def test_offer_create_image_upload_and_notification_complete_as_separate_steps(
+        self,
+        send_push,
+    ):
+        self.authenticate(self.admin)
+        created = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(send_push_notification=True),
+            format="json",
+        )
+
+        image_response = self.client.post(
+            f"{OFFERS_BASE}/{created.data['id']}/image/",
+            {"image": offer_image_upload()},
+            format="multipart",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            notification_response = self.client.post(
+                f"{OFFERS_BASE}/{created.data['id']}/send-notification/",
+                {"request_id": str(uuid.uuid4())},
+                format="json",
+            )
+
+        self.assertEqual(
+            created.status_code,
+            status.HTTP_201_CREATED,
+            created.data,
+        )
+        self.assertEqual(
+            image_response.status_code,
+            status.HTTP_200_OK,
+            image_response.data,
+        )
+        self.assertTrue(image_response.data["image"])
+        self.assertEqual(
+            notification_response.status_code,
+            status.HTTP_200_OK,
+            notification_response.data,
+        )
+        self.assertEqual(notification_response.data["notification_count"], 1)
+        send_push.assert_called_once()
+
+    @patch("offers.views.logger")
+    @patch("notifications.offer_services.send_notifications_push")
+    def test_image_storage_failure_does_not_prevent_offer_notification(
+        self,
+        send_push,
+        logger,
+    ):
+        self.authenticate(self.admin)
+        created = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(),
+            format="json",
+        )
+        storage = Offer._meta.get_field("image").storage
+
+        with patch.object(storage, "save", side_effect=RuntimeError("storage offline")):
+            response = self.client.patch(
+                f"{OFFERS_BASE}/{created.data['id']}/",
+                {"image": offer_image_upload()},
+                format="multipart",
+            )
+        with self.captureOnCommitCallbacks(execute=True):
+            notification_response = self.client.post(
+                f"{OFFERS_BASE}/{created.data['id']}/send-notification/",
+                {"request_id": str(uuid.uuid4())},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.data["code"], "offer_image_storage_unavailable")
+        self.assertTrue(response.data["request_id"])
+        self.assertIn("application/json", response["Content-Type"])
+        self.assertTrue(Offer.objects.filter(pk=created.data["id"]).exists())
+        self.assertFalse(Offer.objects.get(pk=created.data["id"]).image)
+        self.assertEqual(
+            notification_response.status_code,
+            status.HTTP_200_OK,
+            notification_response.data,
+        )
+        self.assertEqual(notification_response.data["notification_count"], 1)
+        send_push.assert_called_once()
+        logger.exception.assert_called_once()
 
     def test_admin_delete_rejects_offer_used_by_order(self):
         self.authenticate(self.admin)
