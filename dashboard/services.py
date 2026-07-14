@@ -179,9 +179,7 @@ def build_top_shops(start, end):
 
 def build_dashboard_overview(from_date, to_date):
     start, end = date_bounds(from_date, to_date)
-    day_start, day_end = date_bounds(to_date, to_date)
     orders = Order.objects.filter(created_at__gte=start, created_at__lt=end)
-    daily_orders = Order.objects.filter(created_at__gte=day_start, created_at__lt=day_end)
 
     order_totals = orders.aggregate(
         all_value=Coalesce(Sum("total_price"), MONEY_ZERO, output_field=MONEY_FIELD),
@@ -191,12 +189,12 @@ def build_dashboard_overview(from_date, to_date):
             output_field=MONEY_FIELD,
         ),
     )
-    daily_order_totals = daily_orders.aggregate(
+    order_counts = orders.aggregate(
         total=Count("id"),
         completed=Count("id", filter=Q(status__in=SUCCESSFUL_STATUSES)),
     )
-    total_orders = daily_order_totals["total"]
-    completed_orders = daily_order_totals["completed"]
+    total_orders = order_counts["total"]
+    completed_orders = order_counts["completed"]
     revenue = money(order_totals["revenue"])
 
     customer_ids = orders.values_list("user_id", flat=True).distinct()

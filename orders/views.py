@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import CourierProfile
+from offers.models import Offer
 from .models import Order, OrderEvent, OrderItem, OrderMarketSection
 from .serializers import (
     AdminOrderCreateSerializer,
@@ -475,6 +476,21 @@ class OrderDeliveryPriceView(APIView):
         serializer.is_valid(raise_exception=True)
         old_delivery_price = order.delivery_price
         delivery_price = serializer.validated_data["delivery_price"]
+        if (
+            delivery_price > Decimal("0.00")
+            and order.order_offers.filter(
+                offer__type=Offer.OfferType.DELIVERY,
+            ).exists()
+        ):
+            return Response(
+                {
+                    "delivery_price": (
+                        "Delivery price must remain zero while a free-delivery offer "
+                        "is applied to the order."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         total = order.subtotal_price - order.discount + delivery_price
         order.delivery_price = delivery_price
         order.total_price = max(total, Decimal("0.00"))

@@ -669,6 +669,7 @@ class HomeOfferSerializer(serializers.ModelSerializer):
             ]
             product_data["offer_variant_id"] = item.variant_id
             product_data["offer_quantity"] = item.quantity
+            product_data["apply_product_discount"] = item.apply_product_discount
             products.append(product_data)
         return products
 

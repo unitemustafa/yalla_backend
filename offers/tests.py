@@ -509,6 +509,7 @@ class OfferAPITests(APITestCase):
                     {
                         "variant_id": self.second_variant.id,
                         "quantity": 3,
+                        "apply_product_discount": False,
                     }
                 ],
             ),
@@ -519,6 +520,7 @@ class OfferAPITests(APITestCase):
         self.assertEqual(response.data["items"][0]["variant_id"], self.second_variant.id)
         self.assertEqual(response.data["items"][0]["product_id"], self.product.id)
         self.assertEqual(response.data["items"][0]["quantity"], 3)
+        self.assertFalse(response.data["items"][0]["apply_product_discount"])
         self.assertEqual(response.data["items"][0]["price"], "400.00")
 
         offer_id = response.data["id"]
@@ -529,6 +531,7 @@ class OfferAPITests(APITestCase):
         client_offer = next(item for item in client_response.data if item["id"] == offer_id)
         self.assertEqual(client_offer["products"][0]["offer_variant_id"], self.second_variant.id)
         self.assertEqual(client_offer["products"][0]["offer_quantity"], 3)
+        self.assertFalse(client_offer["products"][0]["apply_product_discount"])
         self.assertEqual(client_offer["products"][0]["variants"][0]["id"], self.second_variant.id)
 
     def test_admin_can_create_all_supported_offer_types(self):

@@ -117,6 +117,7 @@ class OfferItem(models.Model):
         related_name="offer_items",
     )
     quantity = models.PositiveIntegerField(default=1)
+    apply_product_discount = models.BooleanField(default=True)
 
     class Meta:
         ordering = ("id",)

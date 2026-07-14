@@ -116,6 +116,7 @@ class OfferItemSerializer(serializers.ModelSerializer):
             "price",
             "attribute_values",
             "quantity",
+            "apply_product_discount",
         )
         read_only_fields = ("id",)
 
@@ -515,6 +516,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
                     offer=offer,
                     variant=item["variant"],
                     quantity=item.get("quantity", 1),
+                    apply_product_discount=item.get("apply_product_discount", True),
                 )
                 for item in items
             ]
@@ -539,6 +541,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
                         offer=offer,
                         variant=item["variant"],
                         quantity=item.get("quantity", 1),
+                        apply_product_discount=item.get("apply_product_discount", True),
                     )
                     for item in items
                 ]
@@ -568,6 +571,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
                         offer=instance,
                         variant=item["variant"],
                         quantity=item.get("quantity", 1),
+                        apply_product_discount=item.get("apply_product_discount", True),
                     )
                     for item in self._legacy_items(products)
                 ]

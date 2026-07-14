@@ -534,7 +534,9 @@ class OrderPreviewSerializer(serializers.Serializer):
         )
 
     @classmethod
-    def _product_unit_price(cls, variant):
+    def _product_unit_price(cls, variant, *, apply_product_discount=True):
+        if not apply_product_discount:
+            return variant.price
         discount = variant.product.discount or Decimal("0.00")
         discount_amount = cls._percentage_amount(variant.price, discount)
         return max(variant.price - discount_amount, Decimal("0.00"))
@@ -544,7 +546,11 @@ class OrderPreviewSerializer(serializers.Serializer):
         offer_items = list(offer.items.all())
         if offer_items:
             return [
-                (item.variant, item.quantity)
+                (
+                    item.variant,
+                    item.quantity,
+                    item.apply_product_discount,
+                )
                 for item in offer_items
             ]
 
@@ -552,7 +558,7 @@ class OrderPreviewSerializer(serializers.Serializer):
         for product in offer.products.all():
             variant = product.variants.order_by("id").first()
             if variant is not None:
-                rows.append((variant, 1))
+                rows.append((variant, 1, True))
         return rows
 
     def _image_url(self, image):
@@ -565,7 +571,11 @@ class OrderPreviewSerializer(serializers.Serializer):
     def _offer_product_rows_by_market(self, offer, selected_lines_by_variant):
         groups = {}
 
-        for variant, offer_quantity in self._offer_variant_rows(offer):
+        for (
+            variant,
+            offer_quantity,
+            apply_product_discount,
+        ) in self._offer_variant_rows(offer):
             product = variant.product
             group = groups.setdefault(
                 product.market_id,
@@ -592,11 +602,18 @@ class OrderPreviewSerializer(serializers.Serializer):
                             "unit_price": line["unit_price"],
                             "subtotal": line["subtotal"],
                             "is_selected": True,
+                            "apply_product_discount": apply_product_discount,
+                            "product_discount_percentage": self._money(
+                                product.discount or Decimal("0.00")
+                            ),
                         }
                     )
                 continue
 
-            unit_price = self._product_unit_price(variant)
+            unit_price = self._product_unit_price(
+                variant,
+                apply_product_discount=apply_product_discount,
+            )
             subtotal = unit_price * offer_quantity
             group["offer_products_subtotal"] += subtotal
             group["added_products_subtotal"] += subtotal
@@ -610,6 +627,10 @@ class OrderPreviewSerializer(serializers.Serializer):
                     "unit_price": self._money(unit_price),
                     "subtotal": self._money(subtotal),
                     "is_selected": False,
+                    "apply_product_discount": apply_product_discount,
+                    "product_discount_percentage": self._money(
+                        product.discount or Decimal("0.00")
+                    ),
                 }
             )
 
@@ -801,7 +822,11 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
         for item in offers:
             offer = item["offer"]
             offer_groups = {}
-            for variant, offer_quantity in self._offer_variant_rows(offer):
+            for (
+                variant,
+                offer_quantity,
+                apply_product_discount,
+            ) in self._offer_variant_rows(offer):
                 product = variant.product
                 group = self._create_group(
                     groups,
@@ -825,7 +850,10 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
                     )
                     continue
 
-                unit_price = self._product_unit_price(variant)
+                unit_price = self._product_unit_price(
+                    variant,
+                    apply_product_discount=apply_product_discount,
+                )
                 subtotal = unit_price * offer_quantity
                 offer_group["offer_products_subtotal"] += subtotal
                 group["products_subtotal"] += subtotal
@@ -930,7 +958,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
 class OrderOfferSummarySerializer(serializers.ModelSerializer):
     class Meta:
         model = Offer
-        fields = ("id", "title", "type")
+        fields = ("id", "title", "type", "discount")
         read_only_fields = fields
 
 
@@ -2031,7 +2059,11 @@ class AdminOrderCreateSerializer(OrderSerializer):
         for offer_item in offers:
             offer = offer_item["offer"]
             offer_products_subtotal = Decimal("0.00")
-            for variant, offer_quantity in OrderPreviewSerializer._offer_variant_rows(offer):
+            for (
+                variant,
+                offer_quantity,
+                apply_product_discount,
+            ) in OrderPreviewSerializer._offer_variant_rows(offer):
                 product = variant.product
                 selected_lines = selected_lines_by_variant.get(variant.id, [])
                 if selected_lines:
@@ -2040,7 +2072,10 @@ class AdminOrderCreateSerializer(OrderSerializer):
                     )
                     continue
 
-                unit_price = OrderPreviewSerializer._product_unit_price(variant)
+                unit_price = OrderPreviewSerializer._product_unit_price(
+                    variant,
+                    apply_product_discount=apply_product_discount,
+                )
                 subtotal = unit_price * offer_quantity
                 priced_item = {
                     "variant": variant,

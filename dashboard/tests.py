@@ -517,7 +517,7 @@ class DashboardOverviewAPITests(APITestCase):
         self.assertEqual(response.data["active_orders"], [])
         self.assertEqual(response.data["top_shops"], [])
 
-    def test_overview_uses_to_day_for_orders_and_full_period_for_revenue_and_products(self):
+    def test_overview_uses_full_period_for_orders_revenue_and_products(self):
         first, last, older_active, newer_active = self.seed_dashboard_orders()
         self.client.force_authenticate(self.admin)
 
@@ -533,10 +533,10 @@ class DashboardOverviewAPITests(APITestCase):
         self.assertEqual(
             response.data["orders"],
             {
-                "total": 1,
-                "completed": 1,
-                "incomplete": 0,
-                "completion_rate": 100.0,
+                "total": 5,
+                "completed": 2,
+                "incomplete": 3,
+                "completion_rate": 40.0,
             },
         )
         self.assertEqual(
