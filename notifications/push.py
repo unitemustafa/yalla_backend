@@ -184,6 +184,133 @@ def _send_tokens(
     )
 
 
+def send_notifications_push(
+    notification_ids,
+    *,
+    high_priority=False,
+    android_channel_id=None,
+):
+    """Send recipient-specific notifications in Firebase batches of 500."""
+    ordered_ids = list(dict.fromkeys(int(value) for value in notification_ids))
+    if not ordered_ids:
+        return PushDeliveryResult(frozenset(), frozenset(), frozenset())
+
+    notifications_by_id = {
+        notification.id: notification
+        for notification in Notification.objects.filter(
+            id__in=ordered_ids,
+            recipient__isnull=False,
+        )
+    }
+    notifications = [
+        notifications_by_id[notification_id]
+        for notification_id in ordered_ids
+        if notification_id in notifications_by_id
+    ]
+    if not notifications:
+        return PushDeliveryResult(frozenset(), frozenset(), frozenset())
+
+    recipient_ids = {notification.recipient_id for notification in notifications}
+    tokens_by_user = {}
+    for user_id, token in ClientDevice.objects.filter(
+        user_id__in=recipient_ids,
+        is_active=True,
+    ).values_list("user_id", "token"):
+        tokens_by_user.setdefault(user_id, []).append(token)
+
+    deliveries = [
+        (notification, token)
+        for notification in notifications
+        for token in tokens_by_user.get(notification.recipient_id, ())
+    ]
+    if not deliveries:
+        return PushDeliveryResult(frozenset(), frozenset(), frozenset())
+
+    messaging = _messaging_module()
+    if messaging is None:
+        return PushDeliveryResult(
+            frozenset(),
+            frozenset(),
+            frozenset(token for _, token in deliveries),
+        )
+
+    successful_tokens = set()
+    stale_tokens = set()
+    failed_tokens = set()
+    for start in range(0, len(deliveries), 500):
+        batch = deliveries[start : start + 500]
+        messages = []
+        for notification, token in batch:
+            data = {
+                **(notification.data or {}),
+                "notification_id": notification.id,
+                "title": notification.title,
+                "message": notification.message,
+            }
+            messages.append(
+                messaging.Message(
+                    token=token,
+                    data=_string_data(data),
+                    notification=messaging.Notification(
+                        title=notification.title,
+                        body=notification.message,
+                    ),
+                    android=(
+                        messaging.AndroidConfig(
+                            priority="high",
+                            ttl=timedelta(minutes=5),
+                            notification=(
+                                messaging.AndroidNotification(
+                                    channel_id=android_channel_id,
+                                )
+                                if android_channel_id
+                                else None
+                            ),
+                        )
+                        if high_priority or android_channel_id
+                        else None
+                    ),
+                    apns=(
+                        messaging.APNSConfig(
+                            headers={"apns-priority": "10"},
+                            payload=messaging.APNSPayload(
+                                aps=messaging.Aps(
+                                    content_available=True,
+                                    sound="default",
+                                )
+                            ),
+                        )
+                        if high_priority
+                        else None
+                    ),
+                )
+            )
+        try:
+            response = messaging.send_each(messages)
+        except Exception:
+            logger.exception("FCM notification batch request failed")
+            failed_tokens.update(token for _, token in batch)
+            continue
+        for (_, token), item in zip(batch, response.responses):
+            if item.success:
+                successful_tokens.add(token)
+            elif (
+                item.exception is not None
+                and item.exception.__class__.__name__ == "UnregisteredError"
+            ):
+                stale_tokens.add(token)
+            else:
+                failed_tokens.add(token)
+
+    if stale_tokens:
+        ClientDevice.objects.filter(token__in=stale_tokens).delete()
+    return PushDeliveryResult(
+        frozenset(successful_tokens),
+        frozenset(stale_tokens),
+        frozenset(failed_tokens),
+    )
+
+
 def send_notification_push(
     notification_id,
     *,

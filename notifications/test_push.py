@@ -169,6 +169,92 @@ class FirebaseMessagingInitializationTests(SimpleTestCase):
 
 
 class FCMTokenHandlingTests(TestCase):
+    def test_recipient_specific_notifications_are_sent_in_one_batch(self):
+        first_user = User.objects.create_user(
+            username="batch-push-user-1",
+            email="batch-push-1@example.com",
+            phone="+213555900101",
+            password="Password1!",
+        )
+        second_user = User.objects.create_user(
+            username="batch-push-user-2",
+            email="batch-push-2@example.com",
+            phone="+213555900102",
+            password="Password1!",
+        )
+        first_device = ClientDevice.objects.create(
+            user=first_user,
+            token="batch-token-1",
+            platform=ClientDevice.Platform.ANDROID,
+            last_seen_at=timezone.now(),
+        )
+        second_device = ClientDevice.objects.create(
+            user=second_user,
+            token="batch-token-2",
+            platform=ClientDevice.Platform.ANDROID,
+            last_seen_at=timezone.now(),
+        )
+        first_notification = Notification.objects.create(
+            recipient=first_user,
+            audience=Notification.Audience.CLIENT,
+            type=Notification.Type.OFFER_CREATED,
+            title="First offer",
+            message="First message",
+            data={"event": "offer_created", "offer_id": 1},
+        )
+        second_notification = Notification.objects.create(
+            recipient=second_user,
+            audience=Notification.Audience.CLIENT,
+            type=Notification.Type.OFFER_CREATED,
+            title="Second offer",
+            message="Second message",
+            data={"event": "offer_created", "offer_id": 2},
+        )
+        messaging = Mock()
+        messaging.Message.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.Notification.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.AndroidConfig.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.AndroidNotification.side_effect = (
+            lambda **kwargs: SimpleNamespace(**kwargs)
+        )
+        messaging.APNSConfig.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.APNSPayload.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.Aps.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.send_each.return_value = SimpleNamespace(
+            responses=[
+                SimpleNamespace(success=True, exception=None),
+                SimpleNamespace(success=True, exception=None),
+            ]
+        )
+
+        with patch.object(push, "_messaging_module", return_value=messaging):
+            result = push.send_notifications_push(
+                [first_notification.id, second_notification.id],
+                high_priority=True,
+                android_channel_id="offer_updates",
+            )
+
+        messages = messaging.send_each.call_args.args[0]
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(
+            {message.token for message in messages},
+            {first_device.token, second_device.token},
+        )
+        self.assertEqual(
+            {message.data["notification_id"] for message in messages},
+            {str(first_notification.id), str(second_notification.id)},
+        )
+        self.assertTrue(
+            all(
+                message.android.notification.channel_id == "offer_updates"
+                for message in messages
+            )
+        )
+        self.assertEqual(
+            result.successful_tokens,
+            {first_device.token, second_device.token},
+        )
+
     def test_only_unregistered_fcm_token_is_deleted(self):
         user = User.objects.create_user(
             username="fcm-token-user",

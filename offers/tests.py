@@ -189,7 +189,7 @@ class OfferAPITests(APITestCase):
         offer.service_cities.set(cities or [])
         return offer
 
-    @patch("notifications.offer_services.send_notification_push")
+    @patch("notifications.offer_services.send_notifications_push")
     def test_city_offer_notifies_only_active_clients_in_selected_city(self, send_push):
         other_city_client = User.objects.create_user(
             username="other_offer_city",
@@ -236,9 +236,13 @@ class OfferAPITests(APITestCase):
         self.assertEqual(notification.data["price_text"], "خصم 50%")
         self.assertNotIn(other_city_client.id, notifications.values_list("recipient_id", flat=True))
         self.assertNotIn(inactive_client.id, notifications.values_list("recipient_id", flat=True))
-        send_push.assert_called_once_with(notification.id)
+        send_push.assert_called_once_with(
+            (notification.id,),
+            high_priority=True,
+            android_channel_id="offer_updates",
+        )
 
-    @patch("notifications.offer_services.send_notification_push")
+    @patch("notifications.offer_services.send_notifications_push")
     def test_general_offer_notifies_only_general_selected_clients(self, send_push):
         self.set_client_region(None)
         city_client = User.objects.create_user(
@@ -638,7 +642,7 @@ class OfferAPITests(APITestCase):
         )
         self.assertTrue(Offer.objects.filter(id=offer.id).exists())
 
-    @patch("notifications.offer_services.send_notification_push")
+    @patch("notifications.offer_services.send_notifications_push")
     def test_push_opt_out_creates_no_notification(self, send_push):
         self.authenticate(self.admin)
         with self.captureOnCommitCallbacks(execute=True):
@@ -652,7 +656,7 @@ class OfferAPITests(APITestCase):
         self.assertIsNone(response.data["push_sent_at"])
         send_push.assert_not_called()
 
-    @patch("notifications.offer_services.send_notification_push")
+    @patch("notifications.offer_services.send_notifications_push")
     def test_saving_never_sends_and_explicit_request_is_idempotent(self, send_push):
         self.authenticate(self.admin)
         with self.captureOnCommitCallbacks(execute=True):
@@ -687,7 +691,39 @@ class OfferAPITests(APITestCase):
         self.assertEqual(Notification.objects.filter(offer_id=created.data["id"]).count(), 1)
         send_push.assert_called_once()
 
-    @patch("notifications.offer_services.send_notification_push")
+    @patch("notifications.offer_services.logger")
+    @patch(
+        "notifications.offer_services.send_notifications_push",
+        side_effect=RuntimeError("FCM unavailable"),
+    )
+    def test_push_failure_does_not_turn_successful_offer_dispatch_into_api_failure(
+        self,
+        send_push,
+        logger,
+    ):
+        self.authenticate(self.admin)
+        created = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(send_push_notification=True),
+            format="json",
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"{OFFERS_BASE}/{created.data['id']}/send-notification/",
+                {"request_id": str(uuid.uuid4())},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["notification_count"], 1)
+        self.assertTrue(
+            Notification.objects.filter(offer_id=created.data["id"]).exists()
+        )
+        send_push.assert_called_once()
+        logger.exception.assert_called_once()
+
+    @patch("notifications.offer_services.send_notifications_push")
     def test_expired_offer_can_send_again_after_extending_end_time(self, send_push):
         self.authenticate(self.admin)
         offer = self.create_offer(cities=[self.city])

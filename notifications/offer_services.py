@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.contrib.auth import get_user_model
@@ -10,10 +11,25 @@ from offers.models import Offer
 from rest_framework.exceptions import ValidationError
 
 from .models import Notification, OfferNotificationDispatch
-from .push import send_notification_push
+from .push import send_notifications_push
 
+logger = logging.getLogger(__name__)
 User = get_user_model()
 BATCH_SIZE = 500
+
+
+def _deliver_offer_pushes(notification_ids):
+    try:
+        send_notifications_push(
+            notification_ids,
+            high_priority=True,
+            android_channel_id="offer_updates",
+        )
+    except Exception:
+        logger.exception(
+            "Offer push delivery failed for notification_ids=%s",
+            notification_ids,
+        )
 
 
 def _trim_decimal(value):
@@ -109,9 +125,7 @@ def dispatch_offer_notifications(offer_id, request_id, requested_by_id=None):
             Offer.objects.filter(pk=offer.pk).update(push_sent_at=now)
             if created_notification_ids:
                 transaction.on_commit(
-                    lambda ids=tuple(created_notification_ids): [
-                        send_notification_push(notification_id) for notification_id in ids
-                    ]
+                    lambda ids=tuple(created_notification_ids): _deliver_offer_pushes(ids)
                 )
 
     if validation_error:
