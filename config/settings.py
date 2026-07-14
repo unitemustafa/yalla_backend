@@ -7,6 +7,8 @@ from pathlib import Path
 import os
 import dj_database_url
 
+from .cloudinary_settings import build_cloudinary_storage_settings
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -127,12 +129,7 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 
 # Cloudinary
-CLOUDINARY_STORAGE = {
-    "CLOUD_NAME": os.environ.get("CLOUDINARY_CLOUD_NAME"),
-    "API_KEY": os.environ.get("CLOUDINARY_API_KEY"),
-    "API_SECRET": os.environ.get("CLOUDINARY_API_SECRET"),
-    "SECURE": True,
-}
+CLOUDINARY_STORAGE = build_cloudinary_storage_settings(os.environ)
 
 STORAGES = {
     "default": {
