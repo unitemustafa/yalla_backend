@@ -29,6 +29,13 @@ ALLOWED_HOSTS = [
 
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 
+# Password strength belongs to production. Tests only need deterministic
+# hashing semantics, and the production hasher makes the full suite needlessly
+# CPU-bound because every test creates several users.
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.MD5PasswordHasher",
+]
+
 
 # Temporary local directories prevent tests from touching Cloudinary
 # or leaving uploaded files inside the repository.

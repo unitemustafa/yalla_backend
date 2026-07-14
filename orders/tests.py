@@ -239,7 +239,11 @@ class OrderAPITests(APITestCase):
         )
         self.assertEqual(notifications.count(), 1)
         self.assertEqual(notifications.get().data["market_count"], 2)
-        send_push.assert_called_once_with(notifications.get().id)
+        send_push.assert_called_once_with(
+            notifications.get().id,
+            high_priority=True,
+            android_channel_id="order_updates",
+        )
 
     @patch("notifications.order_services.send_notification_push")
     def test_real_order_transitions_create_idempotent_client_notifications(self, send_push):

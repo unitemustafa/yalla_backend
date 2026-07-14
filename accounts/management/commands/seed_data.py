@@ -27,7 +27,7 @@ from catalog.models import (
 )
 from locations.models import Address, DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
-from offers.models import Offer
+from offers.models import Offer, OfferItem
 from orders.models import (
     Order,
     OrderEvent,
@@ -726,6 +726,25 @@ class Command(BaseCommand):
                 },
             )
             offer.products.set([products[name] for name in product_names])
+            selected_variants = [
+                products[name].variants.order_by("id").first()
+                for name in product_names
+            ]
+            selected_variants = [
+                variant for variant in selected_variants if variant is not None
+            ]
+            offer.items.exclude(
+                variant_id__in=[variant.id for variant in selected_variants]
+            ).delete()
+            for variant in selected_variants:
+                OfferItem.objects.update_or_create(
+                    offer=offer,
+                    variant=variant,
+                    defaults={
+                        "quantity": 1,
+                        "apply_product_discount": True,
+                    },
+                )
             offer.service_cities.set([service_city] if service_city is not None else [])
             offers[title] = offer
         return offers

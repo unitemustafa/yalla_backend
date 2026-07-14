@@ -179,7 +179,14 @@ def create_order_lifecycle_notification(
         },
     )
     if created:
-        transaction.on_commit(partial(send_notification_push, notification.id))
+        transaction.on_commit(
+            partial(
+                send_notification_push,
+                notification.id,
+                high_priority=True,
+                android_channel_id="order_updates",
+            )
+        )
     return notification
 
 

@@ -1066,6 +1066,9 @@ class ProductImageAPITests(APITestCase):
             "name": extra.pop("name", "Image product"),
             "description": "",
             "discount": "0.00",
+            "variants": json.dumps(
+                [{"price": "100.00", "sku": "IMAGE-BASE"}]
+            ),
             **extra,
         }
         if images is not None:
