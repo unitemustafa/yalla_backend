@@ -169,7 +169,48 @@ class FirebaseMessagingInitializationTests(SimpleTestCase):
 
 
 class FCMTokenHandlingTests(TestCase):
-    def test_recipient_specific_notifications_are_sent_in_one_batch(self):
+    def test_multicast_delivery_is_split_at_five_hundred_devices(self):
+        tokens = [f"batch-token-{index}" for index in range(501)]
+        messaging = Mock()
+        messaging.MulticastMessage.side_effect = (
+            lambda **kwargs: SimpleNamespace(**kwargs)
+        )
+        messaging.Notification.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.AndroidConfig.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.AndroidNotification.side_effect = (
+            lambda **kwargs: SimpleNamespace(**kwargs)
+        )
+        messaging.APNSConfig.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.APNSPayload.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.Aps.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.send_each_for_multicast.side_effect = lambda message: SimpleNamespace(
+            responses=[
+                SimpleNamespace(success=True, exception=None)
+                for _ in message.tokens
+            ]
+        )
+
+        with patch.object(push, "_messaging_module", return_value=messaging):
+            result = push._send_tokens(
+                tokens,
+                {"event": "offer_created", "offer_id": 1},
+                title="Shared offer",
+                message="Shared message",
+                high_priority=True,
+                android_channel_id="offer_updates",
+            )
+
+        self.assertEqual(messaging.send_each_for_multicast.call_count, 2)
+        self.assertEqual(
+            [
+                len(call.args[0].tokens)
+                for call in messaging.send_each_for_multicast.call_args_list
+            ],
+            [500, 1],
+        )
+        self.assertEqual(result.successful_tokens, set(tokens))
+
+    def test_identical_notifications_are_sent_in_one_multicast_batch(self):
         first_user = User.objects.create_user(
             username="batch-push-user-1",
             email="batch-push-1@example.com",
@@ -198,20 +239,22 @@ class FCMTokenHandlingTests(TestCase):
             recipient=first_user,
             audience=Notification.Audience.CLIENT,
             type=Notification.Type.OFFER_CREATED,
-            title="First offer",
-            message="First message",
+            title="Shared offer",
+            message="Shared message",
             data={"event": "offer_created", "offer_id": 1},
         )
         second_notification = Notification.objects.create(
             recipient=second_user,
             audience=Notification.Audience.CLIENT,
             type=Notification.Type.OFFER_CREATED,
-            title="Second offer",
-            message="Second message",
-            data={"event": "offer_created", "offer_id": 2},
+            title="Shared offer",
+            message="Shared message",
+            data={"event": "offer_created", "offer_id": 1},
         )
         messaging = Mock()
-        messaging.Message.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.MulticastMessage.side_effect = (
+            lambda **kwargs: SimpleNamespace(**kwargs)
+        )
         messaging.Notification.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
         messaging.AndroidConfig.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
         messaging.AndroidNotification.side_effect = (
@@ -220,7 +263,7 @@ class FCMTokenHandlingTests(TestCase):
         messaging.APNSConfig.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
         messaging.APNSPayload.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
         messaging.Aps.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
-        messaging.send_each.return_value = SimpleNamespace(
+        messaging.send_each_for_multicast.return_value = SimpleNamespace(
             responses=[
                 SimpleNamespace(success=True, exception=None),
                 SimpleNamespace(success=True, exception=None),
@@ -234,22 +277,14 @@ class FCMTokenHandlingTests(TestCase):
                 android_channel_id="offer_updates",
             )
 
-        messages = messaging.send_each.call_args.args[0]
-        self.assertEqual(len(messages), 2)
+        message = messaging.send_each_for_multicast.call_args.args[0]
         self.assertEqual(
-            {message.token for message in messages},
+            set(message.tokens),
             {first_device.token, second_device.token},
         )
-        self.assertEqual(
-            {message.data["notification_id"] for message in messages},
-            {str(first_notification.id), str(second_notification.id)},
-        )
-        self.assertTrue(
-            all(
-                message.android.notification.channel_id == "offer_updates"
-                for message in messages
-            )
-        )
+        self.assertNotIn("notification_id", message.data)
+        self.assertEqual(message.data["offer_id"], "1")
+        self.assertEqual(message.android.notification.channel_id, "offer_updates")
         self.assertEqual(
             result.successful_tokens,
             {first_device.token, second_device.token},
