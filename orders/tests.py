@@ -2564,6 +2564,12 @@ class OrderAPITests(APITestCase):
             self.assertEqual(status_response.data["status"], next_status)
         order.refresh_from_db()
         self.assertIsNotNone(order.delivered_at)
+        delivered_list = self.client.get("/api/v1/courier/orders/")
+        self.assertEqual(delivered_list.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            delivered_list.data[0]["delivered_at"],
+            order.delivered_at.isoformat().replace("+00:00", "Z"),
+        )
         admin_status_notifications = Notification.objects.filter(
             audience=Notification.Audience.ADMIN,
             type=Notification.Type.ORDER_STATUS_CHANGED,

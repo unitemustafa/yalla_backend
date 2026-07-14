@@ -2260,6 +2260,7 @@ class CourierOrderListSerializer(serializers.ModelSerializer):
             "delivery_price",
             "created_at",
             "assigned_at",
+            "delivered_at",
         )
 
     def get_customer(self, instance):
