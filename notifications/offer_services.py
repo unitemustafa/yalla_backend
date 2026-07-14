@@ -18,6 +18,15 @@ User = get_user_model()
 BATCH_SIZE = 500
 
 
+def _locked_offer_queryset():
+    """Lock only the offer row, not nullable rows joined for notification data."""
+    return (
+        Offer.objects.select_for_update(of=("self",))
+        .select_related("market")
+        .prefetch_related("service_cities", "products__variants", "products__market")
+    )
+
+
 def _deliver_offer_pushes(notification_ids):
     try:
         send_notifications_push(
@@ -94,12 +103,7 @@ def dispatch_offer_notifications(offer_id, request_id, requested_by_id=None):
         if not created and dispatch.status == OfferNotificationDispatch.Status.COMPLETED:
             return dispatch
 
-        offer = (
-            Offer.objects.select_for_update()
-            .select_related("market")
-            .prefetch_related("service_cities", "products__variants", "products__market")
-            .get(pk=offer_id)
-        )
+        offer = _locked_offer_queryset().get(pk=offer_id)
         now = timezone.now()
         validation_error = _dispatch_validation_message(offer, now)
         if validation_error:

@@ -20,6 +20,7 @@ from locations.models import ServiceCity
 from markets.models import Market, MarketClassification
 from orders.models import Order, OrderOffer
 from notifications.models import Notification
+from notifications.offer_services import _locked_offer_queryset
 
 from .models import Offer
 
@@ -40,6 +41,11 @@ def offer_image_upload(name="offer.png", image_format="PNG", color="blue"):
 
 class OfferAPITests(APITestCase):
     password = "Password1!"
+
+    def test_offer_notification_lock_targets_offer_row_only(self):
+        queryset = _locked_offer_queryset()
+
+        self.assertEqual(queryset.query.select_for_update_of, ("self",))
 
     def setUp(self):
         self.admin = User.objects.create_user(
