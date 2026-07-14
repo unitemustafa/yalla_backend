@@ -288,7 +288,23 @@ class OfferSendNotificationView(APIView):
         request_id = serializers.UUIDField().run_validation(request.data.get("request_id"))
         from notifications.offer_services import dispatch_offer_notifications
 
-        dispatch = dispatch_offer_notifications(offer_id, request_id, request.user.id)
+        try:
+            dispatch = dispatch_offer_notifications(
+                offer_id,
+                request_id,
+                request.user.id,
+            )
+        except serializers.ValidationError:
+            raise
+        except Exception:
+            logger.exception(
+                "Offer notification dispatch failed offer_id=%s request_id=%s "
+                "requested_by_id=%s",
+                offer_id,
+                request_id,
+                request.user.id,
+            )
+            raise
         return Response({
             "dispatch_id": dispatch.id,
             "request_id": str(dispatch.request_id),
