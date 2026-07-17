@@ -66,39 +66,43 @@ def clear_otp_cooldown(email, purpose):
 
 
 def verify_otp(user, purpose, code, *, consume=True):
-    otp = (
-        OneTimePassword.objects.filter(
-            user=user,
-            purpose=purpose,
-            used_at__isnull=True,
+    # The selected code must remain locked through each state transition so a
+    # valid registration code can only be consumed by one request.
+    with transaction.atomic():
+        otp = (
+            OneTimePassword.objects.select_for_update()
+            .filter(
+                user=user,
+                purpose=purpose,
+                used_at__isnull=True,
+            )
+            .order_by("-created_at")
+            .first()
         )
-        .order_by("-created_at")
-        .first()
-    )
 
-    if otp is None:
-        return None, "No active verification code was found."
-    if otp.expires_at <= timezone.now():
-        otp.used_at = timezone.now()
-        otp.save(update_fields=["used_at"])
-        return None, "The verification code has expired."
-    if otp.attempts >= OTP_MAX_ATTEMPTS:
-        otp.used_at = timezone.now()
-        otp.save(update_fields=["used_at"])
-        return None, "Too many invalid attempts. Request a new code."
-    if not check_password(code, otp.code_hash):
-        otp.attempts += 1
-        update_fields = ["attempts"]
+        if otp is None:
+            return None, "No active verification code was found."
+        if otp.expires_at <= timezone.now():
+            otp.used_at = timezone.now()
+            otp.save(update_fields=["used_at"])
+            return None, "The verification code has expired."
         if otp.attempts >= OTP_MAX_ATTEMPTS:
             otp.used_at = timezone.now()
-            update_fields.append("used_at")
-        otp.save(update_fields=update_fields)
-        return None, "Invalid verification code."
+            otp.save(update_fields=["used_at"])
+            return None, "Too many invalid attempts. Request a new code."
+        if not check_password(code, otp.code_hash):
+            otp.attempts += 1
+            update_fields = ["attempts"]
+            if otp.attempts >= OTP_MAX_ATTEMPTS:
+                otp.used_at = timezone.now()
+                update_fields.append("used_at")
+            otp.save(update_fields=update_fields)
+            return None, "Invalid verification code."
 
-    if consume:
-        otp.used_at = timezone.now()
-        otp.save(update_fields=["used_at"])
-    return otp, None
+        if consume:
+            otp.used_at = timezone.now()
+            otp.save(update_fields=["used_at"])
+        return otp, None
 
 
 def otp_response_data(code):

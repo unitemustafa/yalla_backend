@@ -38,7 +38,7 @@ from .client_sessions import (
     client_session_metadata,
     sync_outstanding_token,
 )
-from .exceptions import AccountInactive, SessionExpired
+from .exceptions import AccountInactive, EmailVerificationRequired, SessionExpired
 from .models import CourierProfile, OneTimePassword
 from .token_security import validate_client_token_state
 from .services import normalize_email, verify_otp
@@ -206,11 +206,15 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
             "username_changed_at",
             "role",
             "is_active",
+            "is_verified",
             "market_region_mode",
             "market_region_service_city_name",
             "has_password",
             "courier_profile",
         )
+        extra_kwargs = {
+            "is_verified": {"read_only": True},
+        }
 
     def get_has_password(self, obj):
         return obj.has_usable_password()
@@ -353,39 +357,16 @@ class RegisterSerializer(
 
     def validate_email(self, value):
         reject_whitespace(value)
-        email = normalize_email(value)
-        user = User.objects.filter(
-            email__iexact=email,
-            deleted_at__isnull=True,
-        ).first()
-        if user and user.is_active:
-            raise serializers.ValidationError("An account with this email already exists.")
-        return email
+        return normalize_email(value)
 
     def validate_username(self, value):
         username = value.strip()
         reject_whitespace(username)
-        email = normalize_email(self.initial_data.get("email", ""))
-        user = User.objects.filter(
-            username__iexact=username,
-            deleted_at__isnull=True,
-        ).first()
-        if user and user.email.lower() != email:
-            raise serializers.ValidationError("This username is already taken.")
         return username
 
     def validate_phone(self, value):
         reject_whitespace(value)
         phone = normalize_egyptian_phone(value)
-        user = User.objects.filter(
-            phone__in=phone_candidates(phone),
-            deleted_at__isnull=True,
-        ).first()
-        email = normalize_email(self.initial_data.get("email", ""))
-        if user and user.email.lower() != email:
-            raise serializers.ValidationError(
-                "An account with this phone number already exists."
-            )
         return phone
 
     def validate_terms_accepted(self, value):
@@ -438,6 +419,8 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             }:
                 raise AccountInactive()
             raise serializers.ValidationError("Account is inactive.")
+        if not user.is_verified:
+            raise EmailVerificationRequired()
         if expected_role and user.role != expected_role:
             if expected_role == User.Role.REPRESENTATIVE:
                 raise PermissionDenied(self._representative_wrong_role_error(user))
@@ -526,6 +509,7 @@ class ResetPasswordSerializer(PasswordValidationMixin, EmailOTPSerializer):
         user = User.objects.filter(
             email__iexact=attrs["email"],
             is_active=True,
+            is_verified=True,
             deleted_at__isnull=True,
         ).first()
         if user is None:
@@ -905,6 +889,7 @@ class AdminUserWriteSerializer(
         user.set_password(password)
         user.terms_accepted = True
         user.terms_accepted_at = timezone.now()
+        user.is_verified = True
         user.save()
         if profile_data is not None:
             profile_data["delivery_area"] = None
@@ -1079,6 +1064,8 @@ class EmailTokenRefreshSerializer(
             token = RefreshToken(refresh)
         except TokenError:
             payload, user, outstanding = _decode_known_refresh(refresh)
+            if not user.is_verified:
+                raise EmailVerificationRequired()
             try:
                 is_expired = int(payload["exp"]) <= int(
                     timezone.now().timestamp()
@@ -1103,6 +1090,8 @@ class EmailTokenRefreshSerializer(
             raise
 
         user = validate_client_token_state(token)
+        if not user.is_verified:
+            raise EmailVerificationRequired()
         app_session_claims = (
             client_session_claims(token)
             if user.role in {User.Role.CLIENT, User.Role.REPRESENTATIVE}

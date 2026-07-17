@@ -1,6 +1,28 @@
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, UserManager
 from django.db import models
 from django.db.models.functions import Lower
+
+
+class VerifiedUserManager(UserManager):
+    """Programmatic provisioning is trusted unless it opts out explicitly."""
+
+    def create_user(self, username, email=None, password=None, **extra_fields):
+        extra_fields.setdefault("is_verified", True)
+        return super().create_user(
+            username,
+            email=email,
+            password=password,
+            **extra_fields,
+        )
+
+    def create_superuser(self, username, email=None, password=None, **extra_fields):
+        extra_fields.setdefault("is_verified", True)
+        return super().create_superuser(
+            username,
+            email=email,
+            password=password,
+            **extra_fields,
+        )
 
 
 class User(AbstractUser):
@@ -31,6 +53,7 @@ class User(AbstractUser):
     deleted_original_phone = models.CharField(max_length=30, null=True, blank=True)
     deleted_original_is_active = models.BooleanField(null=True, blank=True)
     auth_token_version = models.PositiveIntegerField(default=0)
+    is_verified = models.BooleanField(default=False, db_index=True)
     market_region_mode = models.CharField(
         max_length=20,
         choices=MarketRegionMode.choices,
@@ -47,6 +70,8 @@ class User(AbstractUser):
     market_region_updated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = VerifiedUserManager()
 
     class Meta(AbstractUser.Meta):
         constraints = [

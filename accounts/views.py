@@ -1,6 +1,8 @@
 from django.contrib.auth import get_user_model
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.db.models import Q
+from rest_framework.exceptions import ValidationError
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.generics import get_object_or_404
@@ -49,6 +51,7 @@ from .services import (
     otp_response_data,
     verify_otp,
 )
+from .exceptions import EmailVerificationRequired
 
 User = get_user_model()
 
@@ -76,6 +79,8 @@ class IsClientRole(BasePermission):
 
 
 def token_payload(user, request=None, admin_session_lifetime=None, remember=False):
+    if not user.is_verified:
+        raise EmailVerificationRequired()
     now = timezone.now()
     refresh = RefreshToken.for_user(user)
     refresh["auth_token_version"] = user.auth_token_version
@@ -178,26 +183,37 @@ class RegisterView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        user = User.objects.filter(
-            email__iexact=data["email"],
-            deleted_at__isnull=True,
-        ).first()
-
-        if user is None:
-            user = User(
-                email=data["email"],
-                username=data["username"],
-            )
+        users = self._matching_users(data)
+        is_retry = False
+        if not users:
+            user = User(email=data["email"], username=data["username"])
+        elif len(users) == 1 and not users[0].is_verified:
+            user = users[0]
+            is_retry = True
+        else:
+            raise ValidationError(self._duplicate_errors(data, users))
 
         user.username = data["username"]
+        user.email = data["email"]
         user.first_name = data["first_name"]
         user.last_name = data["last_name"]
         user.phone = data["phone"]
         user.terms_accepted = True
         user.terms_accepted_at = timezone.now()
-        user.is_active = False
+        user.is_verified = False
+        if not user.pk:
+            # Public registrations are usable lifecycle-wise but cannot obtain
+            # credentials until their email OTP has been consumed.
+            user.is_active = True
         user.set_password(data["password"])
-        user.save()
+        try:
+            # A savepoint keeps the surrounding transaction usable when a
+            # concurrent signup wins one of the database unique constraints.
+            with transaction.atomic():
+                user.save()
+        except IntegrityError:
+            users = self._matching_users(data)
+            raise ValidationError(self._duplicate_errors(data, users))
 
         try:
             _, code, cooldown_data = issue_otp(
@@ -208,13 +224,42 @@ class RegisterView(APIView):
             return otp_cooldown_error_response(exc)
         return Response(
             {
-                "detail": "Registration OTP sent.",
+                "detail": (
+                    "A new registration OTP has been sent."
+                    if is_retry
+                    else "Registration OTP sent."
+                ),
                 "email": user.email,
                 **otp_cooldown_response_data(cooldown_data),
                 **otp_response_data(code),
             },
             status=status.HTTP_201_CREATED,
         )
+
+    @staticmethod
+    def _matching_users(data):
+        return list(
+            User.objects.select_for_update()
+            .filter(deleted_at__isnull=True)
+            .filter(
+                Q(email__iexact=data["email"])
+                | Q(username__iexact=data["username"])
+                | Q(phone__in=phone_candidates(data["phone"]))
+            )
+            .order_by("pk")
+        )
+
+    @staticmethod
+    def _duplicate_errors(data, users):
+        errors = {}
+        if any(user.email.lower() == data["email"] for user in users):
+            errors["email"] = ["An account with this email already exists."]
+        if any(user.username.lower() == data["username"].lower() for user in users):
+            errors["username"] = ["This username is already taken."]
+        phone_values = set(phone_candidates(data["phone"]))
+        if any(user.phone in phone_values for user in users):
+            errors["phone"] = ["An account with this phone number already exists."]
+        return errors or {"email": ["An account with this email already exists."]}
 
 
 class VerifyRegistrationOTPView(APIView):
@@ -225,9 +270,10 @@ class VerifyRegistrationOTPView(APIView):
         serializer = EmailOTPSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        user = User.objects.filter(
+        user = User.objects.select_for_update().filter(
             email__iexact=serializer.validated_data["email"],
-            is_active=False,
+            is_active=True,
+            is_verified=False,
             deleted_at__isnull=True,
         ).first()
         if user is None:
@@ -247,8 +293,8 @@ class VerifyRegistrationOTPView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user.is_active = True
-        user.save(update_fields=["is_active"])
+        user.is_verified = True
+        user.save(update_fields=["is_verified"])
         update_successful_login(user)
         clear_otp_cooldown(user.email, OneTimePassword.Purpose.REGISTRATION)
         return Response(token_payload(user, request=request), status=status.HTTP_200_OK)
@@ -262,7 +308,8 @@ class ResendRegistrationOTPView(APIView):
         serializer.is_valid(raise_exception=True)
         user = User.objects.filter(
             email__iexact=serializer.validated_data["email"],
-            is_active=False,
+            is_active=True,
+            is_verified=False,
             deleted_at__isnull=True,
         ).first()
         if user is None:
@@ -533,6 +580,7 @@ class ForgotPasswordView(APIView):
         user = User.objects.filter(
             email__iexact=serializer.validated_data["email"],
             is_active=True,
+            is_verified=True,
             deleted_at__isnull=True,
         ).first()
 

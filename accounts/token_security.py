@@ -6,9 +6,15 @@ from .client_sessions import (
     client_session_claims,
     validate_client_session_deadline,
 )
-from .exceptions import AccountInactive, InvalidSession
+from .exceptions import AccountInactive, EmailVerificationRequired, InvalidSession
 
 User = get_user_model()
+
+
+def ensure_user_verified(user):
+    if not user.is_verified:
+        raise EmailVerificationRequired()
+    return user
 
 
 def token_user(validated_token):
@@ -35,6 +41,7 @@ def validate_client_token_state(
         return user
     if user.deleted_at is not None or not user.is_active:
         raise AccountInactive()
+    ensure_user_verified(user)
     try:
         token_version = int(validated_token.get("auth_token_version", 0))
     except (TypeError, ValueError) as exc:

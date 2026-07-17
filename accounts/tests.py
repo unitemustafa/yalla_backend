@@ -149,7 +149,8 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(len(mail.outbox), 1)
 
         user = User.objects.get(email=self.email)
-        self.assertFalse(user.is_active)
+        self.assertTrue(user.is_active)
+        self.assertFalse(user.is_verified)
         self.assertTrue(user.check_password(self.password))
         self.assertEqual(user.username, "yalla_customer")
 
@@ -158,7 +159,9 @@ class AuthenticationAPITests(APITestCase):
             {"email": self.email, "password": self.password},
         )
         self.assertEqual(login_response.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertEqual(login_response.data["code"], "account_inactive")
+        self.assertEqual(
+            login_response.data["code"], "email_verification_required"
+        )
 
         verify_response = self.client.post(
             f"{AUTH_BASE}/verify-email",

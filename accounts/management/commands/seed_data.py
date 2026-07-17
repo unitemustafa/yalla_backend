@@ -88,6 +88,7 @@ class Command(BaseCommand):
                 "is_staff": True,
                 "is_superuser": True,
                 "is_active": True,
+                "is_verified": True,
             },
             {
                 "email": "seed.amina@yalla.test",
@@ -99,6 +100,7 @@ class Command(BaseCommand):
                 "is_staff": False,
                 "is_superuser": False,
                 "is_active": True,
+                "is_verified": True,
             },
             {
                 "email": "seed.karim@yalla.test",
@@ -110,6 +112,7 @@ class Command(BaseCommand):
                 "is_staff": False,
                 "is_superuser": False,
                 "is_active": True,
+                "is_verified": True,
             },
             {
                 "email": "seed.courier@yalla.test",
@@ -121,6 +124,7 @@ class Command(BaseCommand):
                 "is_staff": False,
                 "is_superuser": False,
                 "is_active": True,
+                "is_verified": True,
             },
             {
                 "email": "seed.pending@yalla.test",
@@ -131,7 +135,8 @@ class Command(BaseCommand):
                 "role": User.Role.CLIENT,
                 "is_staff": False,
                 "is_superuser": False,
-                "is_active": False,
+                "is_active": True,
+                "is_verified": False,
             },
             {
                 "email": "seed.sara@yalla.test",
@@ -143,6 +148,7 @@ class Command(BaseCommand):
                 "is_staff": False,
                 "is_superuser": False,
                 "is_active": True,
+                "is_verified": True,
             },
             {
                 "email": "seed.nadir@yalla.test",
@@ -154,6 +160,7 @@ class Command(BaseCommand):
                 "is_staff": False,
                 "is_superuser": False,
                 "is_active": True,
+                "is_verified": True,
             },
             {
                 "email": "seed.courier2@yalla.test",
@@ -165,6 +172,7 @@ class Command(BaseCommand):
                 "is_staff": False,
                 "is_superuser": False,
                 "is_active": True,
+                "is_verified": True,
             },
             {
                 "email": "seed.courier3@yalla.test",
@@ -176,6 +184,7 @@ class Command(BaseCommand):
                 "is_staff": False,
                 "is_superuser": False,
                 "is_active": True,
+                "is_verified": True,
             },
         ]
         users = {}

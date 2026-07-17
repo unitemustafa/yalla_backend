@@ -17,6 +17,17 @@ class AccountInactive(APIException):
         }
 
 
+class EmailVerificationRequired(APIException):
+    status_code = 403
+    default_code = "email_verification_required"
+
+    def __init__(self):
+        self.detail = {
+            "code": self.default_code,
+            "detail": "Email verification is required.",
+        }
+
+
 class SessionExpired(APIException):
     status_code = 401
     default_code = "session_expired"

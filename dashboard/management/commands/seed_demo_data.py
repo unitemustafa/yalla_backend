@@ -339,6 +339,7 @@ class Command(BaseCommand):
                 is_staff=row.get("is_staff", False),
                 is_superuser=row.get("is_superuser", False),
                 is_active=True,
+                is_verified=True,
                 terms_accepted=True,
                 terms_accepted_at=now,
                 privacy_policy_version="seed-2026",
