@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
+from django.template.loader import render_to_string
 from django.utils import timezone
 
 from .models import OTPCooldown, OneTimePassword
@@ -44,15 +45,20 @@ def issue_otp(user, purpose):
             expires_at=timezone.now()
             + timedelta(seconds=settings.AUTH_OTP_EXPIRY_SECONDS),
         )
+        email_context = _otp_email_context(user, purpose, code)
         send_mail(
-            subject=_otp_subject(purpose),
-            message=(
-                f"Your Yalla verification code is {code}. "
-                f"It expires in {settings.AUTH_OTP_EXPIRY_SECONDS // 60} minutes."
-            ),
+            subject=email_context["subject"],
+            message=render_to_string(
+                "accounts/emails/otp.txt",
+                email_context,
+            ).strip(),
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[user.email],
             fail_silently=False,
+            html_message=render_to_string(
+                "accounts/emails/otp.html",
+                email_context,
+            ),
         )
         cooldown_data = _mark_cooldown_sent(cooldown)
         return otp, code, cooldown_data
@@ -187,5 +193,43 @@ def _mark_cooldown_sent(cooldown):
 
 def _otp_subject(purpose):
     if purpose == OneTimePassword.Purpose.REGISTRATION:
-        return "Verify your Yalla account"
-    return "Reset your Yalla password"
+        return "Yalla Market | رمز تأكيد البريد الإلكتروني"
+    return "Yalla Market | رمز تغيير كلمة المرور"
+
+
+def _otp_email_context(user, purpose, code):
+    expiry_seconds = getattr(settings, "AUTH_OTP_EXPIRY_SECONDS", 600)
+    expiry_minutes = max(1, (expiry_seconds + 59) // 60)
+    is_registration = purpose == OneTimePassword.Purpose.REGISTRATION
+
+    return {
+        "subject": _otp_subject(purpose),
+        "code": code,
+        "expiry_minutes": expiry_minutes,
+        "first_name": user.first_name.strip(),
+        "headline_ar": (
+            "أكد بريدك الإلكتروني"
+            if is_registration
+            else "غيّر كلمة المرور بأمان"
+        ),
+        "headline_en": (
+            "Verify your email"
+            if is_registration
+            else "Reset your password securely"
+        ),
+        "intro_ar": (
+            "استخدم رمز التأكيد التالي لإكمال إنشاء حسابك في يلا ماركت."
+            if is_registration
+            else "استخدم الرمز التالي لتأكيد طلب تغيير كلمة المرور."
+        ),
+        "intro_en": (
+            "Use the following verification code to finish creating your Yalla Market account."
+            if is_registration
+            else "Use the following code to confirm your password reset request."
+        ),
+        "preheader": (
+            "رمز تأكيد حسابك في يلا ماركت"
+            if is_registration
+            else "رمز تغيير كلمة مرور حسابك في يلا ماركت"
+        ),
+    }

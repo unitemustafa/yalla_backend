@@ -2644,6 +2644,42 @@ class AuthenticationAPITests(APITestCase):
             ).exists()
         )
 
+    def test_registration_otp_email_has_branded_html_and_plain_fallback(self):
+        user = self.create_active_user()
+        user.first_name = "Yalla"
+        user.save(update_fields=["first_name"])
+
+        _, code, _ = issue_otp(user, OneTimePassword.Purpose.REGISTRATION)
+
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertEqual(email.subject, "Yalla Market | رمز تأكيد البريد الإلكتروني")
+        self.assertIn(code, email.body)
+        self.assertIn("أكد بريدك الإلكتروني", email.body)
+        self.assertEqual(len(email.alternatives), 1)
+        html, content_type = email.alternatives[0]
+        self.assertEqual(content_type, "text/html")
+        self.assertIn(code, html)
+        self.assertIn("يلا ماركت", html)
+        self.assertIn("YALLA MARKET", html)
+        self.assertIn("مرحبًا Yalla،", html)
+        self.assertIn('dir="rtl"', html)
+        self.assertIn("#013c7e", html)
+        self.assertIn("صالح لمدة 10 دقائق فقط", html)
+
+    def test_password_reset_otp_email_uses_reset_copy(self):
+        user = self.create_active_user()
+
+        _, code, _ = issue_otp(user, OneTimePassword.Purpose.PASSWORD_RESET)
+
+        email = mail.outbox[0]
+        self.assertEqual(email.subject, "Yalla Market | رمز تغيير كلمة المرور")
+        self.assertIn(code, email.body)
+        html, content_type = email.alternatives[0]
+        self.assertEqual(content_type, "text/html")
+        self.assertIn("غيّر كلمة المرور بأمان", html)
+        self.assertIn("Reset your password securely", html)
+
     def test_successful_registration_verification_clears_cooldown(self):
         register_response = self.client.post(
             f"{AUTH_BASE}/signup",
