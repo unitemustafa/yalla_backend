@@ -79,6 +79,7 @@ class AddressProductPagination(PageNumberPagination):
 
 class LoginDashboardSnapshotView(APIView):
     permission_classes = [AllowAny]
+    rate_limit_scopes = ("snapshot_ip",)
 
     def get(self, request):
         dashboard_settings, _ = DashboardSettings.objects.get_or_create(pk=1)

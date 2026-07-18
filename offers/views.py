@@ -281,6 +281,7 @@ def update_offer_image_response(request, offer_id):
 
 class OfferSendNotificationView(APIView):
     permission_classes = [IsAuthenticated]
+    rate_limit_scopes = ("notification_send_user",)
 
     def post(self, request, offer_id):
         if request.user.role != User.Role.ADMIN:

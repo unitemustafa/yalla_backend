@@ -280,6 +280,7 @@ class ClientOrderListView(generics.ListAPIView):
 
 class OrderPreviewView(APIView):
     permission_classes = (IsAuthenticated,)
+    rate_limit_scopes = ("order_preview_user",)
 
     def post(self, request):
         preview_user = resolve_order_target_user(request, action="preview")
@@ -294,6 +295,7 @@ class OrderPreviewView(APIView):
 
 class ClientOrderCreateView(APIView):
     permission_classes = (IsAuthenticated, IsClientRole)
+    rate_limit_scopes = ("order_create_user",)
 
     @transaction.atomic
     def post(self, request):

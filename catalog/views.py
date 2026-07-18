@@ -508,6 +508,7 @@ class ProductDetailView(APIView):
 
 class ProductSendNotificationView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
+    rate_limit_scopes = ("notification_send_user",)
 
     def post(self, request, product_id):
         get_object_or_404(Product, id=product_id)
