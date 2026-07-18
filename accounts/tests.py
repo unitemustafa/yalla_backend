@@ -2572,6 +2572,11 @@ class AuthenticationAPITests(APITestCase):
             status.HTTP_429_TOO_MANY_REQUESTS,
         )
         self.assertIn("retry_after_seconds", resend_response.data)
+        self.assertEqual(resend_response.data["code"], "otp_cooldown")
+        self.assertEqual(
+            resend_response.headers["Retry-After"],
+            str(resend_response.data["retry_after_seconds"]),
+        )
 
         cooldown = OTPCooldown.objects.get(
             identifier=self.email,

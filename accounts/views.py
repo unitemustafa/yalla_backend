@@ -165,17 +165,21 @@ def _notify_courier_availability(courier_id, *, source):
 
 
 def otp_cooldown_error_response(exc):
-    return Response(
+    response = Response(
         {
+            "code": "otp_cooldown",
             "detail": "Please wait before requesting another code.",
             "retry_after_seconds": exc.retry_after_seconds,
         },
         status=status.HTTP_429_TOO_MANY_REQUESTS,
     )
+    response.headers["Retry-After"] = str(exc.retry_after_seconds)
+    return response
 
 
 class RegisterView(APIView):
     permission_classes = [AllowAny]
+    rate_limit_scopes = ("signup_ip", "signup_email")
 
     @transaction.atomic
     def post(self, request):
@@ -264,6 +268,7 @@ class RegisterView(APIView):
 
 class VerifyRegistrationOTPView(APIView):
     permission_classes = [AllowAny]
+    rate_limit_scopes = ("otp_verify_ip", "otp_verify_identifier")
 
     @transaction.atomic
     def post(self, request):
@@ -302,6 +307,7 @@ class VerifyRegistrationOTPView(APIView):
 
 class ResendRegistrationOTPView(APIView):
     permission_classes = [AllowAny]
+    rate_limit_scopes = ("otp_send_ip", "otp_send_identifier")
 
     def post(self, request):
         serializer = ForgotPasswordSerializer(data=request.data)
@@ -335,6 +341,7 @@ class ResendRegistrationOTPView(APIView):
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    rate_limit_scopes = ("login_ip", "login_identifier")
     role = None
     serializer_class = LoginSerializer
 
@@ -365,6 +372,10 @@ class RepresentativeLoginView(LoginView):
 class AdminLoginView(LoginView):
     role = User.Role.ADMIN
     serializer_class = AdminLoginSerializer
+    rate_limit_scopes = (
+        "admin_login_ip",
+        "admin_login_identifier",
+    )
 
     def post(self, request):
         serializer = self.serializer_class(
@@ -522,6 +533,7 @@ class AdminUserDetailView(APIView):
 
 class CheckUsernameView(APIView):
     permission_classes = [AllowAny]
+    rate_limit_scopes = ("availability_ip",)
 
     def get(self, request):
         username = request.query_params.get("username", "").strip()
@@ -539,6 +551,7 @@ class CheckUsernameView(APIView):
 
 class CheckEmailView(APIView):
     permission_classes = [AllowAny]
+    rate_limit_scopes = ("availability_ip",)
 
     def get(self, request):
         email = request.query_params.get("email", "").strip()
@@ -556,6 +569,7 @@ class CheckEmailView(APIView):
 
 class CheckPhoneView(APIView):
     permission_classes = [AllowAny]
+    rate_limit_scopes = ("availability_ip",)
 
     def get(self, request):
         phone = request.query_params.get("phone", "").strip()
@@ -573,6 +587,7 @@ class CheckPhoneView(APIView):
 
 class ForgotPasswordView(APIView):
     permission_classes = [AllowAny]
+    rate_limit_scopes = ("otp_send_ip", "otp_send_identifier")
 
     def post(self, request):
         serializer = ForgotPasswordSerializer(data=request.data)
@@ -602,6 +617,7 @@ class ForgotPasswordView(APIView):
 
 class ResetPasswordView(APIView):
     permission_classes = [AllowAny]
+    rate_limit_scopes = ("otp_verify_ip", "otp_verify_identifier")
 
     @transaction.atomic
     def post(self, request):
@@ -627,3 +643,4 @@ class ResetPasswordView(APIView):
 class RefreshTokenView(TokenRefreshView):
     permission_classes = [AllowAny]
     serializer_class = EmailTokenRefreshSerializer
+    rate_limit_scopes = ("refresh_ip", "refresh_token")

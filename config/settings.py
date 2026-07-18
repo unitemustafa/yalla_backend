@@ -96,6 +96,115 @@ DATABASES = {
 }
 
 
+# Distributed rate limiting. The limiter is disabled by default so local
+# development never requires Redis. Production enables it explicitly through
+# RATE_LIMIT_MODE after provisioning a non-sharded Redis/Valkey primary.
+RATE_LIMIT_REDIS_URL = os.environ.get("RATE_LIMIT_REDIS_URL", "").strip()
+RATE_LIMIT_MODE = os.environ.get("RATE_LIMIT_MODE", "off").strip().lower()
+RATE_LIMIT_ENFORCE_SCOPES = tuple(
+    item.strip()
+    for item in os.environ.get("RATE_LIMIT_ENFORCE_SCOPES", "").split(",")
+    if item.strip()
+)
+RATE_LIMIT_CLIENT_IP_HEADER = os.environ.get(
+    "RATE_LIMIT_CLIENT_IP_HEADER",
+    "HTTP_DO_CONNECTING_IP",
+).strip()
+RATE_LIMIT_TRUSTED_PROXY_CIDRS = tuple(
+    item.strip()
+    for item in os.environ.get("RATE_LIMIT_TRUSTED_PROXY_CIDRS", "").split(",")
+    if item.strip()
+)
+RATE_LIMIT_EXEMPT_PATHS = tuple(
+    item.strip()
+    for item in os.environ.get(
+        "RATE_LIMIT_EXEMPT_PATHS",
+        "/health/,/healthz/,/readyz/",
+    ).split(",")
+    if item.strip()
+)
+RATE_LIMIT_LOG_SAMPLE_RATE = float(
+    os.environ.get("RATE_LIMIT_LOG_SAMPLE_RATE", "0.1")
+)
+RATE_LIMIT_KEY_SECRET = os.environ.get("RATE_LIMIT_KEY_SECRET", SECRET_KEY)
+
+
+def _rate_limit_rates(scope, default):
+    value = os.environ.get(f"RATE_LIMIT_{scope.upper()}_RATES", default)
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+RATE_LIMIT_POLICY_RATES = {
+    "api_anon": _rate_limit_rates("api_anon", "120/5m"),
+    "api_user": _rate_limit_rates("api_user", "600/5m"),
+    "api_write": _rate_limit_rates("api_write", "120/5m"),
+    "login_ip": _rate_limit_rates("login_ip", "30/5m"),
+    "login_identifier": _rate_limit_rates(
+        "login_identifier", "5/5m,20/1h"
+    ),
+    "admin_login_ip": _rate_limit_rates("admin_login_ip", "10/5m"),
+    "admin_login_identifier": _rate_limit_rates(
+        "admin_login_identifier", "5/5m,15/1h"
+    ),
+    "signup_ip": _rate_limit_rates("signup_ip", "5/1h"),
+    "signup_email": _rate_limit_rates("signup_email", "3/1d"),
+    "availability_ip": _rate_limit_rates("availability_ip", "30/1m"),
+    "otp_send_ip": _rate_limit_rates("otp_send_ip", "30/1h"),
+    "otp_send_identifier": _rate_limit_rates(
+        "otp_send_identifier", "10/1h"
+    ),
+    "otp_verify_ip": _rate_limit_rates("otp_verify_ip", "30/10m"),
+    "otp_verify_identifier": _rate_limit_rates(
+        "otp_verify_identifier", "10/10m"
+    ),
+    "refresh_ip": _rate_limit_rates("refresh_ip", "120/5m"),
+    "refresh_token": _rate_limit_rates("refresh_token", "30/5m"),
+    "order_preview_user": _rate_limit_rates(
+        "order_preview_user", "60/5m"
+    ),
+    "order_create_user": _rate_limit_rates(
+        "order_create_user", "10/10m"
+    ),
+    "upload_user": _rate_limit_rates("upload_user", "30/1h"),
+    "notification_send_user": _rate_limit_rates(
+        "notification_send_user", "10/1h"
+    ),
+    "snapshot_ip": _rate_limit_rates("snapshot_ip", "60/5m"),
+    "share_ip": _rate_limit_rates("share_ip", "60/5m"),
+}
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "yalla-default-cache",
+    },
+    "rate_limit": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": RATE_LIMIT_REDIS_URL or "redis://127.0.0.1:6379/1",
+        "TIMEOUT": None,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "IGNORE_EXCEPTIONS": False,
+            "SOCKET_CONNECT_TIMEOUT": float(
+                os.environ.get("RATE_LIMIT_CONNECT_TIMEOUT", "0.5")
+            ),
+            "SOCKET_TIMEOUT": float(
+                os.environ.get("RATE_LIMIT_SOCKET_TIMEOUT", "0.2")
+            ),
+            "CONNECTION_POOL_KWARGS": {
+                "max_connections": int(
+                    os.environ.get("RATE_LIMIT_MAX_CONNECTIONS", "20")
+                ),
+                "health_check_interval": int(
+                    os.environ.get("RATE_LIMIT_HEALTH_CHECK_INTERVAL", "30")
+                ),
+                "retry_on_timeout": False,
+            },
+        },
+    }
+}
+
+
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -151,6 +260,10 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'accounts.authentication.DatabaseStateJWTAuthentication',
     ),
+    'DEFAULT_THROTTLE_CLASSES': (
+        'config.rate_limit.YallaRateThrottle',
+    ),
+    'EXCEPTION_HANDLER': 'config.api_exceptions.api_exception_handler',
 }
 
 SIMPLE_JWT = {

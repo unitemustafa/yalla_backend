@@ -6,6 +6,8 @@ from django.views.decorators.http import require_GET
 from catalog.models import Product
 from offers.models import Offer
 
+from .rate_limit import rate_limit_view
+
 
 def _absolute_image_url(request, image_field):
     if not image_field:
@@ -82,6 +84,7 @@ def _share_landing_response(
 
 
 @require_GET
+@rate_limit_view("share_ip")
 def product_share(request, product_id):
     product = get_object_or_404(
         Product.objects.select_related("market"),
@@ -98,6 +101,7 @@ def product_share(request, product_id):
 
 
 @require_GET
+@rate_limit_view("share_ip")
 def offer_share(request, offer_id):
     offer = get_object_or_404(Offer, id=offer_id)
     return _share_landing_response(
