@@ -146,6 +146,10 @@ class Notification(models.Model):
         )
         COURIER_PROFILE_UPDATED = "courier_profile_updated", "Courier Profile Updated"
         PASSWORD_CHANGED = "password_changed", "Password Changed"
+        NEW_PARTNER_APPLICATION = (
+            "new_partner_application",
+            "New Partner Application",
+        )
 
     audience = models.CharField(max_length=30, choices=Audience.choices)
     type = models.CharField(max_length=50, choices=Type.choices)

@@ -20,6 +20,7 @@ urlpatterns = [
     path("api/v1/admin/", include("orders.admin_urls")),
     path("api/v1/courier/", include("orders.courier_urls")),
     path("api/v1/notifications/", include("notifications.urls")),
+    path("api/v1/partners/", include("partners.urls")),
     path("api/v1/dashboard/", include("dashboard.urls")),
     path("api/v1/addresses/", include("locations.address_urls")),
     path("api/v1/locations/", include("locations.urls")),

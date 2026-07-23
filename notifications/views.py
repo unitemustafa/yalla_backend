@@ -44,6 +44,10 @@ def visible_notifications(user):
                 type=Notification.Type.ORDER_STATUS_CHANGED,
                 data__event__in=ADMIN_DASHBOARD_ORDER_EVENTS,
             )
+            | Q(
+                audience=Notification.Audience.ADMIN,
+                type=Notification.Type.NEW_PARTNER_APPLICATION,
+            )
         )
     audience = (
         Notification.Audience.COURIER
