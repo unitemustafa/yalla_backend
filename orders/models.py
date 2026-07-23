@@ -10,6 +10,15 @@ class Order(models.Model):
         FIXED_AREA = "fixed_area", "Fixed area"
         DELIVERY = "delivery", "Delivery"
 
+    class FulfillmentType(models.TextChoices):
+        DIRECT = "direct", "Direct delivery"
+        EXTERNAL_SHIPPING = "external_shipping", "External shipping"
+
+    class ExternalShippingStatus(models.TextChoices):
+        NOT_REQUIRED = "not_required", "Not required"
+        PENDING_QUOTE = "pending_quote", "Pending quote"
+        QUOTED = "quoted", "Quoted"
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         CONFIRMED = "confirmed", "Confirmed"
@@ -74,6 +83,20 @@ class Order(models.Model):
         choices=DeliveryType.choices,
         default=DeliveryType.DELIVERY,
     )
+    fulfillment_type = models.CharField(
+        max_length=24,
+        choices=FulfillmentType.choices,
+        default=FulfillmentType.EXTERNAL_SHIPPING,
+        db_index=True,
+    )
+    external_shipping_status = models.CharField(
+        max_length=24,
+        choices=ExternalShippingStatus.choices,
+        default=ExternalShippingStatus.PENDING_QUOTE,
+        db_index=True,
+    )
+    eta_min_minutes = models.PositiveIntegerField(blank=True, null=True)
+    eta_max_minutes = models.PositiveIntegerField(blank=True, null=True)
     offers = models.ManyToManyField(
         "offers.Offer",
         through="OrderOffer",
@@ -153,10 +176,7 @@ class Order(models.Model):
             models.CheckConstraint(
                 condition=(
                     models.Q(order_scope__isnull=True)
-                    | (
-                        models.Q(order_scope="general")
-                        & models.Q(service_city__isnull=True)
-                    )
+                    | models.Q(order_scope="general")
                     | (
                         models.Q(order_scope="service_city")
                         & models.Q(service_city__isnull=False)

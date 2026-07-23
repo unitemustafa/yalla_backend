@@ -496,7 +496,13 @@ class OrderDeliveryPriceView(APIView):
         total = order.subtotal_price - order.discount + delivery_price
         order.delivery_price = delivery_price
         order.total_price = max(total, Decimal("0.00"))
-        order.save(update_fields=["delivery_price", "total_price", "updated_at"])
+        update_fields = ["delivery_price", "total_price", "updated_at"]
+        if order.fulfillment_type == Order.FulfillmentType.EXTERNAL_SHIPPING:
+            order.external_shipping_status = (
+                Order.ExternalShippingStatus.QUOTED
+            )
+            update_fields.append("external_shipping_status")
+        order.save(update_fields=update_fields)
         record_order_event(
             order,
             OrderEvent.EventType.DELIVERY_PRICE_CHANGED,

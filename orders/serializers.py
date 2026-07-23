@@ -36,7 +36,15 @@ class DeliveryAreaSummarySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DeliveryArea
-        fields = ("id", "service_city_id", "name", "delivery_price", "is_active")
+        fields = (
+            "id",
+            "service_city_id",
+            "name",
+            "delivery_price",
+            "eta_min_minutes",
+            "eta_max_minutes",
+            "is_active",
+        )
 
 
 class MarketSummarySerializer(serializers.ModelSerializer):
@@ -76,6 +84,16 @@ class OrderPreviewAddressSerializer(serializers.ModelSerializer):
     delivery_area = DeliveryAreaSummarySerializer(read_only=True)
     delivery_area_id = serializers.IntegerField(read_only=True)
     delivery_price_preview = serializers.SerializerMethodField()
+    eta_min_minutes = serializers.IntegerField(
+        source="delivery_area.eta_min_minutes",
+        read_only=True,
+        allow_null=True,
+    )
+    eta_max_minutes = serializers.IntegerField(
+        source="delivery_area.eta_max_minutes",
+        read_only=True,
+        allow_null=True,
+    )
 
     class Meta:
         model = Address
@@ -91,7 +109,10 @@ class OrderPreviewAddressSerializer(serializers.ModelSerializer):
             "delivery_area",
             "delivery_area_id",
             "delivery_type",
+            "fulfillment_type",
             "delivery_price_preview",
+            "eta_min_minutes",
+            "eta_max_minutes",
             "is_default",
             "created_at",
         )
@@ -226,6 +247,8 @@ class OrderPreviewSerializer(serializers.Serializer):
             order_scope,
             service_city,
         )
+        if order_scope == Order.Scope.GENERAL:
+            service_city = address.service_city
 
         attrs["user"] = user
         attrs["delivery_address"] = address
@@ -245,6 +268,12 @@ class OrderPreviewSerializer(serializers.Serializer):
         delivery_type = self.validated_data["delivery_type"]
         fixed_delivery_price = self.validated_data["delivery_price"]
         delivery_message = self.validated_data["delivery_message"]
+        fulfillment_type = self.validated_data["fulfillment_type"]
+        external_shipping_status = self.validated_data[
+            "external_shipping_status"
+        ]
+        eta_min_minutes = self.validated_data["eta_min_minutes"]
+        eta_max_minutes = self.validated_data["eta_max_minutes"]
         items = self.validated_data.get("items", [])
         offers = self.validated_data.get("offers", [])
         has_free_delivery = self._has_free_delivery_offer(offers)
@@ -357,6 +386,10 @@ class OrderPreviewSerializer(serializers.Serializer):
                         else None
                     ),
                     "delivery_type": delivery_type,
+                    "fulfillment_type": fulfillment_type,
+                    "external_shipping_status": external_shipping_status,
+                    "eta_min_minutes": eta_min_minutes,
+                    "eta_max_minutes": eta_max_minutes,
                     "delivery_price": self._money_nullable(delivery_price),
                     "delivery_message": delivery_message,
                     "delivery_available": delivery_available,
@@ -401,6 +434,10 @@ class OrderPreviewSerializer(serializers.Serializer):
             ),
             "service_city": self._service_city_data(service_city),
             "order_scope": order_scope,
+            "fulfillment_type": fulfillment_type,
+            "external_shipping_status": external_shipping_status,
+            "eta_min_minutes": eta_min_minutes,
+            "eta_max_minutes": eta_max_minutes,
             "is_multi_market": len(market_groups_data) > 1,
             "market_count": len(market_groups_data),
             "market_names_summary": ", ".join(
@@ -470,18 +507,12 @@ class OrderPreviewSerializer(serializers.Serializer):
         return ServiceCitySummarySerializer(service_city).data
 
     def _delivery_context(self, address, order_scope, service_city):
-        if order_scope == Order.Scope.GENERAL:
-            return {
-                "delivery_area": None,
-                "delivery_type": Order.DeliveryType.DELIVERY,
-                "delivery_price": None,
-                "delivery_message": self.DELIVERY_MESSAGE,
-            }
-
         if (
-            order_scope == Order.Scope.SERVICE_CITY
-            and address is not None
-            and address.delivery_type == Address.DeliveryType.FIXED_AREA
+            address is not None
+            and (
+                address.fulfillment_type == Address.FulfillmentType.DIRECT
+                or address.delivery_type == Address.DeliveryType.FIXED_AREA
+            )
             and address.delivery_area_id
         ):
             delivery_area = address.delivery_area
@@ -489,21 +520,33 @@ class OrderPreviewSerializer(serializers.Serializer):
                 raise serializers.ValidationError(
                     {"address_id": self.DELIVERY_AREA_UNAVAILABLE_MESSAGE}
                 )
-            if (
+            if order_scope == Order.Scope.GENERAL or (
                 service_city is not None
                 and delivery_area.service_city_id == service_city.id
             ):
                 return {
                     "delivery_area": delivery_area,
                     "delivery_type": Order.DeliveryType.FIXED_AREA,
+                    "fulfillment_type": Order.FulfillmentType.DIRECT,
+                    "external_shipping_status": (
+                        Order.ExternalShippingStatus.NOT_REQUIRED
+                    ),
                     "delivery_price": delivery_area.delivery_price,
+                    "eta_min_minutes": delivery_area.eta_min_minutes,
+                    "eta_max_minutes": delivery_area.eta_max_minutes,
                     "delivery_message": "",
                 }
 
         return {
             "delivery_area": None,
             "delivery_type": Order.DeliveryType.DELIVERY,
+            "fulfillment_type": Order.FulfillmentType.EXTERNAL_SHIPPING,
+            "external_shipping_status": (
+                Order.ExternalShippingStatus.PENDING_QUOTE
+            ),
             "delivery_price": None,
+            "eta_min_minutes": None,
+            "eta_max_minutes": None,
             "delivery_message": self.DELIVERY_MESSAGE,
         }
 
@@ -708,6 +751,12 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
         delivery_area = self.validated_data["delivery_area"]
         delivery_type = self.validated_data["delivery_type"]
         delivery_price = self.validated_data["delivery_price"]
+        fulfillment_type = self.validated_data["fulfillment_type"]
+        external_shipping_status = self.validated_data[
+            "external_shipping_status"
+        ]
+        eta_min_minutes = self.validated_data["eta_min_minutes"]
+        eta_max_minutes = self.validated_data["eta_max_minutes"]
         has_free_delivery = self._has_free_delivery_offer(
             self.validated_data.get("offers", [])
         )
@@ -744,6 +793,10 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
             service_city=service_city,
             delivery_area=delivery_area,
             delivery_type=delivery_type,
+            fulfillment_type=fulfillment_type,
+            external_shipping_status=external_shipping_status,
+            eta_min_minutes=eta_min_minutes,
+            eta_max_minutes=eta_max_minutes,
             market=first_group["market"],
             payment_method=payment_method,
             status=Order.Status.PENDING,
@@ -1203,6 +1256,10 @@ class OrderSerializer(serializers.ModelSerializer):
             "delivery_area_id",
             "delivery_area",
             "delivery_type",
+            "fulfillment_type",
+            "external_shipping_status",
+            "eta_min_minutes",
+            "eta_max_minutes",
             "payment_method",
             "discount",
             "description",
@@ -1239,6 +1296,10 @@ class OrderSerializer(serializers.ModelSerializer):
             "id",
             "status",
             "review_status",
+            "fulfillment_type",
+            "external_shipping_status",
+            "eta_min_minutes",
+            "eta_max_minutes",
             "assigned_representative_id",
             "assigned_at",
             "delivered_at",
@@ -1304,6 +1365,17 @@ class OrderSerializer(serializers.ModelSerializer):
                 else None
             ),
             "delivery_type": address.delivery_type,
+            "fulfillment_type": address.fulfillment_type,
+            "address_type": address.address_type,
+            "recipient_name": address.recipient_name,
+            "recipient_phone": address.recipient_phone,
+            "street": address.street,
+            "building_name": address.building_name,
+            "apartment_number": address.apartment_number,
+            "floor": address.floor,
+            "company_name": address.company_name,
+            "additional_instructions": address.additional_instructions,
+            "formatted_address": address.formatted_address,
             "delivery_price_preview": (
                 f"{address.delivery_area.delivery_price:.2f}"
                 if address.delivery_type == Address.DeliveryType.FIXED_AREA
@@ -1445,26 +1517,13 @@ class OrderSerializer(serializers.ModelSerializer):
             if service_city is not None:
                 attrs["service_city"] = service_city
         if order_scope == Order.Scope.GENERAL:
-            service_city = None
-            attrs["service_city"] = None
+            service_city = address.service_city if address is not None else None
+            attrs["service_city"] = service_city
         if order_scope == Order.Scope.SERVICE_CITY and service_city is None:
             raise serializers.ValidationError(
                 {"service_city_id": "Service city is required."}
             )
         if address is not None:
-            if order_scope == Order.Scope.GENERAL and not (
-                address.service_city_id is None
-                and address.delivery_area_id is None
-                and bool((address.manual_city or "").strip())
-                and bool((address.manual_area or "").strip())
-            ):
-                raise serializers.ValidationError(
-                    {
-                        "delivery_address_id": (
-                            "General orders require a manual general address."
-                        )
-                    }
-                )
             if (
                 order_scope == Order.Scope.SERVICE_CITY
                 and address.service_city_id is None
@@ -1624,33 +1683,45 @@ class OrderSerializer(serializers.ModelSerializer):
         return attrs
 
     def _normalize_delivery_fields(self, attrs, address, service_city, order_scope):
-        if order_scope == Order.Scope.GENERAL:
-            attrs["service_city"] = None
-            attrs["delivery_area"] = None
-            attrs["delivery_type"] = Order.DeliveryType.DELIVERY
-            attrs["delivery_price"] = None
-            return
-
         if address is not None:
             if (
-                order_scope == Order.Scope.SERVICE_CITY
-                and address.delivery_type == Address.DeliveryType.FIXED_AREA
+                (
+                    address.fulfillment_type == Address.FulfillmentType.DIRECT
+                    or address.delivery_type == Address.DeliveryType.FIXED_AREA
+                )
                 and address.delivery_area_id
             ):
                 delivery_area = address.delivery_area
                 if (
                     delivery_area.is_active
-                    and service_city is not None
-                    and delivery_area.service_city_id == service_city.id
+                    and (
+                        order_scope == Order.Scope.GENERAL
+                        or (
+                            service_city is not None
+                            and delivery_area.service_city_id == service_city.id
+                        )
+                    )
                 ):
                     attrs["delivery_area"] = delivery_area
                     attrs["delivery_type"] = Order.DeliveryType.FIXED_AREA
+                    attrs["fulfillment_type"] = Order.FulfillmentType.DIRECT
+                    attrs["external_shipping_status"] = (
+                        Order.ExternalShippingStatus.NOT_REQUIRED
+                    )
                     attrs["delivery_price"] = delivery_area.delivery_price
+                    attrs["eta_min_minutes"] = delivery_area.eta_min_minutes
+                    attrs["eta_max_minutes"] = delivery_area.eta_max_minutes
                     return
 
             attrs["delivery_area"] = None
             attrs["delivery_type"] = Order.DeliveryType.DELIVERY
+            attrs["fulfillment_type"] = Order.FulfillmentType.EXTERNAL_SHIPPING
+            attrs["external_shipping_status"] = (
+                Order.ExternalShippingStatus.PENDING_QUOTE
+            )
             attrs["delivery_price"] = None
+            attrs["eta_min_minutes"] = None
+            attrs["eta_max_minutes"] = None
             return
 
         delivery_area = attrs.get(
@@ -1683,7 +1754,13 @@ class OrderSerializer(serializers.ModelSerializer):
                 )
             attrs["delivery_area"] = delivery_area
             attrs["delivery_type"] = Order.DeliveryType.FIXED_AREA
+            attrs["fulfillment_type"] = Order.FulfillmentType.DIRECT
+            attrs["external_shipping_status"] = (
+                Order.ExternalShippingStatus.NOT_REQUIRED
+            )
             attrs["delivery_price"] = delivery_area.delivery_price
+            attrs["eta_min_minutes"] = delivery_area.eta_min_minutes
+            attrs["eta_max_minutes"] = delivery_area.eta_max_minutes
             return
 
         if delivery_type == Order.DeliveryType.FIXED_AREA:
@@ -1692,7 +1769,13 @@ class OrderSerializer(serializers.ModelSerializer):
             )
         attrs["delivery_area"] = None
         attrs["delivery_type"] = Order.DeliveryType.DELIVERY
+        attrs["fulfillment_type"] = Order.FulfillmentType.EXTERNAL_SHIPPING
+        attrs["external_shipping_status"] = (
+            Order.ExternalShippingStatus.PENDING_QUOTE
+        )
         attrs["delivery_price"] = None
+        attrs["eta_min_minutes"] = None
+        attrs["eta_max_minutes"] = None
 
     def _market_matches_order_scope(self, market, order_scope, service_city):
         if market is None or order_scope is None:
@@ -2250,6 +2333,10 @@ class CourierOrderListSerializer(serializers.ModelSerializer):
             "service_city",
             "delivery_area",
             "delivery_type",
+            "fulfillment_type",
+            "external_shipping_status",
+            "eta_min_minutes",
+            "eta_max_minutes",
             "market",
             "market_count",
             "market_names_summary",
@@ -2316,6 +2403,19 @@ class CourierOrderListSerializer(serializers.ModelSerializer):
                 else None
             ),
             "delivery_type": instance.delivery_address.delivery_type,
+            "fulfillment_type": instance.delivery_address.fulfillment_type,
+            "address_type": instance.delivery_address.address_type,
+            "recipient_name": instance.delivery_address.recipient_name,
+            "recipient_phone": instance.delivery_address.recipient_phone,
+            "street": instance.delivery_address.street,
+            "building_name": instance.delivery_address.building_name,
+            "apartment_number": instance.delivery_address.apartment_number,
+            "floor": instance.delivery_address.floor,
+            "company_name": instance.delivery_address.company_name,
+            "additional_instructions": (
+                instance.delivery_address.additional_instructions
+            ),
+            "formatted_address": instance.delivery_address.formatted_address,
         }
 
 

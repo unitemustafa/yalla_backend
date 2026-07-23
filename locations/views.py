@@ -19,8 +19,10 @@ from .serializers import (
     AddressSerializer,
     AddressWriteSerializer,
     DeliveryAreaSerializer,
+    PointResolveSerializer,
     ServiceCitySerializer,
 )
+from .resolution import resolve_point_for_selection
 
 
 class ProtectedDeleteMixin:
@@ -283,6 +285,25 @@ class DeliveryAreaListView(APIView):
     def get(self, request):
         areas = DeliveryArea.objects.order_by("name", "id")
         return Response(DeliveryAreaSerializer(areas, many=True).data)
+
+
+class PointResolveView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = PointResolveSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        resolution = resolve_point_for_selection(
+            user=request.user,
+            latitude=serializer.validated_data["latitude"],
+            longitude=serializer.validated_data["longitude"],
+        )
+        response_status = (
+            status.HTTP_200_OK
+            if resolution.allowed
+            else status.HTTP_422_UNPROCESSABLE_ENTITY
+        )
+        return Response(resolution.as_dict(), status=response_status)
 
 
 def address_queryset_for_request(request):

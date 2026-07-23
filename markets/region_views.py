@@ -87,6 +87,7 @@ class MarketRegionDetectView(APIView):
         current_selection = compact_market_region_selection(request.user)
 
         if detected_city is None:
+            detected_region = general_region_selection()
             if (
                 current_selection is not None
                 and current_selection["mode"] == User.MarketRegionMode.GENERAL
@@ -95,7 +96,7 @@ class MarketRegionDetectView(APIView):
                     {
                         "action": "same_region",
                         "current_selection": current_selection,
-                        "detected_region": general_region_selection(),
+                        "detected_region": detected_region,
                         "message": (
                             "You are already in your selected market region."
                         ),
@@ -104,12 +105,16 @@ class MarketRegionDetectView(APIView):
 
             return Response(
                 {
-                    "action": "unsupported_location",
+                    "action": (
+                        "select_detected_region"
+                        if current_selection is None
+                        else "suggest_switch"
+                    ),
                     "current_selection": current_selection,
-                    "detected_region": None,
+                    "detected_region": detected_region,
                     "message": (
                         "Your current location is outside available service "
-                        "cities. Please choose a region manually."
+                        "cities. Switch to General to browse all Egypt."
                     ),
                 }
             )

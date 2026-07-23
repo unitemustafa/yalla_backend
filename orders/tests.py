@@ -2216,7 +2216,7 @@ class OrderAPITests(APITestCase):
 
         self.assert_address_region_mismatch(response)
 
-    def test_general_region_rejects_service_city_address(self):
+    def test_general_region_accepts_direct_zone_address(self):
         self.make_general_market_region()
         self.authenticate_customer()
 
@@ -2229,7 +2229,13 @@ class OrderAPITests(APITestCase):
             format="json",
         )
 
-        self.assert_address_region_mismatch(response)
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["selected_address"]["id"], self.address.id)
+        self.assertEqual(response.data["fulfillment_type"], "direct")
+        self.assertEqual(
+            response.data["market_groups"][0]["delivery_area"]["id"],
+            self.delivery_area.id,
+        )
 
     def test_service_city_region_accepts_same_city_address(self):
         self.authenticate_customer()
@@ -2246,7 +2252,7 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         self.assertEqual(response.data["selected_address"]["id"], self.address.id)
 
-    def test_general_create_rejects_service_city_address(self):
+    def test_general_create_uses_direct_zone_address(self):
         self.make_general_market_region()
         self.authenticate_customer()
 
@@ -2260,8 +2266,12 @@ class OrderAPITests(APITestCase):
             format="json",
         )
 
-        self.assert_address_region_mismatch(response)
-        self.assertFalse(Order.objects.exists())
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        order = Order.objects.get()
+        self.assertEqual(order.order_scope, Order.Scope.GENERAL)
+        self.assertEqual(order.service_city_id, self.service_city.id)
+        self.assertEqual(order.delivery_area_id, self.delivery_area.id)
+        self.assertEqual(order.fulfillment_type, Order.FulfillmentType.DIRECT)
 
     def test_inactive_address_is_rejected_for_preview(self):
         self.address.is_active = False
@@ -2341,6 +2351,14 @@ class OrderAPITests(APITestCase):
         self.assertIsNone(order.delivery_area_id)
         self.assertIsNone(order.delivery_price)
         self.assertEqual(order.delivery_type, Order.DeliveryType.DELIVERY)
+        self.assertEqual(
+            order.fulfillment_type,
+            Order.FulfillmentType.EXTERNAL_SHIPPING,
+        )
+        self.assertEqual(
+            order.external_shipping_status,
+            Order.ExternalShippingStatus.PENDING_QUOTE,
+        )
         self.assertEqual(order.total_price, Decimal("500.00"))
         self.assertIsNone(response.data[0]["service_city"])
         self.assertIsNone(response.data[0]["delivery_area"])
