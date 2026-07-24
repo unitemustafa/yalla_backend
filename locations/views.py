@@ -1,3 +1,8 @@
+import hashlib
+
+import requests
+from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Count
 from django.db.models.deletion import ProtectedError
@@ -23,6 +28,97 @@ from .serializers import (
     ServiceCitySerializer,
 )
 from .resolution import resolve_point_for_selection
+
+
+class PlaceSearchView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        query = request.query_params.get("q", "").strip()
+        if len(query) < 2:
+            return Response(
+                {"detail": "Search text must contain at least two characters."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cache_key = (
+            "locations:place-search:"
+            + hashlib.sha256(query.casefold().encode("utf-8")).hexdigest()
+        )
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        try:
+            upstream = requests.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={
+                    "q": query,
+                    "format": "jsonv2",
+                    "limit": 8,
+                    "countrycodes": "eg",
+                    "addressdetails": 1,
+                    "polygon_geojson": 1,
+                    "polygon_threshold": 0.0005,
+                    "featureType": "settlement",
+                },
+                headers={
+                    "User-Agent": getattr(
+                        settings,
+                        "NOMINATIM_USER_AGENT",
+                        "YallaSystemAdmin/1.0 (delivery-area-editor)",
+                    ),
+                    "Accept-Language": "ar,en",
+                },
+                timeout=10,
+            )
+            upstream.raise_for_status()
+            raw_results = upstream.json()
+        except (requests.RequestException, ValueError):
+            return Response(
+                {"detail": "Place search service is temporarily unavailable."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        results = []
+        for item in raw_results if isinstance(raw_results, list) else []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                latitude = float(item["lat"])
+                longitude = float(item["lon"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            geometry = item.get("geojson")
+            if not isinstance(geometry, dict) or geometry.get("type") not in {
+                "Polygon",
+                "MultiPolygon",
+            }:
+                geometry = None
+            bbox = item.get("boundingbox")
+            normalized_bbox = None
+            if isinstance(bbox, list) and len(bbox) == 4:
+                try:
+                    south, north, west, east = (float(value) for value in bbox)
+                    normalized_bbox = [west, south, east, north]
+                except (TypeError, ValueError):
+                    pass
+            results.append(
+                {
+                    "display_name": str(item.get("display_name", "")).strip(),
+                    "name": str(item.get("name", "")).strip(),
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "boundary_geojson": geometry,
+                    "boundary_bbox": normalized_bbox,
+                    "source_reference": (
+                        f"{item.get('osm_type', '')}:{item.get('osm_id', '')}"
+                    ).strip(":"),
+                }
+            )
+
+        cache.set(cache_key, results, timeout=60 * 60)
+        return Response(results)
 
 
 class ProtectedDeleteMixin:

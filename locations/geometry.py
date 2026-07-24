@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from math import asin, cos, radians, sin, sqrt
 from typing import Any
 
 from shapely.geometry import Point, mapping, shape
@@ -11,7 +12,7 @@ from shapely.validation import explain_validity
 
 EGYPT_BOUNDS = (22.0, 21.5, 37.0, 31.8)
 ALLOWED_CITY_GEOMETRIES = {"Polygon", "MultiPolygon"}
-ALLOWED_AREA_GEOMETRIES = {"Polygon"}
+ALLOWED_AREA_GEOMETRIES = {"Polygon", "MultiPolygon"}
 
 
 class GeometryValidationError(ValueError):
@@ -119,3 +120,96 @@ def point_within_egypt_bounds(latitude: Any, longitude: Any) -> bool:
     lat = float(latitude)
     lng = float(longitude)
     return south <= lat <= north and west <= lng <= east
+
+
+def haversine_distance_km(
+    latitude_1: Any,
+    longitude_1: Any,
+    latitude_2: Any,
+    longitude_2: Any,
+) -> float:
+    lat_1 = float(latitude_1)
+    lon_1 = float(longitude_1)
+    lat_2 = float(latitude_2)
+    lon_2 = float(longitude_2)
+    latitude_delta = radians(lat_2 - lat_1)
+    longitude_delta = radians(lon_2 - lon_1)
+    haversine = (
+        sin(latitude_delta / 2) ** 2
+        + cos(radians(lat_1))
+        * cos(radians(lat_2))
+        * sin(longitude_delta / 2) ** 2
+    )
+    return 2 * 6371.0088 * asin(sqrt(haversine))
+
+
+def circle_covers_point(
+    center_latitude: Any,
+    center_longitude: Any,
+    radius_km: Any,
+    latitude: Any,
+    longitude: Any,
+) -> bool:
+    if center_latitude is None or center_longitude is None or radius_km is None:
+        return False
+    return haversine_distance_km(
+        center_latitude,
+        center_longitude,
+        latitude,
+        longitude,
+    ) <= float(radius_km)
+
+
+def circle_bbox(
+    center_latitude: Any,
+    center_longitude: Any,
+    radius_km: Any,
+) -> list[float]:
+    latitude = float(center_latitude)
+    longitude = float(center_longitude)
+    radius = float(radius_km)
+    latitude_delta = radius / 111.32
+    longitude_scale = max(abs(cos(radians(latitude))), 0.01)
+    longitude_delta = radius / (111.32 * longitude_scale)
+    return [
+        longitude - longitude_delta,
+        latitude - latitude_delta,
+        longitude + longitude_delta,
+        latitude + latitude_delta,
+    ]
+
+
+def circle_covers_geometry(
+    center_latitude: Any,
+    center_longitude: Any,
+    radius_km: Any,
+    candidate: Any,
+) -> bool:
+    geometry = parse_geometry(
+        candidate,
+        allowed_types=ALLOWED_CITY_GEOMETRIES,
+    )
+
+    def coordinate_pairs(value):
+        if (
+            isinstance(value, (list, tuple))
+            and len(value) >= 2
+            and isinstance(value[0], (int, float))
+            and isinstance(value[1], (int, float))
+        ):
+            yield value[0], value[1]
+            return
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                yield from coordinate_pairs(item)
+
+    return all(
+        circle_covers_point(
+            center_latitude,
+            center_longitude,
+            radius_km,
+            latitude,
+            longitude,
+        )
+        for longitude, latitude in coordinate_pairs(mapping(geometry)["coordinates"])
+    )

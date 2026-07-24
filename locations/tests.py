@@ -1,5 +1,6 @@
 from decimal import Decimal
 from datetime import timedelta
+from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -745,6 +746,106 @@ class LocationManagementAPITests(TestCase):
         self.assertEqual(create_response.data["delivery_area_count"], 0)
         self.assertEqual(create_response.data["market_count"], 0)
         self.assertEqual(create_response.data["offer_count"], 0)
+        self.assertIsNone(create_response.data["boundary_geojson"])
+        self.assertEqual(len(create_response.data["boundary_bbox"]), 4)
+
+    def test_admin_can_create_h3_multi_polygon_delivery_area_inside_city(self):
+        city = ServiceCity.objects.create(
+            name="H3 City",
+            center_latitude=Decimal("30.0000000"),
+            center_longitude=Decimal("31.0000000"),
+            radius_km=Decimal("20.00"),
+        )
+        boundary = {
+            "type": "MultiPolygon",
+            "coordinates": [
+                [
+                    [
+                        [30.99, 29.99],
+                        [31.00, 29.99],
+                        [31.00, 30.00],
+                        [30.99, 30.00],
+                        [30.99, 29.99],
+                    ]
+                ],
+                [
+                    [
+                        [31.00, 30.00],
+                        [31.01, 30.00],
+                        [31.01, 30.01],
+                        [31.00, 30.01],
+                        [31.00, 30.00],
+                    ]
+                ],
+            ],
+        }
+
+        response = self.client.post(
+            "/api/v1/locations/delivery-areas/",
+            {
+                "service_city_id": city.id,
+                "name": "Selected cells",
+                "delivery_price": "35.00",
+                "eta_min_minutes": 20,
+                "eta_max_minutes": 35,
+                "boundary_geojson": boundary,
+                "boundary_source": "h3",
+                "h3_resolution": 9,
+                "h3_cells": ["8930e1d8b37ffff", "8930e1d8b33ffff"],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(response.data["boundary_geojson"]["type"], "MultiPolygon")
+        self.assertEqual(response.data["boundary_source"], "h3")
+        self.assertEqual(response.data["h3_resolution"], 9)
+        self.assertEqual(len(response.data["h3_cells"]), 2)
+
+    @patch("locations.views.requests.get")
+    def test_admin_place_search_returns_sanitized_osm_boundary(self, requests_get):
+        upstream = Mock()
+        upstream.raise_for_status.return_value = None
+        upstream.json.return_value = [
+            {
+                "display_name": "الشبراوين، ههيا، الشرقية، مصر",
+                "name": "الشبراوين",
+                "lat": "30.7000",
+                "lon": "31.6500",
+                "boundingbox": ["30.69", "30.71", "31.64", "31.66"],
+                "osm_type": "relation",
+                "osm_id": 123,
+                "geojson": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [
+                            [31.64, 30.69],
+                            [31.66, 30.69],
+                            [31.66, 30.71],
+                            [31.64, 30.71],
+                            [31.64, 30.69],
+                        ]
+                    ],
+                },
+            }
+        ]
+        requests_get.return_value = upstream
+
+        response = self.client.get(
+            "/api/v1/locations/place-search/",
+            {"q": "الشبراوين"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data[0]["name"], "الشبراوين")
+        self.assertEqual(response.data[0]["source_reference"], "relation:123")
+        self.assertEqual(
+            response.data[0]["boundary_bbox"],
+            [31.64, 30.69, 31.66, 30.71],
+        )
+        self.assertTrue(
+            requests_get.call_args.kwargs["params"]["polygon_geojson"]
+        )
 
     def test_admin_can_update_service_city_coordinates_radius_and_status(self):
         city = ServiceCity.objects.create(
@@ -1317,9 +1418,11 @@ class PointResolutionAPITests(TestCase):
             role=User.Role.CLIENT,
         )
         self.city = ServiceCity.objects.create(
-            name="Polygon City",
-            boundary_geojson=self._polygon(30.0, 30.0, 32.0, 31.0),
-            boundary_bbox=[30.0, 30.0, 32.0, 31.0],
+            name="Circular City",
+            center_latitude=Decimal("30.5000000"),
+            center_longitude=Decimal("31.0000000"),
+            radius_km=Decimal("90.00"),
+            boundary_bbox=[30.06, 29.69, 31.94, 31.31],
         )
         self.area = DeliveryArea.objects.create(
             service_city=self.city,
@@ -1413,7 +1516,7 @@ class PointResolutionAPITests(TestCase):
         self.assertEqual(address.recipient_name, "Ahmed Ali")
         self.assertEqual(response.data[0]["delivery_price_preview"], "55.00")
 
-    def test_selected_city_rejects_point_outside_its_dashboard_boundary(self):
+    def test_selected_city_rejects_point_outside_its_dashboard_diameter(self):
         self.user.market_region_mode = User.MarketRegionMode.SERVICE_CITY
         self.user.market_region_service_city = self.city
         self.user.save(

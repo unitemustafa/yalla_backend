@@ -6,10 +6,10 @@ from accounts.models import User
 
 from .geometry import (
     ALLOWED_AREA_GEOMETRIES,
-    ALLOWED_CITY_GEOMETRIES,
     GeometryValidationError,
+    circle_bbox,
+    circle_covers_geometry,
     geometries_have_forbidden_overlap,
-    geometry_covers_geometry,
     normalize_geometry,
 )
 from .models import Address, DeliveryArea, ServiceCity
@@ -99,68 +99,67 @@ class ServiceCitySerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        boundary = attrs.get(
-            "boundary_geojson",
-            getattr(self.instance, "boundary_geojson", None),
+        center_latitude = attrs.get(
+            "center_latitude",
+            getattr(self.instance, "center_latitude", None),
         )
-        if boundary is None:
-            return attrs
-        try:
-            normalized = normalize_geometry(
-                boundary,
-                allowed_types=ALLOWED_CITY_GEOMETRIES,
-            )
-        except GeometryValidationError as exc:
-            raise serializers.ValidationError(
-                {"boundary_geojson": str(exc)}
-            ) from exc
-
+        center_longitude = attrs.get(
+            "center_longitude",
+            getattr(self.instance, "center_longitude", None),
+        )
+        radius_km = attrs.get(
+            "radius_km",
+            getattr(self.instance, "radius_km", None),
+        )
         is_active = attrs.get(
             "is_active",
             getattr(self.instance, "is_active", True),
         )
-        if is_active:
-            peers = ServiceCity.objects.filter(
-                is_active=True,
-                boundary_geojson__isnull=False,
-            )
-            if self.instance is not None:
-                peers = peers.exclude(pk=self.instance.pk)
-            for peer in peers.only("id", "name", "boundary_geojson"):
-                if geometries_have_forbidden_overlap(
-                    normalized.geojson,
-                    peer.boundary_geojson,
-                ):
-                    raise serializers.ValidationError(
-                        {
-                            "boundary_geojson": (
-                                f"City boundary overlaps active city {peer.name}."
-                            )
-                        }
+        if is_active and (
+            center_latitude is None
+            or center_longitude is None
+            or radius_km is None
+        ):
+            raise serializers.ValidationError(
+                {
+                    "radius_km": (
+                        "Active cities require center latitude, center longitude, "
+                        "and a diameter."
                     )
+                }
+            )
 
         if self.instance is not None:
             for area in self.instance.delivery_areas.filter(
                 is_active=True,
                 boundary_geojson__isnull=False,
             ):
-                if not geometry_covers_geometry(
-                    normalized.geojson,
+                if not circle_covers_geometry(
+                    center_latitude,
+                    center_longitude,
+                    radius_km,
                     area.boundary_geojson,
                 ):
                     raise serializers.ValidationError(
                         {
-                            "boundary_geojson": (
-                                "City boundary would exclude active delivery "
+                            "radius_km": (
+                                "City diameter would exclude active delivery "
                                 f"area {area.name}."
                             )
                         }
                     )
 
-        attrs["boundary_geojson"] = normalized.geojson
-        attrs["boundary_bbox"] = normalized.bbox
-        attrs["center_latitude"] = normalized.center_latitude
-        attrs["center_longitude"] = normalized.center_longitude
+        if (
+            center_latitude is not None
+            and center_longitude is not None
+            and radius_km is not None
+        ):
+            attrs["boundary_bbox"] = circle_bbox(
+                center_latitude,
+                center_longitude,
+                radius_km,
+            )
+        attrs["boundary_geojson"] = None
         return attrs
 
 
@@ -204,6 +203,10 @@ class DeliveryAreaSerializer(ServiceCitySerializer):
             "center_latitude",
             "center_longitude",
             "radius_km",
+            "boundary_source",
+            "source_reference",
+            "h3_resolution",
+            "h3_cells",
             "delivery_price",
             "eta_min_minutes",
             "eta_max_minutes",
@@ -277,17 +280,23 @@ class DeliveryAreaSerializer(ServiceCitySerializer):
                 raise serializers.ValidationError(
                     {"boundary_geojson": str(exc)}
                 ) from exc
-            if not service_city.boundary_geojson:
+            if (
+                service_city.center_latitude is None
+                or service_city.center_longitude is None
+                or service_city.radius_km is None
+            ):
                 raise serializers.ValidationError(
                     {
                         "boundary_geojson": (
-                            "Draw the service city boundary before adding "
-                            "delivery areas."
+                            "Set the service city center and diameter before "
+                            "adding delivery areas."
                         )
                     }
                 )
-            if not geometry_covers_geometry(
-                service_city.boundary_geojson,
+            if not circle_covers_geometry(
+                service_city.center_latitude,
+                service_city.center_longitude,
+                service_city.radius_km,
                 normalized.geojson,
             ):
                 raise serializers.ValidationError(
@@ -321,6 +330,50 @@ class DeliveryAreaSerializer(ServiceCitySerializer):
             attrs["boundary_bbox"] = normalized.bbox
             attrs["center_latitude"] = normalized.center_latitude
             attrs["center_longitude"] = normalized.center_longitude
+
+        boundary_source = attrs.get(
+            "boundary_source",
+            getattr(
+                self.instance,
+                "boundary_source",
+                DeliveryArea.BoundarySource.MANUAL,
+            ),
+        )
+        h3_cells = attrs.get(
+            "h3_cells",
+            getattr(self.instance, "h3_cells", None),
+        )
+        h3_resolution = attrs.get(
+            "h3_resolution",
+            getattr(self.instance, "h3_resolution", None),
+        )
+        if (
+            boundary_source
+            in {
+                DeliveryArea.BoundarySource.OSM,
+                DeliveryArea.BoundarySource.H3,
+            }
+            and boundary is None
+        ):
+            raise serializers.ValidationError(
+                {"boundary_geojson": "Delivery area boundary is required."}
+            )
+        if boundary_source == DeliveryArea.BoundarySource.H3:
+            if not isinstance(h3_cells, list) or not h3_cells:
+                raise serializers.ValidationError(
+                    {"h3_cells": "Select at least one H3 cell."}
+                )
+            if not all(isinstance(cell, str) and cell.strip() for cell in h3_cells):
+                raise serializers.ValidationError(
+                    {"h3_cells": "H3 cells must be non-empty strings."}
+                )
+            if h3_resolution is None or not 0 <= h3_resolution <= 15:
+                raise serializers.ValidationError(
+                    {"h3_resolution": "H3 resolution must be between 0 and 15."}
+                )
+        else:
+            attrs["h3_cells"] = None
+            attrs["h3_resolution"] = None
 
         eta_min = attrs.get(
             "eta_min_minutes",
@@ -361,6 +414,10 @@ class DeliveryAreaSummarySerializer(serializers.ModelSerializer):
             "name",
             "boundary_geojson",
             "boundary_bbox",
+            "boundary_source",
+            "source_reference",
+            "h3_resolution",
+            "h3_cells",
             "delivery_price",
             "eta_min_minutes",
             "eta_max_minutes",

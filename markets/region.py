@@ -32,6 +32,9 @@ def service_city_payload(service_city):
         "delivery_price": service_city.delivery_price,
         "boundary_geojson": service_city.boundary_geojson,
         "boundary_bbox": service_city.boundary_bbox,
+        "center_latitude": service_city.center_latitude,
+        "center_longitude": service_city.center_longitude,
+        "radius_km": service_city.radius_km,
         "is_active": service_city.is_active,
     }
 

@@ -135,6 +135,11 @@ class Address(models.Model):
 
 
 class DeliveryArea(models.Model):
+    class BoundarySource(models.TextChoices):
+        OSM = "osm", "OpenStreetMap"
+        H3 = "h3", "H3 cells"
+        MANUAL = "manual", "Manual"
+
     service_city = models.ForeignKey(
         ServiceCity,
         on_delete=models.CASCADE,
@@ -163,6 +168,14 @@ class DeliveryArea(models.Model):
         blank=True,
         null=True,
     )
+    boundary_source = models.CharField(
+        max_length=20,
+        choices=BoundarySource.choices,
+        default=BoundarySource.MANUAL,
+    )
+    source_reference = models.CharField(max_length=255, blank=True, default="")
+    h3_resolution = models.PositiveSmallIntegerField(blank=True, null=True)
+    h3_cells = models.JSONField(blank=True, null=True)
 
     delivery_price = models.DecimalField(max_digits=8, decimal_places=2)
     eta_min_minutes = models.PositiveIntegerField(blank=True, null=True)

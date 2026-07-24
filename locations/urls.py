@@ -8,11 +8,13 @@ from .views import (
     DeliveryAreaDetailView,
     DeliveryAreaListCreateView,
     PointResolveView,
+    PlaceSearchView,
     ServiceCityDetailView,
     ServiceCityListCreateView,
 )
 
 urlpatterns = [
+    path("place-search/", PlaceSearchView.as_view(), name="place-search"),
     path("resolve-point/", PointResolveView.as_view(), name="resolve-point"),
     path(
         "service-cities/",
