@@ -129,11 +129,12 @@ def resolve_point_for_selection(*, user, latitude, longitude):
             return PointResolution(
                 False, "selected_city_unavailable", None, None, None, None, None, None
             )
-        if (
+        has_circle_coverage = not (
             selected_city.center_latitude is None
             or selected_city.center_longitude is None
             or selected_city.radius_km is None
-        ):
+        )
+        if not has_circle_coverage and not selected_city.boundary_geojson:
             return PointResolution(
                 False,
                 "selected_city_boundary_missing",
@@ -144,13 +145,22 @@ def resolve_point_for_selection(*, user, latitude, longitude):
                 None,
                 None,
             )
-        if not circle_covers_point(
-            selected_city.center_latitude,
-            selected_city.center_longitude,
-            selected_city.radius_km,
-            latitude,
-            longitude,
-        ):
+        point_is_covered = (
+            circle_covers_point(
+                selected_city.center_latitude,
+                selected_city.center_longitude,
+                selected_city.radius_km,
+                latitude,
+                longitude,
+            )
+            if has_circle_coverage
+            else geometry_covers_point(
+                selected_city.boundary_geojson,
+                latitude,
+                longitude,
+            )
+        )
+        if not point_is_covered:
             return PointResolution(
                 False,
                 "outside_selected_city",
