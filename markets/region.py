@@ -29,9 +29,10 @@ def service_city_payload(service_city):
     return {
         "id": service_city.id,
         "name": service_city.name,
+        "center_latitude": service_city.center_latitude,
+        "center_longitude": service_city.center_longitude,
+        "radius_km": service_city.radius_km,
         "delivery_price": service_city.delivery_price,
-        "boundary_geojson": service_city.boundary_geojson,
-        "boundary_bbox": service_city.boundary_bbox,
         "is_active": service_city.is_active,
     }
 
@@ -105,9 +106,28 @@ def current_market_region_selection(user):
 
 
 def detect_service_city(latitude, longitude):
-    from locations.resolution import detect_service_city as detect_by_polygon
+    matching_cities = []
+    cities = ServiceCity.objects.filter(
+        is_active=True,
+        center_latitude__isnull=False,
+        center_longitude__isnull=False,
+        radius_km__isnull=False,
+        radius_km__gt=0,
+    ).order_by("id")
 
-    return detect_by_polygon(latitude, longitude)
+    for city in cities:
+        distance_km = haversine_distance_km(
+            latitude,
+            longitude,
+            city.center_latitude,
+            city.center_longitude,
+        )
+        if distance_km <= float(city.radius_km):
+            matching_cities.append((distance_km, city.id, city))
+
+    if not matching_cities:
+        return None
+    return min(matching_cities, key=lambda item: (item[0], item[1]))[2]
 
 
 def haversine_distance_km(latitude_1, longitude_1, latitude_2, longitude_2):
@@ -222,10 +242,12 @@ def address_matches_market_region(address, current_selection):
     if address is None or current_selection is None or not address.is_active:
         return False
     if current_selection["mode"] == User.MarketRegionMode.GENERAL:
-        # General controls the catalogue scope, not the destination scope.
-        # A customer may choose any saved Egyptian destination, including a
-        # point that happens to fall inside a supported direct-delivery zone.
-        return True
+        return (
+            address.service_city_id is None
+            and address.delivery_area_id is None
+            and bool((address.manual_city or "").strip())
+            and bool((address.manual_area or "").strip())
+        )
     return address.service_city_id == current_selection["service_city"]["id"]
 
 

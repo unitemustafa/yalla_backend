@@ -380,6 +380,24 @@ class HomeAPITests(APITestCase):
                 if option["service_city"] is not None
             ],
         )
+        service_city_option = next(
+            option["service_city"]
+            for option in options_response.data["options"]
+            if option["service_city"]
+            and option["service_city"]["id"] == self.service_city.id
+        )
+        self.assertEqual(
+            service_city_option["center_latitude"],
+            self.service_city.center_latitude,
+        )
+        self.assertEqual(
+            service_city_option["center_longitude"],
+            self.service_city.center_longitude,
+        )
+        self.assertEqual(
+            service_city_option["radius_km"],
+            self.service_city.radius_km,
+        )
         self.assertEqual(me_response.status_code, status.HTTP_200_OK)
         self.assertEqual(
             me_response.data["current_selection"]["service_city"]["id"],

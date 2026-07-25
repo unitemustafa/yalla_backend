@@ -98,6 +98,71 @@ class AddressAPITests(TestCase):
         self.assertEqual(response.data[0]["delivery_price_preview"], "50.00")
         self.assertTrue(response.data[0]["is_default"])
 
+    def test_address_coordinates_must_be_inside_valid_ranges(self):
+        invalid_latitude = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Invalid latitude",
+                "details": "Street 1",
+                "service_city_id": self.service_city.id,
+                "delivery_area_id": self.delivery_area.id,
+                "latitude": "90.0000001",
+                "longitude": "31.2357000",
+            },
+            format="json",
+        )
+        invalid_longitude = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Invalid longitude",
+                "details": "Street 2",
+                "service_city_id": self.service_city.id,
+                "delivery_area_id": self.delivery_area.id,
+                "latitude": "30.0444000",
+                "longitude": "-180.0000001",
+            },
+            format="json",
+        )
+
+        self.assertEqual(invalid_latitude.status_code, 400)
+        self.assertIn("latitude", invalid_latitude.json())
+        self.assertEqual(invalid_longitude.status_code, 400)
+        self.assertIn("longitude", invalid_longitude.json())
+
+    def test_address_coordinates_must_be_provided_together(self):
+        response = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Partial coordinates",
+                "details": "Street 2",
+                "service_city_id": self.service_city.id,
+                "delivery_area_id": self.delivery_area.id,
+                "latitude": "30.0444000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("latitude", response.data)
+
+    def test_address_accepts_and_returns_boundary_coordinates(self):
+        response = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Boundary coordinates",
+                "details": "Street 3",
+                "service_city_id": self.service_city.id,
+                "delivery_area_id": self.delivery_area.id,
+                "latitude": "-90.0000000",
+                "longitude": "180.0000000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data[0]["latitude"], "-90.0000000")
+        self.assertEqual(response.data[0]["longitude"], "180.0000000")
+
     def test_client_can_create_other_address_without_delivery_area(self):
         response = self.client.post(
             "/api/v1/addresses/",
@@ -1304,160 +1369,3 @@ class LocationManagementAPITests(TestCase):
         response = self.client.get("/api/v1/locations/service-cities/")
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-
-
-class PointResolutionAPITests(TestCase):
-    def setUp(self):
-        self.client = APIClient()
-        self.user = User.objects.create_user(
-            username="point_client",
-            email="point-client@example.com",
-            phone="+201000000099",
-            password="Passw0rd!",
-            role=User.Role.CLIENT,
-        )
-        self.city = ServiceCity.objects.create(
-            name="Polygon City",
-            boundary_geojson=self._polygon(30.0, 30.0, 32.0, 31.0),
-            boundary_bbox=[30.0, 30.0, 32.0, 31.0],
-        )
-        self.area = DeliveryArea.objects.create(
-            service_city=self.city,
-            name="Direct Zone",
-            delivery_price=Decimal("55.00"),
-            eta_min_minutes=30,
-            eta_max_minutes=45,
-            boundary_geojson=self._polygon(30.2, 30.2, 30.8, 30.8),
-            boundary_bbox=[30.2, 30.2, 30.8, 30.8],
-        )
-        self.client.force_authenticate(self.user)
-
-    @staticmethod
-    def _polygon(min_lng, min_lat, max_lng, max_lat):
-        return {
-            "type": "Polygon",
-            "coordinates": [
-                [
-                    [min_lng, min_lat],
-                    [max_lng, min_lat],
-                    [max_lng, max_lat],
-                    [min_lng, max_lat],
-                    [min_lng, min_lat],
-                ]
-            ],
-        }
-
-    def test_general_detects_direct_zone_and_returns_price_and_eta(self):
-        self.user.market_region_mode = User.MarketRegionMode.GENERAL
-        self.user.market_region_service_city = None
-        self.user.save(
-            update_fields=[
-                "market_region_mode",
-                "market_region_service_city",
-            ]
-        )
-
-        response = self.client.post(
-            "/api/v1/locations/resolve-point/",
-            {"latitude": "30.5000000", "longitude": "30.5000000"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
-        self.assertTrue(response.data["allowed"])
-        self.assertEqual(response.data["fulfillment_type"], "direct")
-        self.assertEqual(response.data["service_city"]["id"], self.city.id)
-        self.assertEqual(response.data["delivery_area"]["id"], self.area.id)
-        self.assertEqual(response.data["delivery_price"], "55.00")
-        self.assertEqual(response.data["eta_min_minutes"], 30)
-        self.assertEqual(response.data["eta_max_minutes"], 45)
-
-    def test_structured_address_derives_city_zone_and_fulfillment_from_pin(self):
-        self.user.market_region_mode = User.MarketRegionMode.GENERAL
-        self.user.market_region_service_city = None
-        self.user.save(
-            update_fields=[
-                "market_region_mode",
-                "market_region_service_city",
-            ]
-        )
-
-        response = self.client.post(
-            "/api/v1/addresses/",
-            {
-                "name": "Home",
-                "label": "Home",
-                "address_type": "apartment",
-                "recipient_name": "Ahmed Ali",
-                "recipient_phone": "+201000000099",
-                "street": "Test street",
-                "building_name": "Building 5",
-                "apartment_number": "12",
-                "floor": "3",
-                "governorate": "Cairo",
-                "district": "Direct Zone",
-                "latitude": "30.5000000",
-                "longitude": "30.5000000",
-            },
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
-        address = Address.objects.get(user=self.user)
-        self.assertEqual(address.service_city_id, self.city.id)
-        self.assertEqual(address.delivery_area_id, self.area.id)
-        self.assertEqual(
-            address.fulfillment_type,
-            Address.FulfillmentType.DIRECT,
-        )
-        self.assertEqual(address.recipient_name, "Ahmed Ali")
-        self.assertEqual(response.data[0]["delivery_price_preview"], "55.00")
-
-    def test_selected_city_rejects_point_outside_its_dashboard_boundary(self):
-        self.user.market_region_mode = User.MarketRegionMode.SERVICE_CITY
-        self.user.market_region_service_city = self.city
-        self.user.save(
-            update_fields=[
-                "market_region_mode",
-                "market_region_service_city",
-            ]
-        )
-
-        response = self.client.post(
-            "/api/v1/locations/resolve-point/",
-            {"latitude": "29.9000000", "longitude": "29.9000000"},
-            format="json",
-        )
-
-        self.assertEqual(
-            response.status_code,
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            response.data,
-        )
-        self.assertFalse(response.data["allowed"])
-        self.assertEqual(response.data["reason_code"], "outside_selected_city")
-
-    def test_point_inside_city_but_outside_zone_uses_external_shipping(self):
-        self.user.market_region_mode = User.MarketRegionMode.SERVICE_CITY
-        self.user.market_region_service_city = self.city
-        self.user.save(
-            update_fields=[
-                "market_region_mode",
-                "market_region_service_city",
-            ]
-        )
-
-        response = self.client.post(
-            "/api/v1/locations/resolve-point/",
-            {"latitude": "30.9000000", "longitude": "31.5000000"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
-        self.assertTrue(response.data["allowed"])
-        self.assertEqual(
-            response.data["fulfillment_type"],
-            "external_shipping",
-        )
-        self.assertIsNone(response.data["delivery_area"])
-        self.assertIsNone(response.data["delivery_price"])
