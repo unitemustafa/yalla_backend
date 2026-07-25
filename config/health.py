@@ -7,6 +7,6 @@ def health(request):
     return JsonResponse(
         {
             "status": "ok",
-            "deployment_revision": "address-fix-diagnostic-1",
+            "deployment_revision": "address-gps-stable-v1",
         }
     )
