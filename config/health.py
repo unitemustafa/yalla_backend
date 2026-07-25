@@ -4,4 +4,9 @@ from django.views.decorators.http import require_safe
 
 @require_safe
 def health(request):
-    return JsonResponse({"status": "ok"})
+    return JsonResponse(
+        {
+            "status": "ok",
+            "deployment_revision": "address-fix-diagnostic-1",
+        }
+    )
