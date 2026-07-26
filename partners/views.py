@@ -1,3 +1,5 @@
+import logging
+
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -16,6 +18,8 @@ from .serializers import (
     PartnerApplicationSerializer,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _partner_notification(application):
     return Notification.objects.create(
@@ -29,6 +33,27 @@ def _partner_notification(application):
             "applicant_id": application.applicant_id,
         },
     )
+
+
+def _resolve_partner_notification(application_id):
+    """Resolve the dashboard notification without blocking the status update."""
+    try:
+        now = timezone.now()
+        Notification.objects.filter(
+            audience=Notification.Audience.ADMIN,
+            type=Notification.Type.NEW_PARTNER_APPLICATION,
+            data__partner_application_id=application_id,
+            is_resolved=False,
+        ).update(
+            is_resolved=True,
+            resolved_at=now,
+            updated_at=now,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to resolve the notification for partner application %s.",
+            application_id,
+        )
 
 
 class PartnerApplicationListCreateView(APIView):
@@ -137,16 +162,8 @@ class AdminPartnerApplicationDetailView(APIView):
         )
 
         if next_status in final_statuses:
-            now = timezone.now()
-            Notification.objects.filter(
-                audience=Notification.Audience.ADMIN,
-                type=Notification.Type.NEW_PARTNER_APPLICATION,
-                data__partner_application_id=application.id,
-                is_resolved=False,
-            ).update(
-                is_resolved=True,
-                resolved_at=now,
-                updated_at=now,
+            transaction.on_commit(
+                lambda: _resolve_partner_notification(application.id)
             )
 
         application.refresh_from_db()
@@ -156,4 +173,3 @@ class AdminPartnerApplicationDetailView(APIView):
                 context={"request": request},
             ).data
         )
-
