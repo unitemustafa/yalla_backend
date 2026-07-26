@@ -70,6 +70,44 @@ def _record_partner_reviewer(application_id, reviewer_id):
         )
 
 
+def _notify_partner_approval(application_id):
+    """Create and deliver the client notification after the status is saved."""
+    try:
+        application = PartnerApplication.objects.select_related("applicant").get(
+            pk=application_id,
+            status=PartnerApplication.Status.APPROVED,
+        )
+        notification = Notification.objects.create(
+            audience=Notification.Audience.CLIENT,
+            type=Notification.Type.PARTNER_APPLICATION_APPROVED,
+            title="تم قبول طلب الشراكة",
+            message=(
+                f"مبروك! تمت الموافقة على طلب شراكة "
+                f"{application.business_name}."
+            ),
+            recipient=application.applicant,
+            data={
+                "event": "partner_application_approved",
+                "route": "notifications",
+                "status": PartnerApplication.Status.APPROVED,
+                "partner_application_id": application.id,
+                "business_name": application.business_name,
+            },
+        )
+        from notifications.push import send_notification_push
+
+        send_notification_push(
+            notification.id,
+            high_priority=True,
+            android_channel_id="partner_updates",
+        )
+    except Exception:
+        logger.exception(
+            "Failed to notify approval for partner application %s.",
+            application_id,
+        )
+
+
 class PartnerApplicationListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -164,6 +202,7 @@ class AdminPartnerApplicationDetailView(APIView):
             partial=True,
         )
         serializer.is_valid(raise_exception=True)
+        previous_status = application.status
         next_status = serializer.validated_data.get("status", application.status)
         final_statuses = {
             PartnerApplication.Status.APPROVED,
@@ -190,6 +229,13 @@ class AdminPartnerApplicationDetailView(APIView):
         if next_status in final_statuses:
             transaction.on_commit(
                 lambda: _resolve_partner_notification(application.id)
+            )
+        if (
+            next_status == PartnerApplication.Status.APPROVED
+            and previous_status != next_status
+        ):
+            transaction.on_commit(
+                lambda: _notify_partner_approval(application.id)
             )
 
         application.refresh_from_db()

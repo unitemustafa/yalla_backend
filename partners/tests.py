@@ -80,7 +80,8 @@ class PartnerApplicationApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(PartnerApplication.objects.count(), 1)
 
-    def test_admin_can_list_and_approve_application(self):
+    @patch("notifications.push.send_notification_push")
+    def test_admin_can_list_and_approve_application(self, send_push):
         create_response = self.create_application()
         application_id = create_response.data["id"]
         self.client.force_authenticate(self.admin_user)
@@ -106,6 +107,19 @@ class PartnerApplicationApiTests(APITestCase):
         )
         self.assertTrue(notification.is_resolved)
         self.assertIsNotNone(notification.resolved_at)
+        client_notification = Notification.objects.get(
+            type=Notification.Type.PARTNER_APPLICATION_APPROVED,
+        )
+        self.assertEqual(client_notification.recipient, self.client_user)
+        self.assertEqual(
+            client_notification.data["event"],
+            "partner_application_approved",
+        )
+        send_push.assert_called_once_with(
+            client_notification.id,
+            high_priority=True,
+            android_channel_id="partner_updates",
+        )
 
     def test_admin_can_move_application_through_each_review_status(self):
         application_id = self.create_application().data["id"]
@@ -146,6 +160,27 @@ class PartnerApplicationApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], PartnerApplication.Status.IN_REVIEW)
+
+    @patch("notifications.push.send_notification_push")
+    def test_rejection_does_not_notify_the_applicant(self, send_push):
+        application_id = self.create_application().data["id"]
+        self.client.force_authenticate(self.admin_user)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                f"/api/v1/partners/admin/applications/{application_id}/",
+                {"status": PartnerApplication.Status.REJECTED},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(
+            Notification.objects.filter(
+                type=Notification.Type.PARTNER_APPLICATION_APPROVED,
+                recipient=self.client_user,
+            ).exists()
+        )
+        send_push.assert_not_called()
 
     def test_non_admin_cannot_access_admin_list(self):
         self.create_application()

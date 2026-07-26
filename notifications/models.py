@@ -150,6 +150,10 @@ class Notification(models.Model):
             "new_partner_application",
             "New Partner Application",
         )
+        PARTNER_APPLICATION_APPROVED = (
+            "partner_application_approved",
+            "Partner Application Approved",
+        )
 
     audience = models.CharField(max_length=30, choices=Audience.choices)
     type = models.CharField(max_length=50, choices=Type.choices)
