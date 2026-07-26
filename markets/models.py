@@ -77,6 +77,35 @@ class Market(models.Model):
         related_name="markets",
         blank=True,
     )
+    subcategories = models.ManyToManyField(
+        "catalog.StoreSubcategory",
+        through="MarketSubcategory",
+        related_name="markets",
+        blank=True,
+    )
 
     def __str__(self):
         return self.name
+
+
+class MarketSubcategory(models.Model):
+    market = models.ForeignKey(
+        Market,
+        on_delete=models.CASCADE,
+        related_name="subcategory_assignments",
+    )
+    subcategory = models.ForeignKey(
+        "catalog.StoreSubcategory",
+        on_delete=models.CASCADE,
+        related_name="market_assignments",
+    )
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ("sort_order", "id")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("market", "subcategory"),
+                name="markets_market_subcategory_unique",
+            ),
+        )

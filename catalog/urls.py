@@ -22,9 +22,21 @@ from .views import (
     ProductUnlikeView,
     ProductAdditionDetailView,
     ProductAdditionListCreateView,
+    StoreSubcategoryDetailView,
+    StoreSubcategoryListCreateView,
 )
 
 urlpatterns = [
+    path(
+        "store-subcategories/",
+        StoreSubcategoryListCreateView.as_view(),
+        name="store-subcategory-list-create",
+    ),
+    path(
+        "store-subcategories/<int:subcategory_id>/",
+        StoreSubcategoryDetailView.as_view(),
+        name="store-subcategory-detail",
+    ),
     path(
         "addition-classifications/",
         AdditionClassificationListCreateView.as_view(),

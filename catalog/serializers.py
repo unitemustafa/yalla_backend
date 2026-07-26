@@ -17,9 +17,10 @@ from .models import (
     ProductAttributeOption,
     ProductAttributeValue,
     ProductVariant,
+    StoreSubcategory,
     VariantAttributeValue,
 )
-from markets.models import Market
+from markets.models import Market, MarketSubcategory
 from .product_images import (
     PRODUCT_IMAGE_MAX_COUNT,
     add_product_images,
@@ -104,6 +105,75 @@ class ProductCategorySerializer(serializers.ModelSerializer):
 
     def validate_type(self, value):
         return value.strip()
+
+
+class StoreSubcategorySerializer(serializers.ModelSerializer):
+    market_count = serializers.IntegerField(read_only=True)
+    product_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = StoreSubcategory
+        fields = (
+            "id",
+            "name_ar",
+            "name_en",
+            "description_ar",
+            "description_en",
+            "image",
+            "is_active",
+            "market_count",
+            "product_count",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "market_count",
+            "product_count",
+            "created_at",
+            "updated_at",
+        )
+
+    def validate_name_ar(self, value):
+        return self._validate_unique_name(value, "name_ar")
+
+    def validate_name_en(self, value):
+        return self._validate_unique_name(value, "name_en")
+
+    def _validate_unique_name(self, value, field_name):
+        name = value.strip()
+        if not name:
+            raise serializers.ValidationError("This field may not be blank.")
+        queryset = StoreSubcategory.objects.filter(
+            **{f"{field_name}__iexact": name}
+        )
+        if self.instance is not None:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError(
+                "A store subcategory with this name already exists."
+            )
+        return name
+
+    def validate_description_ar(self, value):
+        return value.strip()
+
+    def validate_description_en(self, value):
+        return value.strip()
+
+
+class ProductSubcategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StoreSubcategory
+        fields = (
+            "id",
+            "name_ar",
+            "name_en",
+            "description_ar",
+            "description_en",
+            "image",
+            "is_active",
+        )
 
 
 class CategoryOptionSerializer(serializers.ModelSerializer):
@@ -393,6 +463,12 @@ class AdminProductSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     category = ProductCategoryDetailSerializer(read_only=True)
+    subcategory_id = serializers.PrimaryKeyRelatedField(
+        queryset=StoreSubcategory.objects.all(),
+        source="subcategory",
+        write_only=True,
+    )
+    subcategory = ProductSubcategorySerializer(read_only=True)
     attributes = ProductAttributeSerializer(many=True, required=False)
     attribute_values = AttributeValueSerializer(many=True, required=False)
     variants = ProductVariantSerializer(many=True, required=False)
@@ -428,6 +504,8 @@ class AdminProductSerializer(serializers.ModelSerializer):
             "market_id",
             "category",
             "category_id",
+            "subcategory",
+            "subcategory_id",
             "theme",
             "is_popular",
             "is_available",
@@ -515,6 +593,34 @@ class AdminProductSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"primary_image_index": "Upload images before selecting a primary."}
             )
+
+        market = attrs.get("market") or getattr(self.instance, "market", None)
+        subcategory = attrs.get("subcategory") or getattr(
+            self.instance,
+            "subcategory",
+            None,
+        )
+        if market is not None and subcategory is not None:
+            if not MarketSubcategory.objects.filter(
+                market=market,
+                subcategory=subcategory,
+            ).exists():
+                raise serializers.ValidationError(
+                    {
+                        "subcategory_id": (
+                            "Subcategory must be assigned to the selected market."
+                        )
+                    }
+                )
+            unchanged_inactive = (
+                self.instance is not None
+                and self.instance.subcategory_id == subcategory.id
+                and self.instance.market_id == market.id
+            )
+            if not subcategory.is_active and not unchanged_inactive:
+                raise serializers.ValidationError(
+                    {"subcategory_id": "Subcategory must be active."}
+                )
 
         category = attrs.get("category") or getattr(self.instance, "category", None)
         legacy_attribute_values = attrs.get("attribute_values", [])
@@ -846,12 +952,14 @@ class LikedProductSerializer(serializers.ModelSerializer):
     market = MarketSummarySerializer(read_only=True)
     variants = LikedProductVariantSerializer(many=True, read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
+    subcategory = ProductSubcategorySerializer(read_only=True)
 
     class Meta:
         model = Product
         fields = (
             "id",
             "market",
+            "subcategory",
             "theme",
             "is_popular",
             "is_available",

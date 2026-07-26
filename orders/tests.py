@@ -17,6 +17,7 @@ from catalog.models import (
     ProductAttribute,
     ProductAttributeOption,
     ProductCategory,
+    StoreSubcategory,
     ProductVariant,
     VariantAttributeValue,
 )
@@ -121,6 +122,12 @@ class OrderAPITests(APITestCase):
             classification=category_classification,
             name="Main Meals",
         )
+        self.subcategory = StoreSubcategory.objects.create(
+            name_ar="وجبات الطلبات",
+            name_en="Order Meals",
+        )
+        self.market.subcategories.add(self.subcategory)
+        self.second_market.subcategories.add(self.subcategory)
         size_attribute = CategoryAttribute.objects.create(
             category=category,
             name="Size",
@@ -131,6 +138,7 @@ class OrderAPITests(APITestCase):
         )
         self.product = Product.objects.create(
             market=self.market,
+            subcategory=self.subcategory,
             category=category,
             name="Burger",
         )
@@ -146,6 +154,7 @@ class OrderAPITests(APITestCase):
         )
         self.second_product = Product.objects.create(
             market=self.second_market,
+            subcategory=self.subcategory,
             category=category,
             name="Pizza",
         )
@@ -1200,6 +1209,7 @@ class OrderAPITests(APITestCase):
         remote_market.service_cities.add(remote_city)
         remote_product = Product.objects.create(
             market=remote_market,
+            subcategory=self.subcategory,
             category=self.product.category,
             name="Remote Product",
         )

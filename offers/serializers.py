@@ -6,7 +6,11 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from catalog.models import Product, ProductVariant
-from catalog.serializers import ProductImageSerializer, VariantAttributeValueSerializer
+from catalog.serializers import (
+    ProductImageSerializer,
+    ProductSubcategorySerializer,
+    VariantAttributeValueSerializer,
+)
 from locations.models import ServiceCity
 from markets.models import Market
 from markets.serializers import AdminMarketSerializer, ServiceCitySummarySerializer
@@ -65,6 +69,7 @@ class OfferProductSerializer(serializers.ModelSerializer):
     category_id = serializers.IntegerField(read_only=True)
     market_id = serializers.IntegerField(read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
+    subcategory = ProductSubcategorySerializer(read_only=True)
 
     class Meta:
         model = Product
@@ -72,6 +77,7 @@ class OfferProductSerializer(serializers.ModelSerializer):
             "id",
             "market_id",
             "category_id",
+            "subcategory",
             "is_available",
             "name",
             "description",

@@ -23,10 +23,11 @@ from catalog.models import (
     ProductCategory,
     ProductImage,
     ProductVariant,
+    StoreSubcategory,
     VariantAttributeValue,
 )
 from locations.models import Address, DeliveryArea, ServiceCity
-from markets.models import Market, MarketClassification
+from markets.models import Market, MarketClassification, MarketSubcategory
 from offers.models import Offer, OfferItem
 from orders.models import (
     Order,
@@ -475,6 +476,7 @@ class Command(BaseCommand):
             ("منتجات عضوية", grocery, "organic", "منتجات طبيعية وعضوية"),
         ]
         categories = {}
+        store_subcategories = {}
         for name, classification, category_type, description in category_definitions:
             category, _ = ProductCategory.objects.update_or_create(
                 name=name,
@@ -482,6 +484,16 @@ class Command(BaseCommand):
                 defaults={"type": category_type, "description": description},
             )
             categories[name] = category
+            subcategory, _ = StoreSubcategory.objects.update_or_create(
+                name_ar=name,
+                defaults={
+                    "name_en": name,
+                    "description_ar": description,
+                    "description_en": description,
+                    "is_active": True,
+                },
+            )
+            store_subcategories[name] = subcategory
 
         attribute_definitions = {
             "خضر وفواكه": ("الوحدة", ["500 غ", "1 كغ"]),
@@ -540,8 +552,18 @@ class Command(BaseCommand):
                 name=name,
                 defaults={
                     "category": categories[category_name],
+                    "subcategory": store_subcategories[category_name],
                     "description": f"منتج تجريبي: {name}.",
                     "discount": Decimal("0.00"),
+                },
+            )
+            MarketSubcategory.objects.get_or_create(
+                market=markets[market_name],
+                subcategory=store_subcategories[category_name],
+                defaults={
+                    "sort_order": MarketSubcategory.objects.filter(
+                        market=markets[market_name],
+                    ).count()
                 },
             )
             self._seed_product_image(product, index)

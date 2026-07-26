@@ -21,11 +21,12 @@ from catalog.models import (
     ProductAddition,
     ProductAttributeValue,
     ProductCategory,
+    StoreSubcategory,
     ProductVariant,
     VariantAttributeValue,
 )
 from locations.models import Address, DeliveryArea, ServiceCity
-from markets.models import Market, MarketClassification
+from markets.models import Market, MarketClassification, MarketSubcategory
 from notifications.models import Notification
 from offers.models import Offer
 from orders.models import Order, OrderItem, OrderMarketSection, OrderOffer
@@ -123,6 +124,7 @@ class Command(BaseCommand):
             VariantAttributeValue,
             ProductVariant,
             Product,
+            StoreSubcategory,
             CategoryOption,
             CategoryAttribute,
             ProductCategory,
@@ -196,6 +198,7 @@ class Command(BaseCommand):
             "markets": {},
             "category_classifications": {},
             "categories": {},
+            "store_subcategories": {},
             "attributes": {},
             "options": {},
             "addition_classifications": {},
@@ -704,6 +707,14 @@ class Command(BaseCommand):
             )
             self._attach_image(category, "image", f"seed_category_{category.id}.png")
             context["categories"][name] = category
+            subcategory = StoreSubcategory.objects.create(
+                name_ar=name,
+                name_en=name,
+                description_ar=description,
+                description_en=description,
+                is_active=True,
+            )
+            context["store_subcategories"][name] = subcategory
 
         attribute_rows = {
             "وجبات": {
@@ -831,10 +842,20 @@ class Command(BaseCommand):
         product = Product.objects.create(
             market=context["markets"][market_name],
             category=context["categories"][category_name],
+            subcategory=context["store_subcategories"][category_name],
             name=name,
             description=description,
             discount=self._money(str(discount)),
             is_available=is_available,
+        )
+        MarketSubcategory.objects.get_or_create(
+            market=context["markets"][market_name],
+            subcategory=context["store_subcategories"][category_name],
+            defaults={
+                "sort_order": MarketSubcategory.objects.filter(
+                    market=context["markets"][market_name],
+                ).count()
+            },
         )
         self._attach_image(product, "image", f"seed_product_{product.id}.png")
         context["products"][(market_name, name)] = product

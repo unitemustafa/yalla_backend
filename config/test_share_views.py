@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from catalog.models import Product
+from catalog.models import Product, StoreSubcategory
 from markets.models import Market, MarketClassification
 from offers.models import Offer
 
@@ -17,8 +17,14 @@ class ShareLandingViewTests(TestCase):
             classification=classification,
             name="Share Market",
         )
+        subcategory = StoreSubcategory.objects.create(
+            name_ar="مشاركة",
+            name_en="Sharing",
+        )
+        self.market.subcategories.add(subcategory)
         self.product = Product.objects.create(
             market=self.market,
+            subcategory=subcategory,
             name="Shared product",
             description="Shared safely",
         )

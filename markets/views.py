@@ -206,10 +206,20 @@ class AdminMarketListCreateView(APIView):
     def get(self, request):
         markets = (
             Market.objects.select_related("classification")
-            .prefetch_related("service_cities", "delivery_areas")
+            .prefetch_related(
+                "service_cities",
+                "delivery_areas",
+                "subcategory_assignments__subcategory",
+            )
             .order_by("name", "id")
         )
-        return Response(AdminMarketSerializer(markets, many=True).data)
+        return Response(
+            AdminMarketSerializer(
+                markets,
+                many=True,
+                context={"request": request},
+            ).data
+        )
 
     def post(self, request):
         serializer = AdminMarketSerializer(
@@ -219,7 +229,10 @@ class AdminMarketListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         market = serializer.save()
         return Response(
-            AdminMarketSerializer(market).data,
+            AdminMarketSerializer(
+                market,
+                context={"request": request},
+            ).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -231,14 +244,20 @@ class AdminMarketDetailView(APIView):
         return get_object_or_404(
             Market.objects.select_related("classification").prefetch_related(
                 "service_cities",
-                "delivery_areas"
+                "delivery_areas",
+                "subcategory_assignments__subcategory",
             ),
             id=market_id,
         )
 
     def get(self, request, market_id):
         market = self.get_market(market_id)
-        return Response(AdminMarketSerializer(market).data)
+        return Response(
+            AdminMarketSerializer(
+                market,
+                context={"request": request},
+            ).data
+        )
 
     def patch(self, request, market_id):
         market = self.get_market(market_id)
@@ -246,10 +265,16 @@ class AdminMarketDetailView(APIView):
             market,
             data=request.data,
             partial=True,
+            context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
         market = serializer.save()
-        return Response(AdminMarketSerializer(market).data)
+        return Response(
+            AdminMarketSerializer(
+                market,
+                context={"request": request},
+            ).data
+        )
 
     def delete(self, request, market_id):
         market = self.get_market(market_id)
@@ -455,7 +480,11 @@ class MarketClassificationSummaryView(APIView):
                         distinct=True,
                     )
                 )
-                .prefetch_related("service_cities", "delivery_areas")
+                .prefetch_related(
+                    "service_cities",
+                    "delivery_areas",
+                    "subcategory_assignments__subcategory",
+                )
                 .order_by("-is_popular", "-product_count", "name", "id")[:5]
             )
             for classification in all_classifications
@@ -466,7 +495,11 @@ class MarketClassificationSummaryView(APIView):
                 status=Market.Status.ACTIVE,
             )
             .annotate(product_count=Count("products", distinct=True))
-            .prefetch_related("service_cities", "delivery_areas")
+            .prefetch_related(
+                "service_cities",
+                "delivery_areas",
+                "subcategory_assignments__subcategory",
+            )
             .order_by("-created_at", "-id")[:15]
         )
         market_ids_for_response = [
@@ -485,7 +518,7 @@ class MarketClassificationSummaryView(APIView):
                     market_id=market_id,
                     market__status=Market.Status.ACTIVE,
                 )
-                .select_related("market__classification")
+                .select_related("market__classification", "subcategory")
                 .prefetch_related(
                     "images",
                     Prefetch(
@@ -572,13 +605,17 @@ class MarketClassificationMarketsView(APIView):
                 status=Market.Status.ACTIVE,
             )
             .distinct()
-            .prefetch_related("service_cities", "delivery_areas")
+            .prefetch_related(
+                "service_cities",
+                "delivery_areas",
+                "subcategory_assignments__subcategory",
+            )
             .order_by("-is_popular", "name", "id")
         )
         products_by_market = {
             market.id: list(
                 Product.objects.filter(market=market)
-                .select_related("market__classification")
+                .select_related("market__classification", "subcategory")
                 .prefetch_related(
                     "images",
                     Prefetch(

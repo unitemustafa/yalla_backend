@@ -1,4 +1,4 @@
-from django.db.models import ProtectedError
+from django.db.models import Count, ProtectedError
 
 from rest_framework import serializers, status
 from rest_framework.generics import get_object_or_404
@@ -18,6 +18,7 @@ from .models import (
     ProductImage,
     ProductCategory,
     ProductAddition,
+    StoreSubcategory,
 )
 from .serializers import (
     AdditionClassificationSerializer,
@@ -31,6 +32,7 @@ from .serializers import (
     ProductImagePrimarySerializer,
     ProductImageReorderSerializer,
     ProductImageUploadSerializer,
+    StoreSubcategorySerializer,
 )
 from .product_images import (
     add_product_images,
@@ -67,6 +69,7 @@ def product_queryset():
         Product.objects.select_related(
             "market__classification",
             "category__classification",
+            "subcategory",
         )
         .prefetch_related(
             "category__attributes__options",
@@ -81,6 +84,102 @@ def product_queryset():
             "images",
         )
     )
+
+
+def store_subcategory_queryset():
+    return StoreSubcategory.objects.annotate(
+        market_count=Count("markets", distinct=True),
+        product_count=Count("products", distinct=True),
+    ).order_by("name_ar", "id")
+
+
+class StoreSubcategoryListCreateView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def get(self, request):
+        queryset = store_subcategory_queryset()
+        is_active = request.query_params.get("is_active")
+        if is_active in {"true", "1"}:
+            queryset = queryset.filter(is_active=True)
+        elif is_active in {"false", "0"}:
+            queryset = queryset.filter(is_active=False)
+        return Response(
+            StoreSubcategorySerializer(
+                queryset,
+                many=True,
+                context={"request": request},
+            ).data
+        )
+
+    def post(self, request):
+        serializer = StoreSubcategorySerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        subcategory = serializer.save()
+        subcategory = store_subcategory_queryset().get(pk=subcategory.pk)
+        return Response(
+            StoreSubcategorySerializer(
+                subcategory,
+                context={"request": request},
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class StoreSubcategoryDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def get_subcategory(self, subcategory_id):
+        return get_object_or_404(
+            store_subcategory_queryset(),
+            id=subcategory_id,
+        )
+
+    def get(self, request, subcategory_id):
+        return Response(
+            StoreSubcategorySerializer(
+                self.get_subcategory(subcategory_id),
+                context={"request": request},
+            ).data
+        )
+
+    def patch(self, request, subcategory_id):
+        subcategory = self.get_subcategory(subcategory_id)
+        serializer = StoreSubcategorySerializer(
+            subcategory,
+            data=request.data,
+            partial=True,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        subcategory = serializer.save()
+        subcategory = store_subcategory_queryset().get(pk=subcategory.pk)
+        return Response(
+            StoreSubcategorySerializer(
+                subcategory,
+                context={"request": request},
+            ).data
+        )
+
+    def delete(self, request, subcategory_id):
+        subcategory = self.get_subcategory(subcategory_id)
+        if subcategory.product_count:
+            return Response(
+                {
+                    "detail": (
+                        "Cannot delete a store subcategory while products "
+                        "are using it."
+                    ),
+                    "product_count": subcategory.product_count,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        subcategory.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AdditionClassificationListCreateView(APIView):

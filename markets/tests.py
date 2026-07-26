@@ -24,6 +24,7 @@ from catalog.models import (
     ProductCategory,
     ProductImage,
     ProductVariant,
+    StoreSubcategory,
     VariantAttributeValue,
 )
 from locations.models import Address, DeliveryArea, ServiceCity
@@ -252,6 +253,10 @@ class HomeAPITests(APITestCase):
             name="Remote bakeries",
             classification_type=MarketClassification.ClassificationType.NORMAL,
         )
+        self.subcategory = StoreSubcategory.objects.create(
+            name_ar="اختبارات السوق",
+            name_en="Market Tests",
+        )
         self.local_market = self._create_market(
             "Local Market",
             self.local_classification,
@@ -267,6 +272,12 @@ class HomeAPITests(APITestCase):
             self.remote_classification,
             self.remote_area,
         )
+        for market in (
+            self.local_market,
+            self.second_local_market,
+            self.remote_market,
+        ):
+            market.subcategories.add(self.subcategory)
 
         category_classification = CategoryClassification.objects.create(
             name="Home test"
@@ -785,6 +796,7 @@ class HomeAPITests(APITestCase):
 
         product_without_price = Product.objects.create(
             market=self.local_market,
+            subcategory=self.subcategory,
             name="Popular product without price",
             is_available=True,
             is_popular=True,
@@ -1098,6 +1110,7 @@ class HomeAPITests(APITestCase):
                 "name": "Market with image",
                 "description": "Market description",
                 "scope": Market.Scope.GENERAL,
+                "subcategory_ids": [self.subcategory.id],
                 "image": market_image_upload(),
             },
             format="multipart",
@@ -1161,6 +1174,7 @@ class HomeAPITests(APITestCase):
                 "branch": " فرع أول ",
                 "status": Market.Status.ACTIVE,
                 "is_popular": True,
+                "subcategory_ids": [self.subcategory.id],
                 "delivery_areas": [self.local_area.id],
             },
             format="json",
@@ -1239,6 +1253,7 @@ class HomeAPITests(APITestCase):
                 "classification_id": classification.id,
                 "name": "Invalid general market",
                 "scope": Market.Scope.GENERAL,
+                "subcategory_ids": [self.subcategory.id],
                 "service_city_ids": [self.service_city.id],
             },
             format="json",
@@ -1257,6 +1272,7 @@ class HomeAPITests(APITestCase):
                 "classification_id": classification.id,
                 "name": "Invalid multi-city market",
                 "scope": Market.Scope.SERVICE_CITY,
+                "subcategory_ids": [self.subcategory.id],
                 "service_city_ids": [self.service_city.id, self.remote_city.id],
             },
             format="json",
@@ -2050,11 +2066,13 @@ class HomeAPITests(APITestCase):
         )
         market.delivery_areas.add(area)
         market.service_cities.add(area.service_city)
+        market.subcategories.add(self.subcategory)
         return market
 
     def _create_product(self, name, market, index):
         product = Product.objects.create(
             market=market,
+            subcategory=self.subcategory,
             category=self.category,
             is_popular=True,
             name=name,

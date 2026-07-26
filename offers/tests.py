@@ -15,7 +15,13 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from catalog.models import CategoryClassification, Product, ProductCategory, ProductVariant
+from catalog.models import (
+    CategoryClassification,
+    Product,
+    ProductCategory,
+    ProductVariant,
+    StoreSubcategory,
+)
 from locations.models import ServiceCity
 from markets.models import Market, MarketClassification
 from orders.models import Order, OrderOffer
@@ -108,8 +114,20 @@ class OfferAPITests(APITestCase):
             name="Second City Market",
         )
         self.second_market.service_cities.set([self.city])
+        self.subcategory = StoreSubcategory.objects.create(
+            name_ar="عروض الطعام",
+            name_en="Offer Food",
+        )
+        for market in (
+            self.market,
+            self.general_market,
+            self.remote_market,
+            self.second_market,
+        ):
+            market.subcategories.add(self.subcategory)
         self.product = Product.objects.create(
             market=self.market,
+            subcategory=self.subcategory,
             category=self.category,
             name="Burger",
             description="Burger",
@@ -126,24 +144,28 @@ class OfferAPITests(APITestCase):
         )
         self.second_product = Product.objects.create(
             market=self.market,
+            subcategory=self.subcategory,
             category=self.category,
             name="Fries",
             description="Fries",
         )
         self.general_product = Product.objects.create(
             market=self.general_market,
+            subcategory=self.subcategory,
             category=self.category,
             name="General Product",
             description="General",
         )
         self.remote_product = Product.objects.create(
             market=self.remote_market,
+            subcategory=self.subcategory,
             category=self.category,
             name="Remote Product",
             description="Remote",
         )
         self.second_market_product = Product.objects.create(
             market=self.second_market,
+            subcategory=self.subcategory,
             category=self.category,
             name="Second Market Product",
             description="Second market",

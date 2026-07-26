@@ -9,13 +9,14 @@ from catalog.models import (
     ProductAttributeValue,
     ProductCategory,
     ProductVariant,
+    StoreSubcategory,
     VariantAttributeValue,
 )
-from catalog.serializers import ProductImageSerializer
+from catalog.serializers import ProductImageSerializer, ProductSubcategorySerializer
 from locations.models import DeliveryArea, ServiceCity
 from offers.models import Offer
 
-from .models import Market, MarketClassification
+from .models import Market, MarketClassification, MarketSubcategory
 
 
 class AdminMarketClassificationSerializer(serializers.ModelSerializer):
@@ -119,10 +120,53 @@ class ServiceCityRelatedField(serializers.PrimaryKeyRelatedField):
         return ServiceCitySummarySerializer(value).data
 
 
+class AssignedStoreSubcategorySerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(source="subcategory_id", read_only=True)
+    name_ar = serializers.CharField(
+        source="subcategory.name_ar",
+        read_only=True,
+    )
+    name_en = serializers.CharField(
+        source="subcategory.name_en",
+        read_only=True,
+    )
+    description_ar = serializers.CharField(
+        source="subcategory.description_ar",
+        read_only=True,
+    )
+    description_en = serializers.CharField(
+        source="subcategory.description_en",
+        read_only=True,
+    )
+    image = serializers.ImageField(
+        source="subcategory.image",
+        read_only=True,
+        allow_null=True,
+    )
+    is_active = serializers.BooleanField(
+        source="subcategory.is_active",
+        read_only=True,
+    )
+
+    class Meta:
+        model = MarketSubcategory
+        fields = (
+            "id",
+            "name_ar",
+            "name_en",
+            "description_ar",
+            "description_en",
+            "image",
+            "is_active",
+            "sort_order",
+        )
+
+
 class HomeMarketSerializer(serializers.ModelSerializer):
     classification_id = serializers.IntegerField(read_only=True)
     service_cities = ServiceCitySummarySerializer(many=True, read_only=True)
     delivery_areas = DeliveryAreaSummarySerializer(many=True, read_only=True)
+    subcategories = serializers.SerializerMethodField()
 
     class Meta:
         model = Market
@@ -138,7 +182,35 @@ class HomeMarketSerializer(serializers.ModelSerializer):
             "classification_id",
             "service_cities",
             "delivery_areas",
+            "subcategories",
         )
+
+    def get_subcategories(self, market):
+        if "subcategory_assignments" in getattr(
+            market,
+            "_prefetched_objects_cache",
+            {},
+        ):
+            assignments = sorted(
+                (
+                    assignment
+                    for assignment in market.subcategory_assignments.all()
+                    if assignment.subcategory.is_active
+                ),
+                key=lambda assignment: (
+                    assignment.sort_order,
+                    assignment.id,
+                ),
+            )
+        else:
+            assignments = market.subcategory_assignments.filter(
+                subcategory__is_active=True,
+            ).select_related("subcategory").order_by("sort_order", "id")
+        return AssignedStoreSubcategorySerializer(
+            assignments,
+            many=True,
+            context=self.context,
+        ).data
 
 
 class HomeMarketClassificationSerializer(serializers.ModelSerializer):
@@ -200,6 +272,13 @@ class AdminMarketSerializer(serializers.ModelSerializer):
         many=True,
         required=False,
     )
+    subcategory_ids = serializers.PrimaryKeyRelatedField(
+        queryset=StoreSubcategory.objects.all(),
+        many=True,
+        required=False,
+        write_only=True,
+    )
+    subcategories = serializers.SerializerMethodField()
 
     class Meta:
         model = Market
@@ -219,6 +298,8 @@ class AdminMarketSerializer(serializers.ModelSerializer):
             "service_city_ids",
             "delivery_areas",
             "delivery_area_ids",
+            "subcategories",
+            "subcategory_ids",
             "created_at",
             "updated_at",
         )
@@ -246,6 +327,71 @@ class AdminMarketSerializer(serializers.ModelSerializer):
                     )
                 }
             )
+
+        selected_subcategories = attrs.get("subcategory_ids")
+        if (
+            self.instance is None
+            or selected_subcategories is not None
+        ) and not selected_subcategories:
+            raise serializers.ValidationError(
+                {
+                    "subcategory_ids": (
+                        "At least one active store subcategory is required."
+                    )
+                }
+            )
+        if selected_subcategories is not None:
+            if hasattr(self.initial_data, "getlist"):
+                raw_ids = self.initial_data.getlist("subcategory_ids")
+            else:
+                raw_ids = self.initial_data.get("subcategory_ids", [])
+            if not isinstance(raw_ids, (list, tuple)):
+                raw_ids = [raw_ids]
+            normalized_raw_ids = [str(value) for value in raw_ids]
+            if len(normalized_raw_ids) != len(set(normalized_raw_ids)):
+                raise serializers.ValidationError(
+                    {"subcategory_ids": "Subcategories must be unique."}
+                )
+            existing_ids = (
+                set(
+                    self.instance.subcategory_assignments.values_list(
+                        "subcategory_id",
+                        flat=True,
+                    )
+                )
+                if self.instance is not None
+                else set()
+            )
+            newly_added = [
+                subcategory
+                for subcategory in selected_subcategories
+                if subcategory.id not in existing_ids
+            ]
+            if any(not subcategory.is_active for subcategory in newly_added):
+                raise serializers.ValidationError(
+                    {
+                        "subcategory_ids": (
+                            "Only active store subcategories can be assigned."
+                        )
+                    }
+                )
+            if self.instance is not None:
+                selected_ids = {
+                    subcategory.id for subcategory in selected_subcategories
+                }
+                removed_ids = existing_ids - selected_ids
+                if removed_ids and Product.objects.filter(
+                    market=self.instance,
+                    subcategory_id__in=removed_ids,
+                ).exists():
+                    raise serializers.ValidationError(
+                        {
+                            "subcategory_ids": (
+                                "Move products to another subcategory before "
+                                "removing it from this market."
+                            )
+                        }
+                    )
 
         scope = attrs.get(
             "scope",
@@ -303,9 +449,11 @@ class AdminMarketSerializer(serializers.ModelSerializer):
         send_notification = validated_data.pop("send_notification", False)
         delivery_areas = validated_data.pop("delivery_areas", [])
         service_cities = validated_data.pop("service_cities", [])
+        subcategories = validated_data.pop("subcategory_ids")
         market = Market.objects.create(**validated_data)
         market.service_cities.set(service_cities)
         market.delivery_areas.set(delivery_areas)
+        self._replace_subcategories(market, subcategories)
         if send_notification:
             from notifications.market_services import (
                 create_market_notification_intent,
@@ -324,12 +472,41 @@ class AdminMarketSerializer(serializers.ModelSerializer):
         validated_data.pop("send_notification", None)
         delivery_areas = validated_data.pop("delivery_areas", None)
         service_cities = validated_data.pop("service_cities", None)
+        subcategories = validated_data.pop("subcategory_ids", None)
         instance = super().update(instance, validated_data)
         if service_cities is not None:
             instance.service_cities.set(service_cities)
         if delivery_areas is not None:
             instance.delivery_areas.set(delivery_areas)
+        if subcategories is not None:
+            self._replace_subcategories(instance, subcategories)
         return instance
+
+    def get_subcategories(self, market):
+        assignments = market.subcategory_assignments.select_related(
+            "subcategory",
+        ).order_by("sort_order", "id")
+        return AssignedStoreSubcategorySerializer(
+            assignments,
+            many=True,
+            context=self.context,
+        ).data
+
+    def _replace_subcategories(self, market, subcategories):
+        market.subcategory_assignments.all().delete()
+        MarketSubcategory.objects.bulk_create(
+            MarketSubcategory(
+                market=market,
+                subcategory=subcategory,
+                sort_order=index,
+            )
+            for index, subcategory in enumerate(subcategories)
+        )
+        if hasattr(market, "_prefetched_objects_cache"):
+            market._prefetched_objects_cache.pop(
+                "subcategory_assignments",
+                None,
+            )
 
 
 class MarketClassificationCountSerializer(serializers.ModelSerializer):
@@ -471,6 +648,7 @@ class HomeProductSerializer(serializers.ModelSerializer):
     variants = HomeVariantSerializer(many=True, read_only=True)
     attributes = HomeProductAttributeSerializer(many=True, read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
+    subcategory = ProductSubcategorySerializer(read_only=True)
 
     class Meta:
         model = Product
@@ -485,6 +663,7 @@ class HomeProductSerializer(serializers.ModelSerializer):
             "is_popular",
             "is_available",
             "market",
+            "subcategory",
             "attributes",
             "variants",
         )
@@ -507,6 +686,7 @@ class ProductDetailSerializer(HomeProductSerializer):
 class MarketClassificationProductSerializer(serializers.ModelSerializer):
     images = ProductImageSerializer(many=True, read_only=True)
     variants = HomeVariantSerializer(many=True, read_only=True)
+    subcategory = ProductSubcategorySerializer(read_only=True)
 
     class Meta:
         model = Product
@@ -519,6 +699,7 @@ class MarketClassificationProductSerializer(serializers.ModelSerializer):
             "discount",
             "theme",
             "is_popular",
+            "subcategory",
             "variants",
         )
 
@@ -555,6 +736,7 @@ class MarketWithStoreProductsSerializer(HomeMarketSerializer):
             "status",
             "is_popular",
             "classification_id",
+            "subcategories",
             "product_count",
             "products",
             "created_at",

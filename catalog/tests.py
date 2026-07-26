@@ -26,8 +26,10 @@ from .models import (
     ProductCategory,
     ProductAttributeValue,
     ProductVariant,
+    StoreSubcategory,
     VariantAttributeValue,
 )
+from markets.models import MarketSubcategory
 
 User = get_user_model()
 CATALOG_BASE = "/api/v1/catalog"
@@ -67,6 +69,14 @@ class AdditionClassificationAPITests(APITestCase):
             classification=market_classification,
             name="مطعم الاختبار",
         )
+        self.subcategory = StoreSubcategory.objects.create(
+            name_ar="وجبات اختبار",
+            name_en="Test meals",
+        )
+        MarketSubcategory.objects.create(
+            market=self.market,
+            subcategory=self.subcategory,
+        )
         category_classification = CategoryClassification.objects.create(
             name="وجبات"
         )
@@ -89,6 +99,7 @@ class AdditionClassificationAPITests(APITestCase):
         self.product = Product.objects.create(
             market=self.market,
             category=self.category,
+            subcategory=self.subcategory,
             name="كسكس",
             description="طبق كسكس",
         )
@@ -602,6 +613,7 @@ class AdditionClassificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": self.market.id,
+                "subcategory_id": self.subcategory.id,
                 "name": "Available without price",
                 "is_available": True,
                 "variants": [],
@@ -622,6 +634,7 @@ class AdditionClassificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": self.market.id,
+                "subcategory_id": self.subcategory.id,
                 "name": "Available base product",
                 "is_available": True,
                 "variants": [{"price": "125.50", "sku": "BASE"}],
@@ -683,6 +696,7 @@ class AdditionClassificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": str(self.market.id),
+                "subcategory_id": str(self.subcategory.id),
                 "name": "Multipart variants",
                 "theme": Product.Theme.OTHER,
                 "is_available": "true",
@@ -713,6 +727,7 @@ class AdditionClassificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": self.market.id,
+                "subcategory_id": self.subcategory.id,
                 "name": "Draft without price",
                 "is_available": False,
                 "variants": [],
@@ -758,6 +773,7 @@ class AdditionClassificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": self.market.id,
+                "subcategory_id": self.subcategory.id,
                 "category_id": self.category.id,
                 "is_available": True,
                 "name": " طبق جديد ",
@@ -880,6 +896,7 @@ class AdditionClassificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": self.market.id,
+                "subcategory_id": self.subcategory.id,
                 "category_id": self.category.id,
                 "name": "طبق بصورة",
                 "description": "طبق تجريبي",
@@ -911,6 +928,7 @@ class AdditionClassificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": self.market.id,
+                "subcategory_id": self.subcategory.id,
                 "category_id": self.category.id,
                 "name": "منتج غير صالح",
                 "description": "",
@@ -1052,17 +1070,30 @@ class ProductImageAPITests(APITestCase):
             classification=classification,
             name="Image market",
         )
+        self.subcategory = StoreSubcategory.objects.create(
+            name_ar="صور المنتجات",
+            name_en="Product images",
+        )
+        MarketSubcategory.objects.create(
+            market=self.market,
+            subcategory=self.subcategory,
+        )
         refresh = RefreshToken.for_user(self.admin)
         self.client.credentials(
             HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
         )
 
     def create_product(self, name="Image product"):
-        return Product.objects.create(market=self.market, name=name)
+        return Product.objects.create(
+            market=self.market,
+            subcategory=self.subcategory,
+            name=name,
+        )
 
     def create_product_response(self, images=None, image=None, **extra):
         payload = {
             "market_id": self.market.id,
+            "subcategory_id": self.subcategory.id,
             "name": extra.pop("name", "Image product"),
             "description": "",
             "discount": "0.00",
@@ -1269,6 +1300,7 @@ class ProductImageAPITests(APITestCase):
     def test_legacy_data_migration_reuses_the_stored_file_name(self):
         product = Product.objects.create(
             market=self.market,
+            subcategory=self.subcategory,
             name="Legacy migration",
             image=product_image_upload("migration.png"),
         )
