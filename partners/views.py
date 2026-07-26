@@ -70,19 +70,6 @@ def _record_partner_reviewer(application_id, reviewer_id):
         )
 
 
-def _partner_update_failure(stage, error):
-    logger.exception("Partner status update failed during %s.", stage)
-    return Response(
-        {
-            "detail": (
-                "Partner status update failed "
-                f"[{stage}:{error.__class__.__name__}]."
-            )
-        },
-        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-    )
-
-
 class PartnerApplicationListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -160,15 +147,11 @@ class AdminPartnerApplicationDetailView(APIView):
 
     @transaction.atomic
     def patch(self, request, application_id):
-        try:
-            application = (
-                PartnerApplication.objects.select_for_update()
-                .select_related("applicant", "reviewed_by")
-                .filter(pk=application_id)
-                .first()
-            )
-        except Exception as error:
-            return _partner_update_failure("lookup", error)
+        application = (
+            PartnerApplication.objects.select_related("applicant", "reviewed_by")
+            .filter(pk=application_id)
+            .first()
+        )
         if application is None:
             return Response(
                 {"detail": "Partner application not found."},
@@ -194,12 +177,9 @@ class AdminPartnerApplicationDetailView(APIView):
         }
         if "admin_notes" in serializer.validated_data:
             update_values["admin_notes"] = serializer.validated_data["admin_notes"]
-        try:
-            PartnerApplication.objects.filter(pk=application.pk).update(
-                **update_values,
-            )
-        except Exception as error:
-            return _partner_update_failure("update", error)
+        PartnerApplication.objects.filter(pk=application.pk).update(
+            **update_values,
+        )
         transaction.on_commit(
             lambda: _record_partner_reviewer(
                 application.id,
@@ -212,12 +192,10 @@ class AdminPartnerApplicationDetailView(APIView):
                 lambda: _resolve_partner_notification(application.id)
             )
 
-        try:
-            application.refresh_from_db()
-            response_data = PartnerApplicationSerializer(
+        application.refresh_from_db()
+        return Response(
+            PartnerApplicationSerializer(
                 application,
                 context={"request": request},
             ).data
-        except Exception as error:
-            return _partner_update_failure("response", error)
-        return Response(response_data)
+        )

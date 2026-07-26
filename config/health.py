@@ -7,6 +7,6 @@ def health(request):
     return JsonResponse(
         {
             "status": "ok",
-            "deployment_revision": "partner-status-diagnostic-v3",
+            "deployment_revision": "partner-status-stable-v4",
         }
     )
