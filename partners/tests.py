@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.utils import timezone
 from rest_framework import status
@@ -128,6 +129,23 @@ class PartnerApplicationApiTests(APITestCase):
                     PartnerApplication.objects.get(pk=application_id).status,
                     next_status,
                 )
+
+    def test_status_update_does_not_depend_on_model_serializer_save(self):
+        application_id = self.create_application().data["id"]
+        self.client.force_authenticate(self.admin_user)
+
+        with patch(
+            "partners.views.PartnerApplicationAdminUpdateSerializer.save",
+            side_effect=AssertionError("serializer.save must not be called"),
+        ):
+            response = self.client.patch(
+                f"/api/v1/partners/admin/applications/{application_id}/",
+                {"status": PartnerApplication.Status.IN_REVIEW},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], PartnerApplication.Status.IN_REVIEW)
 
     def test_non_admin_cannot_access_admin_list(self):
         self.create_application()
