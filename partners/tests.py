@@ -85,11 +85,12 @@ class PartnerApplicationApiTests(APITestCase):
         self.client.force_authenticate(self.admin_user)
 
         list_response = self.client.get("/api/v1/partners/admin/applications/")
-        update_response = self.client.patch(
-            f"/api/v1/partners/admin/applications/{application_id}/",
-            {"status": PartnerApplication.Status.APPROVED},
-            format="json",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            update_response = self.client.patch(
+                f"/api/v1/partners/admin/applications/{application_id}/",
+                {"status": PartnerApplication.Status.APPROVED},
+                format="json",
+            )
 
         self.assertEqual(list_response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(list_response.data), 1)
@@ -104,6 +105,29 @@ class PartnerApplicationApiTests(APITestCase):
         )
         self.assertTrue(notification.is_resolved)
         self.assertIsNotNone(notification.resolved_at)
+
+    def test_admin_can_move_application_through_each_review_status(self):
+        application_id = self.create_application().data["id"]
+        self.client.force_authenticate(self.admin_user)
+
+        for next_status in (
+            PartnerApplication.Status.IN_REVIEW,
+            PartnerApplication.Status.APPROVED,
+            PartnerApplication.Status.REJECTED,
+        ):
+            with self.subTest(next_status=next_status):
+                response = self.client.patch(
+                    f"/api/v1/partners/admin/applications/{application_id}/",
+                    {"status": next_status},
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+                self.assertEqual(response.data["status"], next_status)
+                self.assertEqual(
+                    PartnerApplication.objects.get(pk=application_id).status,
+                    next_status,
+                )
 
     def test_non_admin_cannot_access_admin_list(self):
         self.create_application()
