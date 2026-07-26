@@ -56,6 +56,20 @@ def _resolve_partner_notification(application_id):
         )
 
 
+def _record_partner_reviewer(application_id, reviewer_id):
+    """Store audit metadata without rolling back an already-valid status change."""
+    try:
+        PartnerApplication.objects.filter(pk=application_id).update(
+            reviewed_by_id=reviewer_id,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to record reviewer %s for partner application %s.",
+            reviewer_id,
+            application_id,
+        )
+
+
 class PartnerApplicationListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -156,9 +170,22 @@ class AdminPartnerApplicationDetailView(APIView):
             PartnerApplication.Status.APPROVED,
             PartnerApplication.Status.REJECTED,
         }
-        serializer.save(
-            reviewed_by=request.user,
-            reviewed_at=timezone.now() if next_status in final_statuses else None,
+        now = timezone.now()
+        update_values = {
+            "status": next_status,
+            "reviewed_at": now if next_status in final_statuses else None,
+            "updated_at": now,
+        }
+        if "admin_notes" in serializer.validated_data:
+            update_values["admin_notes"] = serializer.validated_data["admin_notes"]
+        PartnerApplication.objects.filter(pk=application.pk).update(
+            **update_values,
+        )
+        transaction.on_commit(
+            lambda: _record_partner_reviewer(
+                application.id,
+                request.user.id,
+            )
         )
 
         if next_status in final_statuses:
