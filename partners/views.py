@@ -81,10 +81,7 @@ def _notify_partner_approval(application_id):
             audience=Notification.Audience.CLIENT,
             type=Notification.Type.PARTNER_APPLICATION_APPROVED,
             title="تم قبول طلب الشراكة",
-            message=(
-                f"مبروك! تمت الموافقة على طلب شراكة "
-                f"{application.business_name}."
-            ),
+            message="مبروك! تمت الموافقة على طلبك للانضمام إلى يلا ماركت.",
             recipient=application.applicant,
             data={
                 "event": "partner_application_approved",

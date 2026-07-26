@@ -115,6 +115,10 @@ class PartnerApplicationApiTests(APITestCase):
             client_notification.data["event"],
             "partner_application_approved",
         )
+        self.assertEqual(
+            client_notification.message,
+            "مبروك! تمت الموافقة على طلبك للانضمام إلى يلا ماركت.",
+        )
         send_push.assert_called_once_with(
             client_notification.id,
             high_priority=True,
