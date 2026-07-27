@@ -560,6 +560,20 @@ class LogoutSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             ) from exc
 
 
+class DeleteAccountSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
+    password = serializers.CharField(
+        write_only=True,
+        trim_whitespace=False,
+        style={"input_type": "password"},
+    )
+
+    def validate_password(self, value):
+        user = self.context["request"].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("The password is incorrect.")
+        return value
+
+
 class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
     first_name = serializers.CharField(max_length=150, required=False)
     last_name = serializers.CharField(

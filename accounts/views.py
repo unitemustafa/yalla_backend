@@ -31,6 +31,7 @@ from .serializers import (
     AdminUserWriteSerializer,
     AdminLoginSerializer,
     ClientLoginSerializer,
+    DeleteAccountSerializer,
     EmailOTPSerializer,
     EmailTokenRefreshSerializer,
     ForgotPasswordSerializer,
@@ -454,6 +455,21 @@ class ClientProfileView(APIView):
     @transaction.atomic
     def put(self, request):
         return self.update(request)
+
+    def delete(self, request):
+        serializer = DeleteAccountSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        from .deletion import permanently_delete_client_account
+
+        permanently_delete_client_account(request.user)
+        return Response(
+            {"detail": "Account deleted successfully."},
+            status=status.HTTP_200_OK,
+        )
 
 
 class AdminUserListCreateView(APIView):

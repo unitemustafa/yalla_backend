@@ -13,14 +13,8 @@ from notifications.services import create_account_disabled_notification
 logger = logging.getLogger(__name__)
 
 
-def handle_client_deactivation(user, *, was_active, notify_disabled=True):
-    if (
-        not was_active
-        or user.is_active
-        or user.role != user.Role.CLIENT
-    ):
-        return False
-
+def revoke_user_sessions(user):
+    """Invalidate both issued JWTs and access tokens already in circulation."""
     user.__class__.objects.filter(pk=user.pk).update(
         auth_token_version=F("auth_token_version") + 1,
     )
@@ -32,6 +26,17 @@ def handle_client_deactivation(user, *, was_active, notify_disabled=True):
         ],
         ignore_conflicts=True,
     )
+
+
+def handle_client_deactivation(user, *, was_active, notify_disabled=True):
+    if (
+        not was_active
+        or user.is_active
+        or user.role != user.Role.CLIENT
+    ):
+        return False
+
+    revoke_user_sessions(user)
     if notify_disabled:
         create_account_disabled_notification(user)
     transaction.on_commit(

@@ -3,12 +3,24 @@ from django.conf.urls.static import static
 from django.urls import path, include
 
 from .share_views import offer_share, product_share
-from .health import health
+from .health import liveness, readiness
+from accounts.legal_views import (
+    AccountDeletionView,
+    PrivacyPolicyView,
+    TermsOfUseView,
+)
 
 urlpatterns = [
-    path("health/", health, name="health"),
-    path("healthz/", health, name="healthz"),
-    path("readyz/", health, name="readyz"),
+    path("privacy/", PrivacyPolicyView.as_view(), name="privacy-policy"),
+    path("terms/", TermsOfUseView.as_view(), name="terms-of-use"),
+    path(
+        "account-deletion/",
+        AccountDeletionView.as_view(),
+        name="account-deletion",
+    ),
+    path("health/", liveness, name="health"),
+    path("healthz/", liveness, name="healthz"),
+    path("readyz/", readiness, name="readyz"),
     path("share/products/<int:product_id>/", product_share, name="product-share"),
     path("share/offers/<int:offer_id>/", offer_share, name="offer-share"),
     path("api/v1/auth/", include("accounts.urls")),

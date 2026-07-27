@@ -6,6 +6,7 @@ from datetime import timedelta
 from pathlib import Path
 import os
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 
 from .cloudinary_settings import build_cloudinary_storage_settings
 
@@ -13,15 +14,73 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 # SECURITY
-SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key")
-DEBUG = os.environ.get("DEBUG", "False") == "True"
+APP_ENV = os.environ.get("APP_ENV", "development").strip().lower()
+IS_PRODUCTION = APP_ENV == "production"
+DEBUG = os.environ.get(
+    "DEBUG",
+    "False" if IS_PRODUCTION else "True",
+).lower() == "true"
+SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
+if not SECRET_KEY:
+    if IS_PRODUCTION:
+        raise ImproperlyConfigured("SECRET_KEY is required in production.")
+    SECRET_KEY = "dev-only-secret-key-not-for-production"
+if IS_PRODUCTION and (
+    len(SECRET_KEY) < 50 or SECRET_KEY.startswith(("dev-", "replace-"))
+):
+    raise ImproperlyConfigured(
+        "SECRET_KEY must be a unique random value of at least 50 characters."
+    )
 
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").split(",")
 
-CSRF_TRUSTED_ORIGINS = os.environ.get(
-    "CSRF_TRUSTED_ORIGINS",
-    "https://*.ondigitalocean.app"
-).split(",")
+def _environment_list(name, default=""):
+    return [
+        item.strip()
+        for item in os.environ.get(name, default).split(",")
+        if item.strip()
+    ]
+
+
+ALLOWED_HOSTS = _environment_list(
+    "ALLOWED_HOSTS",
+    "localhost,127.0.0.1" if not IS_PRODUCTION else "",
+)
+CSRF_TRUSTED_ORIGINS = _environment_list("CSRF_TRUSTED_ORIGINS")
+CORS_ALLOWED_ORIGINS = _environment_list("CORS_ALLOWED_ORIGINS")
+CORS_ALLOW_ALL_ORIGINS = (
+    not IS_PRODUCTION
+    and os.environ.get("CORS_ALLOW_ALL_ORIGINS", "True").lower() == "true"
+)
+
+if IS_PRODUCTION:
+    if DEBUG:
+        raise ImproperlyConfigured("DEBUG must be False in production.")
+    if not ALLOWED_HOSTS or "*" in ALLOWED_HOSTS:
+        raise ImproperlyConfigured(
+            "Set ALLOWED_HOSTS to the exact production host names."
+        )
+    if not CORS_ALLOWED_ORIGINS:
+        raise ImproperlyConfigured(
+            "CORS_ALLOWED_ORIGINS must contain the dashboard HTTPS origin."
+        )
+    if any(not origin.startswith("https://") for origin in CORS_ALLOWED_ORIGINS):
+        raise ImproperlyConfigured(
+            "Every production CORS_ALLOWED_ORIGINS value must use HTTPS."
+        )
+
+SECURE_SSL_REDIRECT = IS_PRODUCTION
+SESSION_COOKIE_SECURE = IS_PRODUCTION
+CSRF_COOKIE_SECURE = IS_PRODUCTION
+SECURE_HSTS_SECONDS = int(
+    os.environ.get("SECURE_HSTS_SECONDS", "31536000" if IS_PRODUCTION else "0")
+)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = IS_PRODUCTION
+SECURE_HSTS_PRELOAD = IS_PRODUCTION
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+X_FRAME_OPTIONS = "DENY"
+if IS_PRODUCTION:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 
 # Application definition
@@ -65,8 +124,6 @@ MIDDLEWARE = [
 
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
-CORS_ALLOW_ALL_ORIGINS = True
-
 ROOT_URLCONF = 'config.urls'
 
 TEMPLATES = [
@@ -88,9 +145,13 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 
 # Database
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+if IS_PRODUCTION and not DATABASE_URL:
+    raise ImproperlyConfigured("DATABASE_URL is required in production.")
+
 DATABASES = {
     "default": dj_database_url.config(
-        default=os.environ.get("DATABASE_URL"),
+        default=DATABASE_URL or None,
         conn_max_age=0 if DEBUG else 600,
         ssl_require=not DEBUG,
     )
@@ -102,6 +163,12 @@ DATABASES = {
 # RATE_LIMIT_MODE after provisioning a non-sharded Redis/Valkey primary.
 RATE_LIMIT_REDIS_URL = os.environ.get("RATE_LIMIT_REDIS_URL", "").strip()
 RATE_LIMIT_MODE = os.environ.get("RATE_LIMIT_MODE", "off").strip().lower()
+if IS_PRODUCTION and (
+    not RATE_LIMIT_REDIS_URL or RATE_LIMIT_MODE != "enforce"
+):
+    raise ImproperlyConfigured(
+        "Production requires RATE_LIMIT_REDIS_URL and RATE_LIMIT_MODE=enforce."
+    )
 RATE_LIMIT_ENFORCE_SCOPES = tuple(
     item.strip()
     for item in os.environ.get("RATE_LIMIT_ENFORCE_SCOPES", "").split(",")

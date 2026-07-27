@@ -1,0 +1,24 @@
+{% extends "legal/base.html" %}
+{% block title %}Delete Your Yalla Market Account{% endblock %}
+{% block content %}
+  <h1>Delete your account and data</h1>
+  <p class="muted">For Yalla Market customer accounts</p>
+
+  <div class="callout">
+    <strong>Fastest option:</strong> open Yalla Market, go to Account, choose <em>Delete Account</em>, enter your current password, and confirm.
+  </div>
+
+  <h2>If you cannot access the app</h2>
+  <ol>
+    <li>Use the support link below and request account deletion.</li>
+    <li>Include the email address or phone number registered to the account.</li>
+    <li>Complete the identity-verification steps sent by support. Never send your password.</li>
+  </ol>
+  <p><a class="button" href="{{ support_whatsapp_url }}" rel="noopener">Request deletion on WhatsApp</a></p>
+
+  <h2>What deletion does</h2>
+  <p>Your profile identifiers, authentication credentials, saved addresses, device tokens, notifications, verification codes, and favourites are deleted or anonymized, and all sessions are revoked. The action cannot be undone.</p>
+
+  <h2>What may be retained</h2>
+  <p>Active orders must be completed or cancelled first. Limited order and transaction records may remain in anonymized form for accounting, dispute handling, fraud prevention, and legal compliance. They are no longer available through the deleted account. Backup copies expire through normal retention cycles.</p>
+{% endblock %}

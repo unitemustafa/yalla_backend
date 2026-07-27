@@ -5,6 +5,7 @@ import tempfile
 # Force tests to remain completely local.
 # Never inherit a production database or production secret.
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+os.environ["APP_ENV"] = "test"
 os.environ["DEBUG"] = "True"
 os.environ["SECRET_KEY"] = (
     "yalla-test-only-secret-key-2026-"

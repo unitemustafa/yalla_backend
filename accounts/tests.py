@@ -2469,6 +2469,180 @@ class AuthenticationAPITests(APITestCase):
         self.assertTrue(user.is_active)
         self.assertIsNone(user.deleted_at)
 
+    def test_client_can_permanently_delete_account(self):
+        user = self.create_active_user()
+        original_email = user.email
+        original_username = user.username
+        original_phone = user.phone
+        refresh = RefreshToken.for_user(user)
+        access = str(refresh.access_token)
+        address = user.addresses.create(
+            name="Home",
+            recipient_name="Yalla Customer",
+            recipient_phone=original_phone,
+            street="Personal street",
+            latitude=30.0444,
+            longitude=31.2357,
+        )
+        ClientDevice.objects.create(
+            user=user,
+            token="account-delete-device",
+            platform=ClientDevice.Platform.ANDROID,
+            is_active=True,
+            last_seen_at=timezone.now(),
+        )
+        Notification.objects.create(
+            audience=Notification.Audience.CLIENT,
+            type=Notification.Type.PASSWORD_CHANGED,
+            title="Private notification",
+            message="Private message",
+            recipient=user,
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+
+        response = self.client.delete(
+            f"{AUTH_BASE}/client/profile/",
+            {"password": self.password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertFalse(user.is_active)
+        self.assertFalse(user.has_usable_password())
+        self.assertIsNotNone(user.deleted_at)
+        self.assertNotEqual(user.email, original_email)
+        self.assertNotEqual(user.username, original_username)
+        self.assertNotEqual(user.phone, original_phone)
+        self.assertEqual(user.first_name, "")
+        self.assertEqual(user.last_name, "")
+        self.assertFalse(user.is_verified)
+        self.assertFalse(User.objects.filter(email=original_email).exists())
+        self.assertFalse(User.objects.filter(username=original_username).exists())
+        self.assertFalse(User.objects.filter(phone=original_phone).exists())
+        self.assertFalse(user.addresses.filter(pk=address.pk).exists())
+        self.assertFalse(user.client_devices.exists())
+        self.assertFalse(user.notifications.exists())
+        self.assertTrue(
+            BlacklistedToken.objects.filter(token__token=str(refresh)).exists()
+        )
+
+        replacement = User.objects.create_user(
+            username=original_username,
+            email=original_email,
+            phone=original_phone,
+            password=self.password,
+        )
+        self.assertIsNotNone(replacement.pk)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+        self.assertIn(
+            self.client.get(f"{AUTH_BASE}/me").status_code,
+            (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN),
+        )
+
+    def test_client_account_delete_requires_current_password(self):
+        user = self.create_active_user()
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.delete(
+            f"{AUTH_BASE}/client/profile/",
+            {"password": "not-the-current-password"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
+        self.assertIsNone(user.deleted_at)
+
+    def test_client_account_delete_is_blocked_while_order_is_active(self):
+        user = self.create_active_user()
+        market = self.create_order_market()
+        self.create_customer_order(
+            user,
+            market,
+            Order.Status.PENDING,
+            Decimal("25.00"),
+            timezone.now(),
+        )
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.delete(
+            f"{AUTH_BASE}/client/profile/",
+            {"password": self.password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("active order", response.data["detail"])
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
+        self.assertIsNone(user.deleted_at)
+
+    def test_client_account_delete_anonymizes_address_used_by_old_order(self):
+        user = self.create_active_user()
+        address = user.addresses.create(
+            name="Home",
+            recipient_name="Private Name",
+            recipient_phone=user.phone,
+            street="Private street",
+            latitude=30.0444,
+            longitude=31.2357,
+        )
+        market = self.create_order_market()
+        order = self.create_customer_order(
+            user,
+            market,
+            Order.Status.DELIVERED,
+            Decimal("25.00"),
+            timezone.now(),
+        )
+        order.delivery_address = address
+        order.save(update_fields=["delivery_address"])
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.delete(
+            f"{AUTH_BASE}/client/profile/",
+            {"password": self.password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        address.refresh_from_db()
+        self.assertEqual(address.name, "Deleted address")
+        self.assertEqual(address.recipient_name, "")
+        self.assertEqual(address.recipient_phone, "")
+        self.assertEqual(address.street, "")
+        self.assertIsNone(address.latitude)
+        self.assertIsNone(address.longitude)
+        order.refresh_from_db()
+        self.assertEqual(order.delivery_address_id, address.id)
+
+    def test_client_account_delete_rejects_non_client_users(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="profile_delete_admin",
+            email="profile-delete-admin@example.com",
+            phone="+213555000099",
+        )
+        refresh = RefreshToken.for_user(admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.delete(
+            f"{AUTH_BASE}/client/profile/",
+            {"password": self.password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        admin.refresh_from_db()
+        self.assertTrue(admin.is_active)
+        self.assertIsNone(admin.deleted_at)
+
     def test_availability_checks(self):
         self.create_active_user()
 
