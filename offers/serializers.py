@@ -143,6 +143,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
     market_count = serializers.SerializerMethodField()
     markets = serializers.SerializerMethodField()
     market_names_summary = serializers.SerializerMethodField()
+    deletion_mode = serializers.SerializerMethodField()
     market_id = serializers.PrimaryKeyRelatedField(
         queryset=Market.objects.all(),
         source="market",
@@ -194,6 +195,8 @@ class AdminOfferSerializer(serializers.ModelSerializer):
             "announcement_priority",
             "announcement_display_seconds",
             "status",
+            "archived_at",
+            "deletion_mode",
             "effective_status",
             "is_currently_visible",
             "can_send_notification",
@@ -204,7 +207,17 @@ class AdminOfferSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "push_sent_at", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "archived_at",
+            "deletion_mode",
+            "push_sent_at",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_deletion_mode(self, instance):
+        return instance.get_deletion_mode()
 
     def to_internal_value(self, data):
         raw_items = data.get("items") if hasattr(data, "get") else None

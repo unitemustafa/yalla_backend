@@ -237,6 +237,7 @@ class HomeMarketClassificationSerializer(serializers.ModelSerializer):
 
 
 class AdminMarketSerializer(serializers.ModelSerializer):
+    deletion_mode = serializers.SerializerMethodField()
     send_notification = serializers.BooleanField(
         write_only=True,
         required=False,
@@ -292,6 +293,8 @@ class AdminMarketSerializer(serializers.ModelSerializer):
             "branch",
             "scope",
             "status",
+            "archived_at",
+            "deletion_mode",
             "is_popular",
             "send_notification",
             "service_cities",
@@ -303,6 +306,10 @@ class AdminMarketSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+        read_only_fields = ("id", "archived_at", "deletion_mode")
+
+    def get_deletion_mode(self, instance):
+        return instance.get_deletion_mode()
 
     def validate_name(self, value):
         return value.strip()

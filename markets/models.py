@@ -66,6 +66,7 @@ class Market(models.Model):
     is_popular = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    archived_at = models.DateTimeField(blank=True, null=True, db_index=True)
 
     delivery_areas = models.ManyToManyField(
         "locations.DeliveryArea",
@@ -86,6 +87,18 @@ class Market(models.Model):
 
     def __str__(self):
         return self.name
+
+    def get_deletion_mode(self):
+        annotated_mode = getattr(self, "deletion_mode_is_archive", None)
+        if annotated_mode is not None:
+            return "archive" if annotated_mode else "delete"
+        if self.orders.exists() or self.order_sections.exists():
+            return "archive"
+        protected_products = self.products.filter(
+            models.Q(variants__order_items__isnull=False)
+            | models.Q(variants__offer_items__isnull=False)
+        )
+        return "archive" if protected_products.exists() else "delete"
 
 
 class MarketSubcategory(models.Model):

@@ -1,6 +1,7 @@
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Exists, OuterRef, Q
 from django.db.models.deletion import ProtectedError
+from django.utils import timezone
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated, SAFE_METHODS
 from rest_framework.response import Response
@@ -150,14 +151,29 @@ class DeliveryAreaListCreateView(generics.ListCreateAPIView):
         schedule_delivery_area_created_notifications(area.id)
 
     def get_queryset(self):
-        queryset = DeliveryArea.objects.select_related("service_city").order_by(
-            "name", "id"
+        protected_areas = DeliveryArea.objects.filter(pk=OuterRef("pk")).filter(
+            Q(courier_profiles__isnull=False)
+            | Q(orders__isnull=False)
+            | Q(addresses__orders__isnull=False)
+            | Q(addresses__is_active=True)
+        )
+        queryset = (
+            DeliveryArea.objects.annotate(
+                deletion_mode_is_archive=Exists(protected_areas),
+            )
+            .select_related("service_city")
+            .order_by("name", "id")
         )
         if self.request.user.role != self.request.user.Role.ADMIN:
             queryset = queryset.filter(
                 is_active=True,
                 service_city__is_active=True,
+                archived_at__isnull=True,
             )
+        elif self.request.query_params.get("archived") in {"true", "1"}:
+            queryset = queryset.filter(archived_at__isnull=False)
+        else:
+            queryset = queryset.filter(archived_at__isnull=True)
         city_id = self.request.query_params.get("service_city_id")
         if city_id:
             queryset = queryset.filter(service_city_id=city_id)
@@ -181,6 +197,7 @@ class DeliveryAreaDetailView(
             queryset = queryset.filter(
                 is_active=True,
                 service_city__is_active=True,
+                archived_at__isnull=True,
             )
         return queryset
 
@@ -199,13 +216,17 @@ class DeliveryAreaDetailView(
         was_active = area.is_active
         if was_active:
             area.is_active = False
-            area.save(update_fields=("is_active",))
+            area.archived_at = timezone.now()
+            area.save(update_fields=("is_active", "archived_at"))
             transaction.on_commit(
                 lambda area_id=area.id: _send_delivery_area_status_change(
                     area_id,
                     False,
                 )
             )
+        elif area.archived_at is None:
+            area.archived_at = timezone.now()
+            area.save(update_fields=("archived_at",))
         return Response(
             {
                 "action": "archived",
@@ -259,6 +280,19 @@ class DeliveryAreaDetailView(
         area.markets.clear()
         area.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def patch(self, request, *args, **kwargs):
+        area = self.get_object()
+        if request.data.get("restore") is True:
+            area.archived_at = None
+            area.save(update_fields=("archived_at",))
+            return Response(
+                self.get_serializer(
+                    area,
+                    context={"request": request},
+                ).data
+            )
+        return super().patch(request, *args, **kwargs)
 
 
 def _send_delivery_area_status_change(area_id, is_active):

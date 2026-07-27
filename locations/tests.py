@@ -1119,11 +1119,37 @@ class LocationManagementAPITests(TestCase):
         self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
         area.refresh_from_db()
         self.assertFalse(area.is_active)
+        self.assertIsNotNone(area.archived_at)
         address.refresh_from_db()
         self.assertEqual(address.delivery_area_id, area.id)
         self.assertEqual(address.delivery_type, Address.DeliveryType.FIXED_AREA)
         self.assertEqual(address.service_city_id, area.service_city_id)
         self.assertTrue(Address.objects.filter(pk=address.id).exists())
+        self.assertNotIn(
+            area.id,
+            [
+                item["id"]
+                for item in self.client.get(
+                    "/api/v1/locations/delivery-areas/"
+                ).data
+            ],
+        )
+        archived_area = next(
+            item
+            for item in self.client.get(
+                "/api/v1/locations/delivery-areas/?archived=true"
+            ).data
+            if item["id"] == area.id
+        )
+        self.assertEqual(archived_area["deletion_mode"], "archive")
+
+        restore_response = self.client.patch(
+            f"/api/v1/locations/delivery-areas/{area.id}/",
+            {"restore": True},
+            format="json",
+        )
+        self.assertEqual(restore_response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(restore_response.data["archived_at"])
 
     def test_delivery_area_delete_removes_stale_unreferenced_address(self):
         area = self.create_area("Stale Address Area")

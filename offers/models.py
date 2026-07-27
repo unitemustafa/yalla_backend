@@ -73,9 +73,18 @@ class Offer(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    archived_at = models.DateTimeField(blank=True, null=True, db_index=True)
 
     def __str__(self):
         return self.title
+
+    def get_deletion_mode(self):
+        annotated_mode = getattr(self, "deletion_mode_is_archive", None)
+        if annotated_mode is not None:
+            return "archive" if annotated_mode else "delete"
+        if self.order_offers.exists() or self.notification_dispatches.exists():
+            return "archive"
+        return "delete"
 
     def get_effective_status(self, now=None):
         now = now or timezone.now()

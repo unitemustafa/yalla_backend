@@ -495,6 +495,7 @@ class AdminProductSerializer(serializers.ModelSerializer):
         min_value=0,
         write_only=True,
     )
+    deletion_mode = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -509,6 +510,8 @@ class AdminProductSerializer(serializers.ModelSerializer):
             "theme",
             "is_popular",
             "is_available",
+            "archived_at",
+            "deletion_mode",
             "name",
             "description",
             "image",
@@ -523,7 +526,16 @@ class AdminProductSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "archived_at",
+            "deletion_mode",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_deletion_mode(self, instance):
+        return instance.get_deletion_mode()
 
     def validate_name(self, value):
         return value.strip()

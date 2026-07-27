@@ -87,6 +87,7 @@ class ServiceCitySerializer(serializers.ModelSerializer):
 
 
 class DeliveryAreaSerializer(ServiceCitySerializer):
+    deletion_mode = serializers.SerializerMethodField()
     service_city_id = serializers.PrimaryKeyRelatedField(
         queryset=ServiceCity.objects.all(),
         source="service_city",
@@ -126,8 +127,13 @@ class DeliveryAreaSerializer(ServiceCitySerializer):
             "radius_km",
             "delivery_price",
             "is_active",
+            "archived_at",
+            "deletion_mode",
         )
-        read_only_fields = ("id",)
+        read_only_fields = ("id", "archived_at", "deletion_mode")
+
+    def get_deletion_mode(self, instance):
+        return instance.get_deletion_mode()
 
     def validate_name(self, value):
         value = value.strip()

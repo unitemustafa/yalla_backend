@@ -771,6 +771,27 @@ class OfferAPITests(APITestCase):
         self.assertTrue(Offer.objects.filter(id=offer.id).exists())
         offer.refresh_from_db()
         self.assertEqual(offer.status, Offer.Status.INACTIVE)
+        self.assertIsNotNone(offer.archived_at)
+        self.assertNotIn(
+            offer.id,
+            [item["id"] for item in self.client.get(f"{OFFERS_BASE}/").data],
+        )
+        archived_offer = next(
+            item
+            for item in self.client.get(
+                f"{OFFERS_BASE}/?archived=true"
+            ).data
+            if item["id"] == offer.id
+        )
+        self.assertEqual(archived_offer["deletion_mode"], "archive")
+
+        restore_response = self.client.patch(
+            f"{OFFERS_BASE}/{offer.id}/",
+            {"restore": True},
+            format="json",
+        )
+        self.assertEqual(restore_response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(restore_response.data["archived_at"])
 
     @patch("notifications.offer_services.send_notifications_push")
     def test_push_opt_out_creates_no_notification(self, send_push):

@@ -1,4 +1,5 @@
-from django.db.models import Count, ProtectedError
+from django.db.models import Count, Exists, OuterRef, ProtectedError, Q
+from django.utils import timezone
 
 from rest_framework import serializers, status
 from rest_framework.generics import get_object_or_404
@@ -65,8 +66,14 @@ class IsClientRole(BasePermission):
 
 
 def product_queryset():
+    protected_products = Product.objects.filter(pk=OuterRef("pk")).filter(
+        Q(variants__order_items__isnull=False)
+        | Q(variants__offer_items__isnull=False)
+    )
     return (
-        Product.objects.select_related(
+        Product.objects.annotate(
+            deletion_mode_is_archive=Exists(protected_products),
+        ).select_related(
             "market__classification",
             "category__classification",
             "subcategory",
@@ -514,9 +521,14 @@ class ProductListCreateView(APIView):
         return product_queryset().order_by("name", "id")
 
     def get(self, request):
+        queryset = self.get_queryset()
+        if request.query_params.get("archived") in {"true", "1"}:
+            queryset = queryset.filter(archived_at__isnull=False)
+        else:
+            queryset = queryset.filter(archived_at__isnull=True)
         return Response(
             AdminProductSerializer(
-                self.get_queryset(),
+                queryset,
                 many=True,
                 context={"request": request},
             ).data
@@ -560,6 +572,16 @@ class ProductDetailView(APIView):
 
     def patch(self, request, product_id):
         product = self.get_product(product_id)
+        if request.data.get("restore") is True:
+            product.archived_at = None
+            product.save(update_fields=("archived_at", "updated_at"))
+            product = self.get_queryset().get(id=product.id)
+            return Response(
+                AdminProductSerializer(
+                    product,
+                    context={"request": request},
+                ).data
+            )
         serializer = AdminProductSerializer(
             product,
             data=request.data,
@@ -599,7 +621,10 @@ class ProductDetailView(APIView):
             product.delete()
         except ProtectedError:
             product.is_available = False
-            product.save(update_fields=("is_available", "updated_at"))
+            product.archived_at = timezone.now()
+            product.save(
+                update_fields=("is_available", "archived_at", "updated_at")
+            )
             return Response(
                 {
                     "action": "archived",

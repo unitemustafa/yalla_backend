@@ -1,7 +1,7 @@
 from datetime import datetime, time, timedelta
 
 from django.db.models import ProtectedError
-from django.db.models import Count, Max, Min, Prefetch, Q
+from django.db.models import Count, Exists, Max, Min, OuterRef, Prefetch, Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.generics import get_object_or_404
@@ -204,8 +204,17 @@ class AdminMarketListCreateView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
+        protected_markets = Market.objects.filter(pk=OuterRef("pk")).filter(
+            Q(orders__isnull=False)
+            | Q(order_sections__isnull=False)
+            | Q(products__variants__order_items__isnull=False)
+            | Q(products__variants__offer_items__isnull=False)
+        )
         markets = (
-            Market.objects.select_related("classification")
+            Market.objects.annotate(
+                deletion_mode_is_archive=Exists(protected_markets),
+            )
+            .select_related("classification")
             .prefetch_related(
                 "service_cities",
                 "delivery_areas",
@@ -213,6 +222,10 @@ class AdminMarketListCreateView(APIView):
             )
             .order_by("name", "id")
         )
+        if request.query_params.get("archived") in {"true", "1"}:
+            markets = markets.filter(archived_at__isnull=False)
+        else:
+            markets = markets.filter(archived_at__isnull=True)
         return Response(
             AdminMarketSerializer(
                 markets,
@@ -261,6 +274,15 @@ class AdminMarketDetailView(APIView):
 
     def patch(self, request, market_id):
         market = self.get_market(market_id)
+        if request.data.get("restore") is True:
+            market.archived_at = None
+            market.save(update_fields=("archived_at", "updated_at"))
+            return Response(
+                AdminMarketSerializer(
+                    market,
+                    context={"request": request},
+                ).data
+            )
         serializer = AdminMarketSerializer(
             market,
             data=request.data,
@@ -282,7 +304,8 @@ class AdminMarketDetailView(APIView):
             market.delete()
         except ProtectedError:
             market.status = Market.Status.INACTIVE
-            market.save(update_fields=("status", "updated_at"))
+            market.archived_at = timezone.now()
+            market.save(update_fields=("status", "archived_at", "updated_at"))
             return Response(
                 {
                     "action": "archived",

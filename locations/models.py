@@ -169,6 +169,25 @@ class DeliveryArea(models.Model):
     eta_max_minutes = models.PositiveIntegerField(blank=True, null=True)
 
     is_active = models.BooleanField(default=True)
+    archived_at = models.DateTimeField(blank=True, null=True, db_index=True)
+
+    def get_deletion_mode(self):
+        annotated_mode = getattr(self, "deletion_mode_is_archive", None)
+        if annotated_mode is not None:
+            return "archive" if annotated_mode else "delete"
+        from accounts.models import CourierProfile
+        from orders.models import Order
+
+        if CourierProfile.objects.filter(delivery_area=self).exists():
+            return "archive"
+        if Order.objects.filter(
+            models.Q(delivery_area=self)
+            | models.Q(delivery_address__delivery_area=self)
+        ).exists():
+            return "archive"
+        if self.addresses.filter(is_active=True).exists():
+            return "archive"
+        return "delete"
 
     class Meta:
         constraints = [

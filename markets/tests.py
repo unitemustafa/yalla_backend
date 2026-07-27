@@ -1266,7 +1266,31 @@ class HomeAPITests(APITestCase):
         self.assertEqual(response.data["action"], "archived")
         self.local_market.refresh_from_db()
         self.assertEqual(self.local_market.status, Market.Status.INACTIVE)
+        self.assertIsNotNone(self.local_market.archived_at)
         self.assertTrue(Order.objects.filter(pk=order.id).exists())
+        self.assertNotIn(
+            self.local_market.id,
+            [
+                item["id"]
+                for item in self.client.get(f"{HOME_BASE}/markets/").data
+            ],
+        )
+        archived_market = next(
+            item
+            for item in self.client.get(
+                f"{HOME_BASE}/markets/?archived=true"
+            ).data
+            if item["id"] == self.local_market.id
+        )
+        self.assertEqual(archived_market["deletion_mode"], "archive")
+
+        restore_response = self.client.patch(
+            f"{HOME_BASE}/markets/{self.local_market.id}/",
+            {"restore": True},
+            format="json",
+        )
+        self.assertEqual(restore_response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(restore_response.data["archived_at"])
 
     def test_admin_market_rejects_general_scope_with_service_city(self):
         classification = MarketClassification.objects.create(name="General only")
