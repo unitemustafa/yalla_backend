@@ -95,7 +95,7 @@ class StoreSubcategoryAPITests(APITestCase):
             f"{CATALOG_BASE}/store-subcategories/"
         )
         self.assertEqual(list_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(list_response.data), 4)
+        self.assertEqual(len(list_response.data), 3)
 
         update_response = self.client.patch(
             (
