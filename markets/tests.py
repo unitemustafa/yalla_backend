@@ -772,6 +772,41 @@ class HomeAPITests(APITestCase):
             farther_city.id,
         )
 
+    def test_market_region_detect_nearest_center_wins_over_broad_neighbour_radius(self):
+        broad_city = ServiceCity.objects.create(
+            name="Broad GPS City",
+            center_latitude=Decimal("10.0000000"),
+            center_longitude=Decimal("10.0000000"),
+            radius_km=Decimal("20.00"),
+        )
+        nearer_city = ServiceCity.objects.create(
+            name="Nearer Small GPS City",
+            center_latitude=Decimal("10.0800000"),
+            center_longitude=Decimal("10.0000000"),
+            radius_km=Decimal("2.00"),
+        )
+        self.authenticate()
+
+        response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {
+                "latitude": "10.0500000",
+                "longitude": "10.0000000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "suggest_switch")
+        self.assertEqual(
+            response.data["detected_region"]["service_city"]["id"],
+            nearer_city.id,
+        )
+        self.assertNotEqual(
+            response.data["detected_region"]["service_city"]["id"],
+            broad_city.id,
+        )
+
     def test_home_requires_saved_market_region(self):
         self.user.market_region_mode = None
         self.user.market_region_service_city = None
