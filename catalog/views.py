@@ -1,4 +1,4 @@
-from django.db.models import Count, Exists, OuterRef, ProtectedError, Q
+from django.db.models import Count, ProtectedError, Q
 from django.utils import timezone
 
 from rest_framework import serializers, status
@@ -66,14 +66,8 @@ class IsClientRole(BasePermission):
 
 
 def product_queryset():
-    protected_products = Product.objects.filter(pk=OuterRef("pk")).filter(
-        Q(variants__order_items__isnull=False)
-        | Q(variants__offer_items__isnull=False)
-    )
     return (
-        Product.objects.annotate(
-            deletion_mode_is_archive=Exists(protected_products),
-        ).select_related(
+        Product.objects.select_related(
             "market__classification",
             "category__classification",
             "subcategory",
@@ -617,25 +611,18 @@ class ProductDetailView(APIView):
 
     def delete(self, request, product_id):
         product = self.get_product(product_id)
-        try:
-            product.delete()
-        except ProtectedError:
-            product.is_available = False
-            product.archived_at = timezone.now()
-            product.save(
-                update_fields=("is_available", "archived_at", "updated_at")
-            )
-            return Response(
-                {
-                    "action": "archived",
-                    "detail": (
-                        "تمت أرشفة المنتج بدلًا من حذفه لأنه مرتبط "
-                        "بسجل طلبات سابق."
-                    ),
-                },
-                status=status.HTTP_200_OK,
-            )
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        product.is_available = False
+        product.archived_at = timezone.now()
+        product.save(
+            update_fields=("is_available", "archived_at", "updated_at")
+        )
+        return Response(
+            {
+                "action": "archived",
+                "detail": "تمت أرشفة المنتج ويمكن استعادته من الأرشيف.",
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class ProductSendNotificationView(APIView):

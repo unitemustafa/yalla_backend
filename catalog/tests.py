@@ -811,7 +811,7 @@ class AdditionClassificationAPITests(APITestCase):
         self.assertEqual(response.data["variants"][0]["id"], variant.id)
         self.assertEqual(self.product.variants.count(), 1)
 
-    def test_admin_can_create_read_update_and_delete_product(self):
+    def test_admin_can_create_read_update_and_archive_product(self):
         addition_classification = AdditionClassification.objects.create(
             name="إضافات الوجبات"
         )
@@ -915,8 +915,8 @@ class AdditionClassificationAPITests(APITestCase):
             format="json",
         )
         delete_response = self.client.delete(f"{CATALOG_BASE}/products/{product_id}/")
-        deleted_detail_response = self.client.get(
-            f"{CATALOG_BASE}/products/{product_id}/"
+        archived_list_response = self.client.get(
+            f"{CATALOG_BASE}/products/?archived=true"
         )
 
         self.assertEqual(list_response.status_code, status.HTTP_200_OK)
@@ -935,10 +935,11 @@ class AdditionClassificationAPITests(APITestCase):
         )
         self.assertEqual(update_response.data["variants"][0]["sku"], "MEAL-L")
         self.assertEqual(update_response.data["additions"], [])
-        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertEqual(
-            deleted_detail_response.status_code,
-            status.HTTP_404_NOT_FOUND,
+        self.assertEqual(delete_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(delete_response.data["action"], "archived")
+        self.assertIn(
+            product_id,
+            [item["id"] for item in archived_list_response.data],
         )
 
     @override_settings(MEDIA_ROOT="/tmp/yalla_catalog_legacy_image_test")
