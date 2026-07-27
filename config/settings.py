@@ -172,7 +172,17 @@ RATE_LIMIT_POLICY_RATES = {
     ),
     "snapshot_ip": _rate_limit_rates("snapshot_ip", "60/5m"),
     "share_ip": _rate_limit_rates("share_ip", "60/5m"),
+    "geocoding_user": _rate_limit_rates("geocoding_user", "30/1m"),
+    "geocoding_global": _rate_limit_rates("geocoding_global", "4/1s"),
 }
+
+GEOAPIFY_API_KEY = os.environ.get("GEOAPIFY_API_KEY", "").strip()
+GEOAPIFY_CONNECT_TIMEOUT = float(
+    os.environ.get("GEOAPIFY_CONNECT_TIMEOUT", "3")
+)
+GEOAPIFY_READ_TIMEOUT = float(
+    os.environ.get("GEOAPIFY_READ_TIMEOUT", "5")
+)
 
 CACHES = {
     "default": {
@@ -202,7 +212,29 @@ CACHES = {
                 "retry_on_timeout": False,
             },
         },
-    }
+    },
+    "geocoding": (
+        {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": RATE_LIMIT_REDIS_URL,
+            "KEY_PREFIX": "yalla-geocoding",
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "IGNORE_EXCEPTIONS": False,
+                "SOCKET_CONNECT_TIMEOUT": float(
+                    os.environ.get("RATE_LIMIT_CONNECT_TIMEOUT", "0.5")
+                ),
+                "SOCKET_TIMEOUT": float(
+                    os.environ.get("RATE_LIMIT_SOCKET_TIMEOUT", "0.2")
+                ),
+            },
+        }
+        if RATE_LIMIT_REDIS_URL
+        else {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "yalla-geocoding-cache",
+        }
+    ),
 }
 
 

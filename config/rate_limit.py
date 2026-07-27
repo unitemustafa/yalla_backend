@@ -163,6 +163,8 @@ POLICIES = {
     "notification_send_user": PolicyDefinition("sliding", "user"),
     "snapshot_ip": PolicyDefinition("fixed", "ip"),
     "share_ip": PolicyDefinition("fixed", "ip"),
+    "geocoding_user": PolicyDefinition("sliding", "user"),
+    "geocoding_global": PolicyDefinition("sliding", "global"),
 }
 
 
@@ -283,6 +285,8 @@ def _identity_for_policy(request, policy):
         if not user or not user.is_authenticated:
             return ""
         return _fingerprint("user", user.pk)
+    if policy.identity == "global":
+        return _fingerprint("global", "geoapify")
     value = _request_value(request, policy.fields)
     if not value:
         return ""

@@ -234,6 +234,8 @@ class AddressSerializer(serializers.ModelSerializer):
             "postalCode",
             "latitude",
             "longitude",
+            "formatted_address",
+            "place_id",
             "details",
             "manual_city",
             "manual_area",
@@ -333,6 +335,16 @@ class AddressWriteSerializer(serializers.Serializer):
     country = serializers.CharField(required=False, allow_blank=True)
     postalCode = serializers.CharField(required=False, allow_blank=True)
     postal_code = serializers.CharField(required=False, allow_blank=True)
+    formatted_address = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=500,
+    )
+    place_id = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=255,
+    )
     latitude = serializers.DecimalField(
         max_digits=10,
         decimal_places=7,
@@ -504,6 +516,16 @@ class AddressWriteSerializer(serializers.Serializer):
         attrs["normalized_service_city"] = service_city
         attrs["normalized_delivery_area"] = delivery_area
         attrs["normalized_delivery_type"] = delivery_type
+        attrs["normalized_formatted_address"] = self._clean_text(
+            attrs["formatted_address"]
+            if "formatted_address" in attrs
+            else getattr(self.instance, "formatted_address", "")
+        )
+        attrs["normalized_place_id"] = self._clean_text(
+            attrs["place_id"]
+            if "place_id" in attrs
+            else getattr(self.instance, "place_id", "")
+        )
         attrs["normalized_default"] = attrs.get(
             "is_default",
             attrs.get(
@@ -522,6 +544,8 @@ class AddressWriteSerializer(serializers.Serializer):
             manual_area=validated_data["normalized_manual_area"],
             latitude=validated_data["normalized_latitude"],
             longitude=validated_data["normalized_longitude"],
+            formatted_address=validated_data["normalized_formatted_address"],
+            place_id=validated_data["normalized_place_id"],
             service_city=validated_data["normalized_service_city"],
             delivery_area=validated_data["normalized_delivery_area"],
             delivery_type=validated_data["normalized_delivery_type"],
@@ -535,6 +559,8 @@ class AddressWriteSerializer(serializers.Serializer):
         instance.manual_area = validated_data["normalized_manual_area"]
         instance.latitude = validated_data["normalized_latitude"]
         instance.longitude = validated_data["normalized_longitude"]
+        instance.formatted_address = validated_data["normalized_formatted_address"]
+        instance.place_id = validated_data["normalized_place_id"]
         instance.service_city = validated_data["normalized_service_city"]
         instance.delivery_area = validated_data["normalized_delivery_area"]
         instance.delivery_type = validated_data["normalized_delivery_type"]
@@ -547,6 +573,8 @@ class AddressWriteSerializer(serializers.Serializer):
                 "manual_area",
                 "latitude",
                 "longitude",
+                "formatted_address",
+                "place_id",
                 "service_city",
                 "delivery_area",
                 "delivery_type",
@@ -561,6 +589,10 @@ class AddressWriteSerializer(serializers.Serializer):
             return None
         value = str(value).strip()
         return value or None
+
+    @staticmethod
+    def _clean_text(value):
+        return str(value or "").strip()
 
     def _normalized_name(self, attrs):
         explicit_name = (

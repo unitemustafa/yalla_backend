@@ -71,6 +71,8 @@ class AddressAPITests(TestCase):
                 "delivery_area_id": self.delivery_area.id,
                 "latitude": "30.0444000",
                 "longitude": "31.2357000",
+                "formatted_address": "Home street, Cairo, Egypt",
+                "place_id": "geo-home",
                 "is_default": True,
             },
             format="json",
@@ -81,6 +83,8 @@ class AddressAPITests(TestCase):
         self.assertEqual(address.name, "Home")
         self.assertEqual(address.latitude, Decimal("30.0444000"))
         self.assertEqual(address.longitude, Decimal("31.2357000"))
+        self.assertEqual(address.formatted_address, "Home street, Cairo, Egypt")
+        self.assertEqual(address.place_id, "geo-home")
         self.assertEqual(address.service_city_id, self.service_city.id)
         self.assertEqual(address.delivery_area_id, self.delivery_area.id)
         self.assertEqual(address.delivery_type, Address.DeliveryType.FIXED_AREA)
@@ -93,6 +97,11 @@ class AddressAPITests(TestCase):
         self.assertEqual(response.data[0]["details"], "Home street")
         self.assertEqual(response.data[0]["line1"], "Home street")
         self.assertEqual(response.data[0]["street"], "Home street")
+        self.assertEqual(
+            response.data[0]["formatted_address"],
+            "Home street, Cairo, Egypt",
+        )
+        self.assertEqual(response.data[0]["place_id"], "geo-home")
         self.assertEqual(response.data[0]["delivery_area"]["id"], self.delivery_area.id)
         self.assertEqual(response.data[0]["delivery_type"], Address.DeliveryType.FIXED_AREA)
         self.assertEqual(response.data[0]["delivery_price_preview"], "50.00")
