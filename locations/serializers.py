@@ -11,6 +11,7 @@ class ServiceCitySerializer(serializers.ModelSerializer):
     delivery_area_count = serializers.SerializerMethodField()
     market_count = serializers.SerializerMethodField()
     offer_count = serializers.SerializerMethodField()
+    deletion_mode = serializers.SerializerMethodField()
 
     class Meta:
         model = ServiceCity
@@ -22,16 +23,23 @@ class ServiceCitySerializer(serializers.ModelSerializer):
             "radius_km",
             "delivery_price",
             "is_active",
+            "archived_at",
+            "deletion_mode",
             "delivery_area_count",
             "market_count",
             "offer_count",
         )
         read_only_fields = (
             "id",
+            "archived_at",
+            "deletion_mode",
             "delivery_area_count",
             "market_count",
             "offer_count",
         )
+
+    def get_deletion_mode(self, instance):
+        return instance.get_deletion_mode()
 
     def get_delivery_area_count(self, instance):
         count = getattr(instance, "delivery_area_count", None)

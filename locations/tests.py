@@ -906,6 +906,7 @@ class LocationManagementAPITests(TestCase):
         self.assertTrue(ServiceCity.objects.filter(pk=city.id).exists())
         city.refresh_from_db()
         self.assertFalse(city.is_active)
+        self.assertIsNotNone(city.archived_at)
         return response
 
     def test_service_city_with_delivery_areas_is_not_deleted(self):
@@ -917,6 +918,40 @@ class LocationManagementAPITests(TestCase):
         )
 
         self.assert_service_city_delete_archived(city, "delivery_areas")
+
+    def test_archived_service_city_is_hidden_and_can_be_restored(self):
+        city = ServiceCity.objects.create(name="Restorable City")
+        DeliveryArea.objects.create(
+            service_city=city,
+            name="Restorable Area",
+            delivery_price=Decimal("20.00"),
+        )
+
+        current_before = self.client.get("/api/v1/locations/service-cities/")
+        city_before = next(
+            item for item in current_before.data if item["id"] == city.id
+        )
+        self.assertEqual(city_before["deletion_mode"], "archive")
+
+        self.assert_service_city_delete_archived(city, "delivery_areas")
+
+        current_after = self.client.get("/api/v1/locations/service-cities/")
+        archived = self.client.get(
+            "/api/v1/locations/service-cities/?archived=true"
+        )
+        self.assertNotIn(city.id, [item["id"] for item in current_after.data])
+        self.assertIn(city.id, [item["id"] for item in archived.data])
+
+        restored = self.client.patch(
+            f"/api/v1/locations/service-cities/{city.id}/",
+            {"restore": True},
+            format="json",
+        )
+        self.assertEqual(restored.status_code, status.HTTP_200_OK)
+        self.assertIsNone(restored.data["archived_at"])
+        self.assertEqual(restored.data["deletion_mode"], "archive")
+        city.refresh_from_db()
+        self.assertIsNone(city.archived_at)
 
     def test_service_city_with_markets_is_not_deleted(self):
         city = ServiceCity.objects.create(name="Market City")

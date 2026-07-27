@@ -38,7 +38,17 @@ class ProtectedDeleteMixin:
 
 
 def service_city_queryset():
+    protected_cities = ServiceCity.objects.filter(pk=OuterRef("pk")).filter(
+        Q(delivery_areas__isnull=False)
+        | Q(markets__isnull=False)
+        | Q(offers__isnull=False)
+        | Q(courier_profiles__user__deleted_at__isnull=True)
+        | Q(addresses__user__deleted_at__isnull=True)
+        | Q(orders__isnull=False)
+        | Q(market_region_users__deleted_at__isnull=True)
+    )
     return ServiceCity.objects.annotate(
+        deletion_mode_is_archive=Exists(protected_cities),
         delivery_area_count=Count("delivery_areas", distinct=True),
         market_count=Count("markets", distinct=True),
         offer_count=Count("offers", distinct=True),
@@ -71,7 +81,10 @@ class ServiceCityListCreateView(generics.ListCreateAPIView):
     serializer_class = ServiceCitySerializer
 
     def get_queryset(self):
-        return service_city_queryset()
+        queryset = service_city_queryset()
+        if self.request.query_params.get("archived") in {"true", "1"}:
+            return queryset.filter(archived_at__isnull=False)
+        return queryset.filter(archived_at__isnull=True)
 
 
 class ServiceCityDetailView(
@@ -83,6 +96,15 @@ class ServiceCityDetailView(
 
     def get_queryset(self):
         return service_city_queryset()
+
+    def partial_update(self, request, *args, **kwargs):
+        city = self.get_object()
+        if request.data.get("restore") is True:
+            city.archived_at = None
+            city.save(update_fields=("archived_at",))
+            city = self.get_queryset().get(pk=city.pk)
+            return Response(self.get_serializer(city).data)
+        return super().partial_update(request, *args, **kwargs)
 
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
@@ -112,7 +134,8 @@ class ServiceCityDetailView(
         relations = service_city_relation_counts(city)
         if relations:
             city.is_active = False
-            city.save(update_fields=("is_active",))
+            city.archived_at = timezone.now()
+            city.save(update_fields=("is_active", "archived_at"))
             return Response(
                 {
                     "action": "archived",
