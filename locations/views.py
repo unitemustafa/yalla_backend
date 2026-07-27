@@ -65,25 +65,6 @@ def service_city_relation_counts(city):
     return {key: value for key, value in checks.items() if value}
 
 
-def service_city_relation_message(city, relations):
-    labels = {
-        "delivery_areas": "مناطق التوصيل",
-        "markets": "المحلات",
-        "offers": "العروض",
-        "couriers": "المندوبون",
-        "addresses": "عناوين العملاء",
-        "orders": "الطلبات",
-        "users": "حسابات العملاء",
-    }
-    linked_data = "، ".join(
-        f"{labels.get(key, key)} ({count})" for key, count in relations.items()
-    )
-    return (
-        f"لا يمكن حذف مدينة {city.name} لأنها مرتبطة بـ: {linked_data}. "
-        "انقل أو احذف هذه البيانات أولًا."
-    )
-
-
 class ServiceCityListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
     serializer_class = ServiceCitySerializer
@@ -129,13 +110,18 @@ class ServiceCityDetailView(
         )
         relations = service_city_relation_counts(city)
         if relations:
+            city.is_active = False
+            city.save(update_fields=("is_active",))
             return Response(
                 {
-                    "detail": service_city_relation_message(city, relations),
-                    "code": "service_city_in_use",
+                    "action": "archived",
+                    "detail": (
+                        f"تمت أرشفة مدينة {city.name} وتعطيلها لأنها "
+                        "مرتبطة ببيانات مستخدمة."
+                    ),
                     "relations": relations,
                 },
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_200_OK,
             )
 
         city.delete()
@@ -188,15 +174,6 @@ class DeliveryAreaDetailView(
     protected_error_message = (
         "Delivery area cannot be deleted while representatives are using it."
     )
-    courier_error_message = (
-        "لا يمكن حذف منطقة التوصيل لأنها مستخدمة بواسطة مندوبين."
-    )
-    order_error_message = (
-        "لا يمكن حذف منطقة التوصيل لوجود طلبات مرتبطة بها."
-    )
-    address_error_message = (
-        "لا يمكن حذف منطقة التوصيل لوجود عناوين محفوظة مرتبطة بها."
-    )
 
     def get_queryset(self):
         queryset = DeliveryArea.objects.select_related("service_city")
@@ -218,6 +195,25 @@ class DeliveryAreaDetailView(
                 )
             )
 
+    def archive(self, area, detail):
+        was_active = area.is_active
+        if was_active:
+            area.is_active = False
+            area.save(update_fields=("is_active",))
+            transaction.on_commit(
+                lambda area_id=area.id: _send_delivery_area_status_change(
+                    area_id,
+                    False,
+                )
+            )
+        return Response(
+            {
+                "action": "archived",
+                "detail": detail,
+            },
+            status=status.HTTP_200_OK,
+        )
+
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         area = generics.get_object_or_404(
@@ -226,9 +222,9 @@ class DeliveryAreaDetailView(
         )
 
         if CourierProfile.objects.filter(delivery_area=area).exists():
-            return Response(
-                {"detail": self.courier_error_message},
-                status=status.HTTP_400_BAD_REQUEST,
+            return self.archive(
+                area,
+                "تمت أرشفة منطقة التوصيل لأنها مستخدمة بواسطة مندوبين.",
             )
 
         if Order.objects.filter(
@@ -236,9 +232,9 @@ class DeliveryAreaDetailView(
         ).exists() or Order.objects.filter(
             delivery_address__delivery_area=area,
         ).exists():
-            return Response(
-                {"detail": self.order_error_message},
-                status=status.HTTP_400_BAD_REQUEST,
+            return self.archive(
+                area,
+                "تمت أرشفة منطقة التوصيل لأنها مرتبطة بسجل طلبات سابق.",
             )
 
         stale_addresses = Address.objects.filter(
@@ -249,15 +245,15 @@ class DeliveryAreaDetailView(
         try:
             stale_addresses.delete()
         except ProtectedError:
-            return Response(
-                {"detail": self.order_error_message},
-                status=status.HTTP_400_BAD_REQUEST,
+            return self.archive(
+                area,
+                "تمت أرشفة منطقة التوصيل لأنها مرتبطة بسجل طلبات سابق.",
             )
 
         if Address.objects.filter(delivery_area=area, is_active=True).exists():
-            return Response(
-                {"detail": self.address_error_message},
-                status=status.HTTP_400_BAD_REQUEST,
+            return self.archive(
+                area,
+                "تمت أرشفة منطقة التوصيل لأنها مرتبطة بعناوين محفوظة.",
             )
 
         area.markets.clear()

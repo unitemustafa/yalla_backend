@@ -222,14 +222,19 @@ class OfferDetailView(APIView):
         try:
             offer.delete()
         except ProtectedError:
+            offer.status = Offer.Status.INACTIVE
+            offer.save(update_fields=("status", "updated_at"))
             return Response(
-                {"detail": "Cannot delete offer while orders are using it."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {
+                    "action": "archived",
+                    "detail": (
+                        "تمت أرشفة العرض بدلًا من حذفه لأنه مرتبط "
+                        "بسجل طلبات سابق."
+                    ),
+                },
+                status=status.HTTP_200_OK,
             )
-        return Response(
-            {"details": "Deleted Successfully"},
-            status=status.HTTP_200_OK,
-        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @staticmethod
     def _require_admin(request):

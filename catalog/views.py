@@ -168,15 +168,18 @@ class StoreSubcategoryDetailView(APIView):
     def delete(self, request, subcategory_id):
         subcategory = self.get_subcategory(subcategory_id)
         if subcategory.product_count:
+            subcategory.is_active = False
+            subcategory.save(update_fields=("is_active", "updated_at"))
             return Response(
                 {
                     "detail": (
-                        "Cannot delete a store subcategory while products "
-                        "are using it."
+                        "تمت أرشفة الفئة الداخلية وتعطيلها لأنها مستخدمة "
+                        "بواسطة منتجات حالية."
                     ),
+                    "action": "archived",
                     "product_count": subcategory.product_count,
                 },
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_200_OK,
             )
         subcategory.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -595,14 +598,19 @@ class ProductDetailView(APIView):
         try:
             product.delete()
         except ProtectedError:
+            product.is_available = False
+            product.save(update_fields=("is_available", "updated_at"))
             return Response(
-                {"detail": "Cannot delete product while orders are using it."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {
+                    "action": "archived",
+                    "detail": (
+                        "تمت أرشفة المنتج بدلًا من حذفه لأنه مرتبط "
+                        "بسجل طلبات سابق."
+                    ),
+                },
+                status=status.HTTP_200_OK,
             )
-        return Response(
-            {"details": "Deleted Successfully"},
-            status=status.HTTP_204_NO_CONTENT,
-        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ProductSendNotificationView(APIView):

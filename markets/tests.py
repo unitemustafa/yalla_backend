@@ -1144,7 +1144,7 @@ class HomeAPITests(APITestCase):
             MarketClassification.ClassificationType.NORMAL,
         )
 
-    def test_market_classification_delete_rejects_used_classification(self):
+    def test_market_classification_delete_archives_used_classification(self):
         self.authenticate(self.admin)
 
         response = self.client.delete(
@@ -1152,7 +1152,10 @@ class HomeAPITests(APITestCase):
             f"{self.local_classification.id}/"
         )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "archived")
+        self.local_classification.refresh_from_db()
+        self.assertFalse(self.local_classification.is_active)
 
     def test_market_crud_requires_admin_role(self):
         self.authenticate()
@@ -1242,6 +1245,28 @@ class HomeAPITests(APITestCase):
             deleted_detail_response.status_code,
             status.HTTP_404_NOT_FOUND,
         )
+
+    def test_admin_delete_archives_market_used_by_order(self):
+        self.authenticate(self.admin)
+        order = Order.objects.create(
+            user=self.user,
+            market=self.local_market,
+            service_city=self.service_city,
+            order_scope=Order.Scope.SERVICE_CITY,
+            payment_method="cash",
+            subtotal_price=Decimal("100.00"),
+            total_price=Decimal("100.00"),
+        )
+
+        response = self.client.delete(
+            f"{HOME_BASE}/markets/{self.local_market.id}/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "archived")
+        self.local_market.refresh_from_db()
+        self.assertEqual(self.local_market.status, Market.Status.INACTIVE)
+        self.assertTrue(Order.objects.filter(pk=order.id).exists())
 
     def test_admin_market_rejects_general_scope_with_service_city(self):
         classification = MarketClassification.objects.create(name="General only")

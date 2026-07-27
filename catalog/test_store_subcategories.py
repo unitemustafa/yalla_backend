@@ -181,7 +181,7 @@ class StoreSubcategoryAPITests(APITestCase):
         self.assertTrue(valid.is_valid(), valid.errors)
         self.assertEqual(valid.save().subcategory_id, self.meals.id)
 
-    def test_used_subcategory_cannot_be_unassigned_or_deleted(self):
+    def test_used_subcategory_cannot_be_unassigned_and_is_archived_on_delete(self):
         market = self.create_market()
         product = Product.objects.create(
             market=market,
@@ -212,9 +212,12 @@ class StoreSubcategoryAPITests(APITestCase):
         response = self.client.delete(
             f"{CATALOG_BASE}/store-subcategories/{self.drinks.id}/"
         )
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "archived")
         self.assertEqual(response.data["product_count"], 1)
         self.assertTrue(Product.objects.filter(pk=product.pk).exists())
+        self.drinks.refresh_from_db()
+        self.assertFalse(self.drinks.is_active)
 
     def test_inactive_subcategory_stays_on_existing_product_but_rejects_new_use(self):
         market = self.create_market()

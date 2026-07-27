@@ -185,19 +185,19 @@ class AdminMarketClassificationDetailView(APIView):
         try:
             classification.delete()
         except ProtectedError:
+            classification.is_active = False
+            classification.save(update_fields=("is_active",))
             return Response(
                 {
+                    "action": "archived",
                     "detail": (
-                        "Cannot delete market classification while markets "
-                        "are using it."
-                    )
+                        "تمت أرشفة فئة المحل وتعطيلها لأنها مستخدمة "
+                        "بواسطة محلات حالية."
+                    ),
                 },
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_200_OK,
             )
-        return Response(
-            {"details": "Deleted Successfully"},
-            status=status.HTTP_204_NO_CONTENT,
-        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AdminMarketListCreateView(APIView):
@@ -281,9 +281,17 @@ class AdminMarketDetailView(APIView):
         try:
             market.delete()
         except ProtectedError:
+            market.status = Market.Status.INACTIVE
+            market.save(update_fields=("status", "updated_at"))
             return Response(
-                {"detail": "Cannot delete market while orders are using it."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {
+                    "action": "archived",
+                    "detail": (
+                        "تمت أرشفة المحل بدلًا من حذفه لأنه مرتبط "
+                        "بسجل طلبات سابق."
+                    ),
+                },
+                status=status.HTTP_200_OK,
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
 

@@ -14,6 +14,7 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from markets.models import Market, MarketClassification
+from orders.models import Order, OrderItem
 
 from .models import (
     AdditionClassification,
@@ -117,6 +118,35 @@ class AdditionClassificationAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_admin_delete_archives_product_used_by_order(self):
+        self.authenticate(self.admin)
+        variant = ProductVariant.objects.create(
+            product=self.product,
+            price=Decimal("100.00"),
+        )
+        order = Order.objects.create(
+            user=self.client_user,
+            market=self.market,
+            payment_method="cash",
+            subtotal_price=Decimal("100.00"),
+            total_price=Decimal("100.00"),
+        )
+        OrderItem.objects.create(
+            order=order,
+            variant=variant,
+            quantity=1,
+            unit_price=Decimal("100.00"),
+        )
+
+        response = self.client.delete(
+            f"{CATALOG_BASE}/products/{self.product.id}/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "archived")
+        self.product.refresh_from_db()
+        self.assertFalse(self.product.is_available)
 
     def test_addition_classification_create_requires_admin_role(self):
         self.authenticate(self.client_user)

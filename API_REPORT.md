@@ -450,12 +450,12 @@ Captured general/manual address item:
 Delete behavior:
 
 - Address delete is soft delete: `is_active=False`; response returns remaining active addresses.
-- Service city delete is blocked when linked rows exist and returns:
+- A service city with linked rows is archived and disabled:
 
 ```json
 {
-  "detail": "لا يمكن حذف المدينة لوجود بيانات مرتبطة بها.",
-  "code": "service_city_in_use",
+  "action": "archived",
+  "detail": "تمت أرشفة مدينة القاهرة وتعطيلها لأنها مرتبطة ببيانات مستخدمة.",
   "relations": {"delivery_areas": 1}
 }
 ```
@@ -1580,15 +1580,26 @@ Image upload error captured through dashboard invalid logo:
 }
 ```
 
-Delete blockers:
+Delete/archive behavior:
 
 ```json
-{"detail": "Cannot delete product while orders are using it."}
+{
+  "action": "archived",
+  "detail": "تمت أرشفة المنتج بدلًا من حذفه لأنه مرتبط بسجل طلبات سابق."
+}
 ```
 
 ```json
-{"detail": "Cannot delete offer while orders are using it."}
+{
+  "action": "archived",
+  "detail": "تمت أرشفة العرض بدلًا من حذفه لأنه مرتبط بسجل طلبات سابق."
+}
 ```
+
+- Unused products, offers, markets, delivery areas, cities, and classifications
+  return `204` and are permanently deleted.
+- Records protected by historical orders or other active dependencies are
+  retained and deactivated with a `200` response and `action=archived`.
 
 ```json
 {"detail": "Unresolved blocking notifications cannot be deleted."}

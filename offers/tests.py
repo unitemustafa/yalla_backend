@@ -746,7 +746,7 @@ class OfferAPITests(APITestCase):
         send_push.assert_called_once()
         logger.exception.assert_called_once()
 
-    def test_admin_delete_rejects_offer_used_by_order(self):
+    def test_admin_delete_archives_offer_used_by_order(self):
         self.authenticate(self.admin)
         offer = self.create_offer(cities=[self.city])
         order = Order.objects.create(
@@ -762,12 +762,15 @@ class OfferAPITests(APITestCase):
 
         response = self.client.delete(f"{OFFERS_BASE}/{offer.id}/")
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "archived")
         self.assertEqual(
             response.data["detail"],
-            "Cannot delete offer while orders are using it.",
+            "تمت أرشفة العرض بدلًا من حذفه لأنه مرتبط بسجل طلبات سابق.",
         )
         self.assertTrue(Offer.objects.filter(id=offer.id).exists())
+        offer.refresh_from_db()
+        self.assertEqual(offer.status, Offer.Status.INACTIVE)
 
     @patch("notifications.offer_services.send_notifications_push")
     def test_push_opt_out_creates_no_notification(self, send_push):
