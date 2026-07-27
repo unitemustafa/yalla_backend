@@ -746,6 +746,21 @@ class OfferAPITests(APITestCase):
         send_push.assert_called_once()
         logger.exception.assert_called_once()
 
+    def test_admin_delete_removes_unused_offer(self):
+        self.authenticate(self.admin)
+        offer = self.create_offer(cities=[self.city])
+
+        listed_offer = next(
+            item
+            for item in self.client.get(f"{OFFERS_BASE}/").data
+            if item["id"] == offer.id
+        )
+        response = self.client.delete(f"{OFFERS_BASE}/{offer.id}/")
+
+        self.assertEqual(listed_offer["deletion_mode"], "delete")
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Offer.objects.filter(pk=offer.id).exists())
+
     def test_admin_delete_archives_offer_used_by_order(self):
         self.authenticate(self.admin)
         offer = self.create_offer(cities=[self.city])

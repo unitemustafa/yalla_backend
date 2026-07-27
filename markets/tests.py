@@ -1220,6 +1220,7 @@ class HomeAPITests(APITestCase):
         listed_market = next(
             item for item in list_response.data if item["id"] == market_id
         )
+        self.assertEqual(listed_market["deletion_mode"], "delete")
         self.assertEqual(
             [area["id"] for area in listed_market["delivery_areas"]],
             [self.local_area.id],

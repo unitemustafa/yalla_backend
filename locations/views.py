@@ -42,10 +42,19 @@ def service_city_queryset():
         Q(delivery_areas__isnull=False)
         | Q(markets__isnull=False)
         | Q(offers__isnull=False)
-        | Q(courier_profiles__user__deleted_at__isnull=True)
-        | Q(addresses__user__deleted_at__isnull=True)
+        | Q(
+            courier_profiles__isnull=False,
+            courier_profiles__user__deleted_at__isnull=True,
+        )
+        | Q(
+            addresses__isnull=False,
+            addresses__user__deleted_at__isnull=True,
+        )
         | Q(orders__isnull=False)
-        | Q(market_region_users__deleted_at__isnull=True)
+        | Q(
+            market_region_users__isnull=False,
+            market_region_users__deleted_at__isnull=True,
+        )
     )
     return ServiceCity.objects.annotate(
         deletion_mode_is_archive=Exists(protected_cities),

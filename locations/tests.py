@@ -890,8 +890,16 @@ class LocationManagementAPITests(TestCase):
     def test_empty_service_city_deletes_successfully(self):
         city = ServiceCity.objects.create(name="Empty City")
 
+        listed_city = next(
+            item
+            for item in self.client.get(
+                "/api/v1/locations/service-cities/"
+            ).data
+            if item["id"] == city.id
+        )
         response = self.client.delete(f"/api/v1/locations/service-cities/{city.id}/")
 
+        self.assertEqual(listed_city["deletion_mode"], "delete")
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(ServiceCity.objects.filter(pk=city.id).exists())
 
@@ -1001,10 +1009,18 @@ class LocationManagementAPITests(TestCase):
         courier.deleted_at = timezone.now()
         courier.save(update_fields=["deleted_at"])
 
+        listed_city = next(
+            item
+            for item in self.client.get(
+                "/api/v1/locations/service-cities/"
+            ).data
+            if item["id"] == city.id
+        )
         response = self.client.delete(
             f"/api/v1/locations/service-cities/{city.id}/"
         )
 
+        self.assertEqual(listed_city["deletion_mode"], "delete")
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(ServiceCity.objects.filter(pk=city.id).exists())
         self.assertFalse(CourierProfile.objects.filter(pk=profile.id).exists())
@@ -1030,10 +1046,18 @@ class LocationManagementAPITests(TestCase):
         client.deleted_at = timezone.now()
         client.save(update_fields=["deleted_at"])
 
+        listed_city = next(
+            item
+            for item in self.client.get(
+                "/api/v1/locations/service-cities/"
+            ).data
+            if item["id"] == city.id
+        )
         response = self.client.delete(
             f"/api/v1/locations/service-cities/{city.id}/"
         )
 
+        self.assertEqual(listed_city["deletion_mode"], "delete")
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(ServiceCity.objects.filter(pk=city.id).exists())
         self.assertFalse(Address.objects.filter(pk=address.id).exists())
@@ -1128,8 +1152,16 @@ class LocationManagementAPITests(TestCase):
     def test_delivery_area_without_relations_deletes(self):
         area = self.create_area("Unused Area")
 
+        listed_area = next(
+            item
+            for item in self.client.get(
+                "/api/v1/locations/delivery-areas/"
+            ).data
+            if item["id"] == area.id
+        )
         response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
 
+        self.assertEqual(listed_area["deletion_mode"], "delete")
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(DeliveryArea.objects.filter(pk=area.id).exists())
 
