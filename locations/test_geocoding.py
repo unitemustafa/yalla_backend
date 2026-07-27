@@ -196,3 +196,66 @@ class GeocodingAPITests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
         get.assert_not_called()
+
+    def test_city_coverage_lookup_requires_admin(self):
+        response = self.client.get(
+            "/api/v1/locations/service-cities/coverage-lookup/",
+            {"q": "القاهرة"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_city_coverage_lookup_calculates_circle_from_bbox(self):
+        self.user.role = User.Role.ADMIN
+        self.user.save(update_fields=("role",))
+        upstream = self.provider_response(
+            [
+                {
+                    "city": "القاهرة",
+                    "formatted": "القاهرة، مصر",
+                    "country_code": "eg",
+                    "result_type": "city",
+                    "lat": 30.0444,
+                    "lon": 31.2357,
+                    "bbox": {
+                        "lon1": 30.5,
+                        "lat1": 29.5,
+                        "lon2": 31.5,
+                        "lat2": 30.5,
+                    },
+                }
+            ]
+        )
+        with patch("locations.geocoding.requests.get", return_value=upstream) as get:
+            response = self.client.get(
+                "/api/v1/locations/service-cities/coverage-lookup/",
+                {"q": "القاهرة", "lang": "ar"},
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        coverage = response.data["coverage"]
+        self.assertEqual(coverage["latitude"], 30.0)
+        self.assertEqual(coverage["longitude"], 31.0)
+        self.assertGreater(coverage["radius_km"], 70)
+        self.assertLess(coverage["radius_km"], 75)
+        params = get.call_args.kwargs["params"]
+        self.assertEqual(params["type"], "city")
+        self.assertEqual(params["filter"], "countrycode:eg")
+        self.assertEqual(params["format"], "json")
+        self.assertEqual(params["limit"], 5)
+        self.assertEqual(params["apiKey"], "backend-secret")
+
+    def test_admin_city_coverage_lookup_returns_not_found_without_bbox(self):
+        self.user.role = User.Role.ADMIN
+        self.user.save(update_fields=("role",))
+        upstream = self.provider_response(
+            [{"city": "Unknown", "lat": 30.0, "lon": 31.0}]
+        )
+        with patch("locations.geocoding.requests.get", return_value=upstream):
+            response = self.client.get(
+                "/api/v1/locations/service-cities/coverage-lookup/",
+                {"q": "Unknown"},
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data["code"], "city_not_found")

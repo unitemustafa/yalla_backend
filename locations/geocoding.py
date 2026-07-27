@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 
 import requests
 from django.conf import settings
@@ -9,9 +10,12 @@ from config.rate_limit import evaluate_rate_limit, rate_limit_mode
 
 
 AUTOCOMPLETE_URL = "https://api.geoapify.com/v1/geocode/autocomplete"
+FORWARD_URL = "https://api.geoapify.com/v1/geocode/search"
 REVERSE_URL = "https://api.geoapify.com/v1/geocode/reverse"
 AUTOCOMPLETE_CACHE_SECONDS = 5 * 60
+CITY_COVERAGE_CACHE_SECONDS = 30 * 24 * 60 * 60
 REVERSE_CACHE_SECONDS = 24 * 60 * 60
+EARTH_RADIUS_KM = 6371.0088
 
 
 class GeoapifyUnavailable(Exception):
@@ -96,6 +100,45 @@ def reverse(*, latitude, longitude, language, request):
     return location
 
 
+def city_coverage(*, query, language, request):
+    normalized_query = " ".join(query.strip().split())
+    cache_key = _cache_key(
+        "city-coverage",
+        {
+            "q": normalized_query.casefold(),
+            "lang": language,
+        },
+    )
+    cached = caches["geocoding"].get(cache_key)
+    if cached is not None:
+        return cached.get("coverage")
+
+    payload = _provider_get(
+        FORWARD_URL,
+        {
+            "text": normalized_query,
+            "type": "city",
+            "format": "json",
+            "filter": "countrycode:eg",
+            "lang": language,
+            "limit": 5,
+        },
+        request=request,
+    )
+    coverage = None
+    for item in payload.get("results", []):
+        coverage = _city_coverage_from_result(item)
+        if coverage is not None:
+            break
+
+    caches["geocoding"].set(
+        cache_key,
+        {"coverage": coverage},
+        timeout=CITY_COVERAGE_CACHE_SECONDS,
+    )
+    return coverage
+
+
 def _provider_get(url, params, *, request):
     decision = evaluate_rate_limit(request, ("geocoding_global",))
     if not decision.allowed and rate_limit_mode() == "enforce":
@@ -149,6 +192,64 @@ def _normalize_result(item):
         "result_type": _optional_text(item.get("result_type")),
         "distance_meters": _optional_float(distance),
     }
+
+
+def _city_coverage_from_result(item):
+    bbox = item.get("bbox")
+    if not isinstance(bbox, dict):
+        return None
+    try:
+        west = float(bbox["lon1"])
+        south = float(bbox["lat1"])
+        east = float(bbox["lon2"])
+        north = float(bbox["lat2"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (
+        -180 <= west <= 180
+        and -180 <= east <= 180
+        and -90 <= south <= 90
+        and -90 <= north <= 90
+        and west < east
+        and south < north
+    ):
+        return None
+
+    latitude = (south + north) / 2
+    longitude = (west + east) / 2
+    radius_km = max(
+        _haversine_km(latitude, longitude, corner_latitude, corner_longitude)
+        for corner_latitude in (south, north)
+        for corner_longitude in (west, east)
+    )
+    return {
+        "name": _optional_text(item.get("city") or item.get("name")),
+        "formatted_address": _optional_text(item.get("formatted")),
+        "latitude": round(latitude, 7),
+        "longitude": round(longitude, 7),
+        "radius_km": round(max(radius_km, 0.1), 2),
+        "bounding_box": {
+            "west": west,
+            "south": south,
+            "east": east,
+            "north": north,
+        },
+        "source": "Geoapify / OpenStreetMap",
+    }
+
+
+def _haversine_km(latitude_a, longitude_a, latitude_b, longitude_b):
+    latitude_a = math.radians(latitude_a)
+    latitude_b = math.radians(latitude_b)
+    latitude_delta = latitude_b - latitude_a
+    longitude_delta = math.radians(longitude_b - longitude_a)
+    value = (
+        math.sin(latitude_delta / 2) ** 2
+        + math.cos(latitude_a)
+        * math.cos(latitude_b)
+        * math.sin(longitude_delta / 2) ** 2
+    )
+    return 2 * EARTH_RADIUS_KM * math.asin(min(1, math.sqrt(value)))
 
 
 def _optional_text(value):

@@ -3,10 +3,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.views import IsAdminRole
+
 from .geocoding import (
     GeoapifyRateLimited,
     GeoapifyUnavailable,
     autocomplete,
+    city_coverage,
     reverse,
 )
 
@@ -21,6 +24,11 @@ class AutocompleteQuerySerializer(serializers.Serializer):
 class ReverseQuerySerializer(serializers.Serializer):
     latitude = serializers.FloatField(min_value=-90, max_value=90)
     longitude = serializers.FloatField(min_value=-180, max_value=180)
+    lang = serializers.ChoiceField(choices=("ar", "en"), default="ar")
+
+
+class CityCoverageQuerySerializer(serializers.Serializer):
+    q = serializers.CharField(min_length=2, max_length=100, trim_whitespace=True)
     lang = serializers.ChoiceField(choices=("ar", "en"), default="ar")
 
 
@@ -91,3 +99,30 @@ class GeocodingReverseView(_GeoapifyView):
             if isinstance(result, Response)
             else Response({"location": result})
         )
+
+
+class CityCoverageLookupView(_GeoapifyView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        serializer = CityCoverageQuerySerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        params = serializer.validated_data
+        result = self.provider_response(
+            lambda: city_coverage(
+                query=params["q"],
+                language=params["lang"],
+                request=request,
+            )
+        )
+        if isinstance(result, Response):
+            return result
+        if result is None:
+            return Response(
+                {
+                    "code": "city_not_found",
+                    "detail": "تعذر العثور على نطاق واضح لهذه المدينة داخل مصر.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response({"coverage": result})
