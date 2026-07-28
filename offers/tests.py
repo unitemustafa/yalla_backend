@@ -531,6 +531,37 @@ class OfferAPITests(APITestCase):
         self.assertTrue(response.data["is_multi_market"])
         self.assertEqual(response.data["market_id"], self.market.id)
 
+    def test_client_offer_markets_include_classification_ids(self):
+        self.authenticate(self.admin)
+        created = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(
+                type=Offer.OfferType.PACKAGE,
+                product_ids=[self.product.id, self.second_market_product.id],
+            ),
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.data)
+
+        self.authenticate(self.client_user)
+        response = self.client.get(f"{OFFERS_BASE}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        offer = next(
+            item for item in response.data if item["id"] == created.data["id"]
+        )
+        self.assertEqual(
+            {market["id"] for market in offer["markets"]},
+            {self.market.id, self.second_market.id},
+        )
+        self.assertEqual(
+            {market["classification_id"] for market in offer["markets"]},
+            {
+                self.market.classification_id,
+                self.second_market.classification_id,
+            },
+        )
+
     def test_offer_create_rejects_missing_products(self):
         self.authenticate(self.admin)
 

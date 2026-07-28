@@ -16,7 +16,7 @@ from dashboard.models import DashboardSettings
 from locations.models import DeliveryArea, ServiceCity
 from orders.models import Order
 
-from .models import Market, MarketClassification
+from .models import Market, MarketClassification, MarketType
 from .region import (
     current_market_region_selection,
     no_market_region_selection_response,
@@ -27,10 +27,13 @@ from .region import (
 from .serializers import (
     AdminMarketClassificationSerializer,
     AdminMarketSerializer,
+    ClientMarketTypeSerializer,
     HomeMarketClassificationSerializer,
+    HomeMarketSerializer,
     HomeOfferSerializer,
     HomeProductSerializer,
     MarketClassificationCountSerializer,
+    MarketTypeSerializer,
     MarketWithCommonProductsSerializer,
     MarketWithStoreProductsSerializer,
     ProductDetailSerializer,
@@ -200,6 +203,88 @@ class AdminMarketClassificationDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class AdminMarketTypeListCreateView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        market_types = MarketType.objects.select_related(
+            "classification"
+        ).annotate(
+            market_count=Count("markets", distinct=True)
+        )
+        classification_id = request.query_params.get("classification_id")
+        if classification_id:
+            market_types = market_types.filter(
+                classification_id=classification_id
+            )
+        return Response(
+            MarketTypeSerializer(
+                market_types.order_by(
+                    "classification__name",
+                    "sort_order",
+                    "id",
+                ),
+                many=True,
+                context={"request": request},
+            ).data
+        )
+
+    def post(self, request):
+        serializer = MarketTypeSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        market_type = serializer.save()
+        return Response(
+            MarketTypeSerializer(
+                market_type,
+                context={"request": request},
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminMarketTypeDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get_market_type(self, market_type_id):
+        return get_object_or_404(
+            MarketType.objects.select_related("classification").annotate(
+                market_count=Count("markets", distinct=True)
+            ),
+            id=market_type_id,
+        )
+
+    def get(self, request, market_type_id):
+        return Response(
+            MarketTypeSerializer(
+                self.get_market_type(market_type_id),
+                context={"request": request},
+            ).data
+        )
+
+    def patch(self, request, market_type_id):
+        serializer = MarketTypeSerializer(
+            self.get_market_type(market_type_id),
+            data=request.data,
+            partial=True,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        market_type = serializer.save()
+        return Response(
+            MarketTypeSerializer(
+                market_type,
+                context={"request": request},
+            ).data
+        )
+
+    def delete(self, request, market_type_id):
+        self.get_market_type(market_type_id).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class AdminMarketListCreateView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
 
@@ -219,6 +304,7 @@ class AdminMarketListCreateView(APIView):
                 "service_cities",
                 "delivery_areas",
                 "subcategory_assignments__subcategory",
+                "market_types",
             )
             .order_by("name", "id")
         )
@@ -259,6 +345,7 @@ class AdminMarketDetailView(APIView):
                 "service_cities",
                 "delivery_areas",
                 "subcategory_assignments__subcategory",
+                "market_types",
             ),
             id=market_id,
         )
@@ -495,6 +582,16 @@ class MarketClassificationSummaryView(APIView):
                     distinct=True,
                 )
             )
+            .prefetch_related(
+                Prefetch(
+                    "market_types",
+                    queryset=MarketType.objects.filter(is_active=True).order_by(
+                        "sort_order",
+                        "id",
+                    ),
+                    to_attr="active_market_types",
+                )
+            )
             .distinct()
             .order_by("name")
         )
@@ -505,16 +602,12 @@ class MarketClassificationSummaryView(APIView):
                     classification=classification,
                     status=Market.Status.ACTIVE,
                 )
-                .annotate(
-                    product_count=Count(
-                        "products",
-                        distinct=True,
-                    )
-                )
+                .with_client_metrics(request.user)
                 .prefetch_related(
                     "service_cities",
                     "delivery_areas",
                     "subcategory_assignments__subcategory",
+                    "market_types",
                 )
                 .order_by("-is_popular", "-product_count", "name", "id")[:5]
             )
@@ -525,11 +618,12 @@ class MarketClassificationSummaryView(APIView):
                 id__in=market_ids,
                 status=Market.Status.ACTIVE,
             )
-            .annotate(product_count=Count("products", distinct=True))
+            .with_client_metrics(request.user)
             .prefetch_related(
                 "service_cities",
                 "delivery_areas",
                 "subcategory_assignments__subcategory",
+                "market_types",
             )
             .order_by("-created_at", "-id")[:15]
         )
@@ -548,6 +642,9 @@ class MarketClassificationSummaryView(APIView):
                 Product.objects.filter(
                     market_id=market_id,
                     market__status=Market.Status.ACTIVE,
+                    archived_at__isnull=True,
+                    is_available=True,
+                    variants__isnull=False,
                 )
                 .select_related("market__classification", "subcategory")
                 .prefetch_related(
@@ -558,6 +655,7 @@ class MarketClassificationSummaryView(APIView):
                     ),
                 )
                 .order_by("-created_at", "-id")
+                .distinct()
             )
             for market_id in market_ids_for_response
         }
@@ -635,48 +733,146 @@ class MarketClassificationMarketsView(APIView):
                 classification=classification,
                 status=Market.Status.ACTIVE,
             )
+            .with_client_metrics(request.user)
             .distinct()
             .prefetch_related(
                 "service_cities",
                 "delivery_areas",
                 "subcategory_assignments__subcategory",
+                "market_types",
             )
             .order_by("-is_popular", "name", "id")
         )
-        products_by_market = {
-            market.id: list(
-                Product.objects.filter(market=market)
-                .select_related("market__classification", "subcategory")
-                .prefetch_related(
-                    "images",
-                    Prefetch(
-                        "variants",
-                        queryset=ProductVariant.objects.order_by("price", "id"),
-                    ),
-                )
-                .order_by("-created_at", "-id")[:3]
-            )
-            for market in markets
-        }
-
         return Response(
             {
                 "classification": {
                     "id": classification.id,
                     "name": classification.name,
                     "classification_type": classification.classification_type,
+                    "market_types": ClientMarketTypeSerializer(
+                        classification.market_types.filter(
+                            is_active=True,
+                        ).order_by("sort_order", "id"),
+                        many=True,
+                        context={"request": request},
+                    ).data,
                 },
-                "markets": MarketWithCommonProductsSerializer(
+                "markets": HomeMarketSerializer(
                     markets,
                     many=True,
-                    context={
-                        "request": request,
-                        "products_by_market": products_by_market,
-                    },
+                    context={"request": request},
                 ).data,
             },
             status=status.HTTP_200_OK,
         )
+
+
+class MarketStorefrontDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsClientRole]
+
+    def get(self, request, market_id):
+        market = get_object_or_404(
+            visible_market_queryset(request.user)
+            .filter(status=Market.Status.ACTIVE, archived_at__isnull=True)
+            .with_client_metrics(request.user)
+            .select_related("classification")
+            .prefetch_related(
+                "service_cities",
+                "delivery_areas",
+                "subcategory_assignments__subcategory",
+                "market_types",
+            ),
+            id=market_id,
+        )
+        products = list(
+            Product.objects.filter(
+                market=market,
+                archived_at__isnull=True,
+                is_available=True,
+                variants__isnull=False,
+            )
+            .select_related("market__classification", "subcategory")
+            .prefetch_related(
+                "images",
+                Prefetch(
+                    "variants",
+                    queryset=ProductVariant.objects.order_by("price", "id"),
+                ),
+            )
+            .distinct()
+            .order_by("-created_at", "-id")
+        )
+        return Response(
+            MarketWithCommonProductsSerializer(
+                market,
+                context={
+                    "request": request,
+                    "products_by_market": {market.id: products},
+                },
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class MarketLikeListView(APIView):
+    permission_classes = [IsAuthenticated, IsClientRole]
+
+    def get(self, request):
+        markets = (
+            visible_market_queryset(request.user)
+            .filter(
+                liked_by=request.user,
+                status=Market.Status.ACTIVE,
+                archived_at__isnull=True,
+            )
+            .with_client_metrics(request.user)
+            .select_related("classification")
+            .prefetch_related(
+                "service_cities",
+                "delivery_areas",
+                "subcategory_assignments__subcategory",
+                "market_types",
+            )
+            .distinct()
+            .order_by("name", "id")
+        )
+        return Response(
+            HomeMarketSerializer(
+                markets,
+                many=True,
+                context={"request": request},
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class MarketLikeToggleView(APIView):
+    permission_classes = [IsAuthenticated, IsClientRole]
+
+    def post(self, request, market_id):
+        market = get_object_or_404(
+            visible_market_queryset(request.user).filter(
+                status=Market.Status.ACTIVE,
+                archived_at__isnull=True,
+            ),
+            id=market_id,
+        )
+        if market.liked_by.filter(id=request.user.id).exists():
+            market.liked_by.remove(request.user)
+            liked = False
+        else:
+            market.liked_by.add(request.user)
+            liked = True
+        return Response({"market_id": market.id, "liked": liked})
+
+
+class MarketUnlikeView(APIView):
+    permission_classes = [IsAuthenticated, IsClientRole]
+
+    def delete(self, request, market_id):
+        market = get_object_or_404(Market, id=market_id)
+        market.liked_by.remove(request.user)
+        return Response({"market_id": market.id, "liked": False})
 
 
 class ProductSearchView(APIView):

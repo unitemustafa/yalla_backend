@@ -1,9 +1,12 @@
 import uuid
 from decimal import Decimal
+from io import BytesIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
+from PIL import Image
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -17,6 +20,12 @@ from .models import MarketNotificationDispatch, Notification
 
 
 User = get_user_model()
+
+
+def market_image_upload(name):
+    content = BytesIO()
+    Image.new("RGB", (2, 2), color="blue").save(content, format="PNG")
+    return SimpleUploadedFile(name, content.getvalue(), content_type="image/png")
 
 
 class MarketNotificationTests(APITestCase):
@@ -107,8 +116,14 @@ class MarketNotificationTests(APITestCase):
                 "scope": "general",
                 "subcategory_ids": [self.subcategory.id],
                 "send_notification": False,
+                "image": market_image_upload("without-notification-logo.png"),
+                "cover_image": market_image_upload(
+                    "without-notification-cover.png"
+                ),
+                "delivery_time_min_minutes": 20,
+                "delivery_time_max_minutes": 40,
             },
-            format="json",
+            format="multipart",
         )
         with_notification = self.client.post(
             "/api/v1/home/markets/",
@@ -118,8 +133,12 @@ class MarketNotificationTests(APITestCase):
                 "scope": "general",
                 "subcategory_ids": [self.subcategory.id],
                 "send_notification": True,
+                "image": market_image_upload("with-notification-logo.png"),
+                "cover_image": market_image_upload("with-notification-cover.png"),
+                "delivery_time_min_minutes": 20,
+                "delivery_time_max_minutes": 40,
             },
-            format="json",
+            format="multipart",
         )
 
         self.assertEqual(without_notification.status_code, status.HTTP_201_CREATED)

@@ -27,7 +27,7 @@ from catalog.models import (
     VariantAttributeValue,
 )
 from locations.models import Address, DeliveryArea, ServiceCity
-from markets.models import Market, MarketClassification, MarketSubcategory
+from markets.models import Market, MarketClassification, MarketSubcategory, MarketType
 from offers.models import Offer, OfferItem
 from orders.models import (
     Order,
@@ -398,6 +398,7 @@ class Command(BaseCommand):
 
     def _seed_markets(self, areas):
         classifications = {}
+        market_types = {}
         classification_types = {
             "سوبرماركت": MarketClassification.ClassificationType.POPULAR,
             "مطعم": MarketClassification.ClassificationType.FEATURED,
@@ -405,12 +406,29 @@ class Command(BaseCommand):
             "حلويات": MarketClassification.ClassificationType.NORMAL,
             "منتجات عضوية": MarketClassification.ClassificationType.NORMAL,
         }
+        market_type_names = {
+            "سوبرماركت": "Supermarket",
+            "مطعم": "Restaurant",
+            "مخبزة": "Bakery",
+            "حلويات": "Desserts",
+            "منتجات عضوية": "Organic",
+        }
         for name, classification_type in classification_types.items():
             obj, _ = MarketClassification.objects.update_or_create(
                 name=name,
                 defaults={"classification_type": classification_type},
             )
             classifications[name] = obj
+            market_type, _ = MarketType.objects.update_or_create(
+                classification=obj,
+                name_ar=name,
+                defaults={
+                    "name_en": market_type_names[name],
+                    "image": f"seed/market-types/{market_type_names[name].lower()}.webp",
+                    "is_active": True,
+                },
+            )
+            market_types[name] = market_type
 
         definitions = [
             (
@@ -459,6 +477,7 @@ class Command(BaseCommand):
                 market.service_cities.set(
                     {areas[name].service_city_id for name in area_names}
                 )
+            market.market_types.set([market_types[classification]])
             markets[name] = market
         return markets
 

@@ -63,6 +63,18 @@ class ShareLandingViewTests(TestCase):
             f"yallamarket://offers/{self.offer.id}",
         )
 
+    def test_market_share_page_opens_the_market_deep_link(self):
+        response = self.client.get(
+            reverse("market-share", args=[self.market.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f"yallamarket://markets/{self.market.id}",
+        )
+        self.assertContains(response, self.market.name)
+
     def test_share_page_escapes_product_content(self):
         self.product.name = '<script>alert("unsafe")</script>'
         self.product.save(update_fields=["name"])
@@ -82,5 +94,9 @@ class ShareLandingViewTests(TestCase):
         )
         self.assertEqual(
             self.client.get(reverse("offer-share", args=[999999])).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(reverse("market-share", args=[999999])).status_code,
             404,
         )

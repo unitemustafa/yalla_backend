@@ -1,7 +1,11 @@
+from io import BytesIO
+
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
+from PIL import Image
 
 from markets.models import Market, MarketClassification, MarketSubcategory
 from markets.serializers import (
@@ -16,6 +20,12 @@ from .serializers import AdminProductSerializer
 User = get_user_model()
 CATALOG_BASE = "/api/v1/catalog"
 HOME_BASE = "/api/v1/home"
+
+
+def market_image_upload(name):
+    content = BytesIO()
+    Image.new("RGB", (2, 2), color="blue").save(content, format="PNG")
+    return SimpleUploadedFile(name, content.getvalue(), content_type="image/png")
 
 
 class StoreSubcategoryAPITests(APITestCase):
@@ -123,6 +133,10 @@ class StoreSubcategoryAPITests(APITestCase):
                 "name": "Ordered Store",
                 "scope": Market.Scope.GENERAL,
                 "subcategory_ids": [self.meals.id, self.drinks.id],
+                "image": market_image_upload("logo.png"),
+                "cover_image": market_image_upload("cover.png"),
+                "delivery_time_min_minutes": 20,
+                "delivery_time_max_minutes": 40,
             }
         )
         self.assertTrue(serializer.is_valid(), serializer.errors)
@@ -140,6 +154,10 @@ class StoreSubcategoryAPITests(APITestCase):
                 "classification_id": self.classification.id,
                 "name": "Missing Categories",
                 "scope": Market.Scope.GENERAL,
+                "image": market_image_upload("missing-logo.png"),
+                "cover_image": market_image_upload("missing-cover.png"),
+                "delivery_time_min_minutes": 20,
+                "delivery_time_max_minutes": 40,
             }
         )
         self.assertFalse(missing.is_valid())

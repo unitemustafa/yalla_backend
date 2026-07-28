@@ -2,7 +2,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path, include
 
-from .share_views import offer_share, product_share
+from .share_views import market_share, offer_share, product_share
 from .health import liveness, readiness
 from accounts.legal_views import (
     AccountDeletionView,
@@ -23,6 +23,7 @@ urlpatterns = [
     path("readyz/", readiness, name="readyz"),
     path("share/products/<int:product_id>/", product_share, name="product-share"),
     path("share/offers/<int:offer_id>/", offer_share, name="offer-share"),
+    path("share/markets/<int:market_id>/", market_share, name="market-share"),
     path("api/v1/auth/", include("accounts.urls")),
     path("api/v1/catalog/", include("catalog.urls")),
     path("api/v1/home/", include("markets.urls")),

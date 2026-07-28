@@ -4,6 +4,7 @@ from django.utils.html import escape
 from django.views.decorators.http import require_GET
 
 from catalog.models import Product
+from markets.models import Market
 from offers.models import Offer
 
 from .rate_limit import rate_limit_view
@@ -111,4 +112,21 @@ def offer_share(request, offer_id):
         title=offer.title,
         description=offer.description,
         image_url=_absolute_image_url(request, offer.image),
+    )
+
+
+@require_GET
+@rate_limit_view("share_ip")
+def market_share(request, market_id):
+    market = get_object_or_404(Market, id=market_id)
+    return _share_landing_response(
+        request,
+        content_type="markets",
+        content_id=market.id,
+        title=market.name,
+        description=market.description,
+        image_url=_absolute_image_url(
+            request,
+            market.cover_image or market.image,
+        ),
     )
