@@ -154,6 +154,165 @@ class AddressAPITests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("latitude", response.data)
 
+    def test_address_outside_configured_service_city_is_rejected(self):
+        self.service_city.center_latitude = Decimal("30.0000000")
+        self.service_city.center_longitude = Decimal("31.0000000")
+        self.service_city.radius_km = Decimal("10.00")
+        self.service_city.save(
+            update_fields=(
+                "center_latitude",
+                "center_longitude",
+                "radius_km",
+            )
+        )
+
+        response = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Outside",
+                "details": "Far street",
+                "service_city_id": self.service_city.id,
+                "latitude": "31.0000000",
+                "longitude": "32.0000000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("latitude", response.data)
+
+    def test_service_city_bbox_rejects_point_even_without_polygon(self):
+        self.service_city.boundary_geojson = None
+        self.service_city.boundary_bbox = [
+            30.90,
+            29.90,
+            31.10,
+            30.10,
+        ]
+        self.service_city.radius_km = Decimal("100.00")
+        self.service_city.save(
+            update_fields=(
+                "boundary_geojson",
+                "boundary_bbox",
+                "radius_km",
+            )
+        )
+
+        response = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Outside bbox",
+                "details": "Far street",
+                "service_city_id": self.service_city.id,
+                "latitude": "30.5000000",
+                "longitude": "31.0000000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("latitude", response.data)
+
+    def test_coordinates_resolve_fixed_area_and_preserve_structured_fields(self):
+        self.service_city.center_latitude = Decimal("30.0000000")
+        self.service_city.center_longitude = Decimal("31.0000000")
+        self.service_city.radius_km = Decimal("20.00")
+        self.service_city.save(
+            update_fields=(
+                "center_latitude",
+                "center_longitude",
+                "radius_km",
+            )
+        )
+        self.delivery_area.center_latitude = Decimal("30.0000000")
+        self.delivery_area.center_longitude = Decimal("31.0000000")
+        self.delivery_area.radius_km = Decimal("2.00")
+        self.delivery_area.eta_min_minutes = 25
+        self.delivery_area.eta_max_minutes = 40
+        self.delivery_area.save(
+            update_fields=(
+                "center_latitude",
+                "center_longitude",
+                "radius_km",
+                "eta_min_minutes",
+                "eta_max_minutes",
+            )
+        )
+
+        response = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Family home",
+                "details": "Tahrir street",
+                "service_city_id": self.service_city.id,
+                "latitude": "30.0010000",
+                "longitude": "31.0010000",
+                "address_type": "apartment",
+                "recipient_phone": "+201111111111",
+                "street": "Tahrir street",
+                "building_name": "Nile Tower",
+                "apartment_number": "12",
+                "floor": "3",
+                "additional_instructions": "Call on arrival",
+                "label": "Family home",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        address = Address.objects.get(user=self.user)
+        self.assertEqual(address.delivery_area, self.delivery_area)
+        self.assertEqual(address.delivery_type, Address.DeliveryType.FIXED_AREA)
+        self.assertEqual(address.fulfillment_type, Address.FulfillmentType.DIRECT)
+        self.assertEqual(address.building_name, "Nile Tower")
+        self.assertEqual(address.apartment_number, "12")
+        self.assertEqual(response.data[0]["recipient_phone"], "+201111111111")
+        self.assertEqual(response.data[0]["label"], "Family home")
+
+    def test_point_inside_city_but_outside_areas_uses_delivery(self):
+        self.service_city.center_latitude = Decimal("30.0000000")
+        self.service_city.center_longitude = Decimal("31.0000000")
+        self.service_city.radius_km = Decimal("20.00")
+        self.service_city.save(
+            update_fields=(
+                "center_latitude",
+                "center_longitude",
+                "radius_km",
+            )
+        )
+        self.delivery_area.center_latitude = Decimal("30.0000000")
+        self.delivery_area.center_longitude = Decimal("31.0000000")
+        self.delivery_area.radius_km = Decimal("1.00")
+        self.delivery_area.save(
+            update_fields=(
+                "center_latitude",
+                "center_longitude",
+                "radius_km",
+            )
+        )
+
+        response = self.client.post(
+            "/api/v1/addresses/",
+            {
+                "name": "Later price",
+                "details": "New district",
+                "service_city_id": self.service_city.id,
+                "delivery_area_id": self.delivery_area.id,
+                "latitude": "30.1000000",
+                "longitude": "31.0000000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        address = Address.objects.get(user=self.user)
+        self.assertIsNone(address.delivery_area)
+        self.assertEqual(address.delivery_type, Address.DeliveryType.DELIVERY)
+        self.assertEqual(
+            address.fulfillment_type,
+            Address.FulfillmentType.EXTERNAL_SHIPPING,
+        )
+
     def test_address_accepts_and_returns_boundary_coordinates(self):
         response = self.client.post(
             "/api/v1/addresses/",
