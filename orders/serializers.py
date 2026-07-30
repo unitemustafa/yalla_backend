@@ -744,6 +744,16 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
             service_city=service_city,
             delivery_area=delivery_area,
             delivery_type=delivery_type,
+            fulfillment_type=(
+                Order.FulfillmentType.DIRECT
+                if parent_delivery_price is not None
+                else Order.FulfillmentType.EXTERNAL_SHIPPING
+            ),
+            external_shipping_status=(
+                Order.ExternalShippingStatus.NOT_REQUIRED
+                if parent_delivery_price is not None
+                else Order.ExternalShippingStatus.PENDING_QUOTE
+            ),
             market=first_group["market"],
             payment_method=payment_method,
             status=Order.Status.PENDING,
@@ -1165,6 +1175,7 @@ class OrderSerializer(serializers.ModelSerializer):
     service_city = ServiceCitySummarySerializer(read_only=True)
     delivery_area = DeliveryAreaSummarySerializer(read_only=True)
     delivery_address = serializers.SerializerMethodField()
+    delivery_price_status = serializers.SerializerMethodField()
     is_multi_market = serializers.SerializerMethodField()
     market_count = serializers.SerializerMethodField()
     market_names_summary = serializers.SerializerMethodField()
@@ -1203,6 +1214,11 @@ class OrderSerializer(serializers.ModelSerializer):
             "delivery_area_id",
             "delivery_area",
             "delivery_type",
+            "fulfillment_type",
+            "external_shipping_status",
+            "delivery_price_status",
+            "eta_min_minutes",
+            "eta_max_minutes",
             "payment_method",
             "discount",
             "description",
@@ -1239,6 +1255,10 @@ class OrderSerializer(serializers.ModelSerializer):
             "id",
             "status",
             "review_status",
+            "fulfillment_type",
+            "external_shipping_status",
+            "eta_min_minutes",
+            "eta_max_minutes",
             "assigned_representative_id",
             "assigned_at",
             "delivered_at",
@@ -1311,6 +1331,15 @@ class OrderSerializer(serializers.ModelSerializer):
                 else None
             ),
         }
+
+    def get_delivery_price_status(self, instance):
+        if (
+            instance.fulfillment_type == Order.FulfillmentType.DIRECT
+            or instance.external_shipping_status
+            == Order.ExternalShippingStatus.NOT_REQUIRED
+        ):
+            return "fixed"
+        return instance.external_shipping_status
 
     def get_is_multi_market(self, instance):
         return self.get_market_count(instance) > 1
@@ -1866,6 +1895,7 @@ class OrderListSerializer(serializers.ModelSerializer):
     market_names_summary = serializers.SerializerMethodField()
     has_offer = serializers.SerializerMethodField()
     offer_titles = serializers.SerializerMethodField()
+    delivery_price_status = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -1882,6 +1912,9 @@ class OrderListSerializer(serializers.ModelSerializer):
             "offer_titles",
             "delivery_address",
             "delivery_type",
+            "fulfillment_type",
+            "external_shipping_status",
+            "delivery_price_status",
             "delivery_price",
             "subtotal_price",
             "discount",
@@ -1897,6 +1930,9 @@ class OrderListSerializer(serializers.ModelSerializer):
 
     def get_delivery_address(self, instance):
         return OrderSerializer(context=self.context).get_delivery_address(instance)
+
+    def get_delivery_price_status(self, instance):
+        return OrderSerializer(context=self.context).get_delivery_price_status(instance)
 
     def get_market_count(self, instance):
         return instance.market_sections.count()
@@ -2013,6 +2049,16 @@ class AdminOrderCreateSerializer(OrderSerializer):
             else validated_data.get("delivery_price")
         )
         validated_data["delivery_price"] = delivery_price
+        validated_data["fulfillment_type"] = (
+            Order.FulfillmentType.DIRECT
+            if delivery_price is not None
+            else Order.FulfillmentType.EXTERNAL_SHIPPING
+        )
+        validated_data["external_shipping_status"] = (
+            Order.ExternalShippingStatus.NOT_REQUIRED
+            if delivery_price is not None
+            else Order.ExternalShippingStatus.PENDING_QUOTE
+        )
         delivery_total = delivery_price or Decimal("0.00")
         total = subtotal + delivery_total - discount
 
@@ -2114,6 +2160,10 @@ class OrderDeliveryPriceSerializer(serializers.Serializer):
         max_digits=10,
         decimal_places=2,
         min_value=Decimal("0.00"),
+    )
+    action = serializers.ChoiceField(
+        choices=("save", "request_approval"),
+        default="save",
     )
 
 

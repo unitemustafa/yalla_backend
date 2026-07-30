@@ -21,6 +21,11 @@ def _content(event_type, order_id, status):
             "تعذر قبول طلبك",
             f"تم رفض طلبك #{order_id}. افتح التطبيق لمعرفة التفاصيل.",
         )
+    if event_type == "delivery_quote_sent":
+        return (
+            "سعر التوصيل جاهز",
+            f"تم تحديد سعر توصيل طلبك #{order_id}. افتح الطلب لمراجعته والموافقة عليه.",
+        )
     if event_type == "order_cancelled" or status == Order.Status.CANCELLED:
         return "تم إلغاء الطلب", f"تم إلغاء طلبك #{order_id}."
     if event_type == "order_failed_delivery" or status == Order.Status.FAILED_DELIVERY:

@@ -17,6 +17,10 @@ class Order(models.Model):
     class ExternalShippingStatus(models.TextChoices):
         NOT_REQUIRED = "not_required", "Not required"
         PENDING_QUOTE = "pending_quote", "Pending quote"
+        AWAITING_CUSTOMER_APPROVAL = (
+            "awaiting_customer_approval",
+            "Awaiting customer approval",
+        )
         QUOTED = "quoted", "Quoted"
 
     class Status(models.TextChoices):
@@ -90,7 +94,7 @@ class Order(models.Model):
         db_index=True,
     )
     external_shipping_status = models.CharField(
-        max_length=24,
+        max_length=32,
         choices=ExternalShippingStatus.choices,
         default=ExternalShippingStatus.PENDING_QUOTE,
         db_index=True,
@@ -306,6 +310,11 @@ class OrderEvent(models.Model):
         DELIVERY_PRICE_CHANGED = (
             "delivery_price_changed",
             "Delivery price changed",
+        )
+        DELIVERY_QUOTE_SENT = "delivery_quote_sent", "Delivery quote sent"
+        DELIVERY_QUOTE_ACCEPTED = (
+            "delivery_quote_accepted",
+            "Delivery quote accepted",
         )
         CANCELLED = "cancelled", "Cancelled"
 

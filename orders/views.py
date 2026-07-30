@@ -478,6 +478,20 @@ class OrderDeliveryPriceView(APIView):
         serializer.is_valid(raise_exception=True)
         old_delivery_price = order.delivery_price
         delivery_price = serializer.validated_data["delivery_price"]
+        action = serializer.validated_data["action"]
+        if (
+            action == "request_approval"
+            and order.delivery_type != Order.DeliveryType.DELIVERY
+        ):
+            return Response(
+                {
+                    "action": (
+                        "Customer approval is only available for manually "
+                        "quoted delivery orders."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if (
             delivery_price > Decimal("0.00")
             and order.order_offers.filter(
@@ -496,10 +510,34 @@ class OrderDeliveryPriceView(APIView):
         total = order.subtotal_price - order.discount + delivery_price
         order.delivery_price = delivery_price
         order.total_price = max(total, Decimal("0.00"))
-        order.save(update_fields=["delivery_price", "total_price", "updated_at"])
-        record_order_event(
+        if order.delivery_type == Order.DeliveryType.FIXED_AREA:
+            order.fulfillment_type = Order.FulfillmentType.DIRECT
+            order.external_shipping_status = (
+                Order.ExternalShippingStatus.NOT_REQUIRED
+            )
+        else:
+            order.fulfillment_type = Order.FulfillmentType.EXTERNAL_SHIPPING
+            order.external_shipping_status = (
+                Order.ExternalShippingStatus.AWAITING_CUSTOMER_APPROVAL
+                if action == "request_approval"
+                else Order.ExternalShippingStatus.QUOTED
+            )
+        order.save(
+            update_fields=[
+                "delivery_price",
+                "total_price",
+                "fulfillment_type",
+                "external_shipping_status",
+                "updated_at",
+            ]
+        )
+        event = record_order_event(
             order,
-            OrderEvent.EventType.DELIVERY_PRICE_CHANGED,
+            (
+                OrderEvent.EventType.DELIVERY_QUOTE_SENT
+                if action == "request_approval"
+                else OrderEvent.EventType.DELIVERY_PRICE_CHANGED
+            ),
             actor=request.user,
             from_status=order.status,
             to_status=order.status,
@@ -510,9 +548,63 @@ class OrderDeliveryPriceView(APIView):
                     else None
                 ),
                 "to_delivery_price": f"{delivery_price:.2f}",
+                "requires_customer_approval": action == "request_approval",
             },
         )
+        if action == "request_approval":
+            schedule_order_lifecycle_notification(
+                order,
+                event,
+                "delivery_quote_sent",
+                old_status=order.status,
+                new_status=order.status,
+            )
 
+        refreshed_order = order_queryset().get(pk=order.pk)
+        return Response(
+            OrderSerializer(refreshed_order, context={"request": request}).data
+        )
+
+
+class ClientOrderDeliveryQuoteAcceptView(APIView):
+    permission_classes = (IsAuthenticated, IsClientRole)
+
+    @transaction.atomic
+    def post(self, request, order_id):
+        order = generics.get_object_or_404(
+            Order.objects.select_for_update(),
+            pk=order_id,
+            user=request.user,
+        )
+        if (
+            order.external_shipping_status
+            != Order.ExternalShippingStatus.AWAITING_CUSTOMER_APPROVAL
+            or order.delivery_price is None
+        ):
+            return Response(
+                {"detail": "This order has no delivery quote awaiting approval."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if order.status in (
+            Order.Status.DELIVERED,
+            Order.Status.FAILED_DELIVERY,
+            Order.Status.CANCELLED,
+        ):
+            return Response(
+                {"detail": "A closed order quote cannot be approved."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        order.external_shipping_status = Order.ExternalShippingStatus.QUOTED
+        order.save(update_fields=["external_shipping_status", "updated_at"])
+        record_order_event(
+            order,
+            OrderEvent.EventType.DELIVERY_QUOTE_ACCEPTED,
+            actor=request.user,
+            from_status=order.status,
+            to_status=order.status,
+            metadata={"delivery_price": f"{order.delivery_price:.2f}"},
+        )
         refreshed_order = order_queryset().get(pk=order.pk)
         return Response(
             OrderSerializer(refreshed_order, context={"request": request}).data
