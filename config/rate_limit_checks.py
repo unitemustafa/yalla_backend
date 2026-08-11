@@ -65,6 +65,14 @@ def check_rate_limit_configuration(app_configs, **kwargs):
                     id="rate_limit.E006",
                 )
             )
+    for scope in getattr(settings, "RATE_LIMIT_FAIL_CLOSED_SCOPES", ()):
+        if scope not in POLICIES:
+            messages.append(
+                Error(
+                    f"Unknown fail-closed rate limit scope: {scope}",
+                    id="rate_limit.E008",
+                )
+            )
     for scope, rates in rates_by_scope.items():
         if scope not in POLICIES:
             messages.append(

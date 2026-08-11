@@ -45,22 +45,22 @@ class ServiceCitySerializer(serializers.ModelSerializer):
             "offer_count",
         )
 
-    def get_deletion_mode(self, instance):
+    def get_deletion_mode(self, instance) -> str:
         return instance.get_deletion_mode()
 
-    def get_delivery_area_count(self, instance):
+    def get_delivery_area_count(self, instance) -> int:
         count = getattr(instance, "delivery_area_count", None)
         if count is not None:
             return count
         return instance.delivery_areas.count()
 
-    def get_market_count(self, instance):
+    def get_market_count(self, instance) -> int:
         count = getattr(instance, "market_count", None)
         if count is not None:
             return count
         return instance.markets.distinct().count()
 
-    def get_offer_count(self, instance):
+    def get_offer_count(self, instance) -> int:
         count = getattr(instance, "offer_count", None)
         if count is not None:
             return count
@@ -151,7 +151,7 @@ class DeliveryAreaSerializer(ServiceCitySerializer):
         )
         read_only_fields = ("id", "archived_at", "deletion_mode")
 
-    def get_deletion_mode(self, instance):
+    def get_deletion_mode(self, instance) -> str:
         return instance.get_deletion_mode()
 
     def validate_name(self, value):

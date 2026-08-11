@@ -51,16 +51,31 @@ class ShareLandingViewTests(TestCase):
         self.assertContains(response, "Shared product")
         self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
 
-    def test_offer_share_page_keeps_opening_after_offer_expiry(self):
+    def test_expired_offer_share_page_returns_not_found(self):
         self.offer.end_time = timezone.now() - timedelta(minutes=1)
         self.offer.save(update_fields=["end_time"])
 
         response = self.client.get(reverse("offer-share", args=[self.offer.id]))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response,
-            f"yallamarket://offers/{self.offer.id}",
+        self.assertEqual(response.status_code, 404)
+
+    def test_archived_or_inactive_shared_content_returns_not_found(self):
+        self.product.archived_at = timezone.now()
+        self.product.save(update_fields=["archived_at"])
+        self.market.status = Market.Status.INACTIVE
+        self.market.save(update_fields=["status"])
+
+        self.assertEqual(
+            self.client.get(
+                reverse("product-share", args=[self.product.id])
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(
+                reverse("market-share", args=[self.market.id])
+            ).status_code,
+            404,
         )
 
     def test_market_share_page_opens_the_market_deep_link(self):

@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Q
@@ -239,8 +240,10 @@ def dispatch_product_notifications(product_id, request_id, requested_by_id=None)
                 ]
             )
             if created_notification_ids:
-                transaction.on_commit(
-                    lambda ids=tuple(created_notification_ids): [
+                notification_ids = tuple(created_notification_ids)
+
+                def deliver(ids=notification_ids):
+                    return [
                         send_notification_push(
                             notification_id,
                             high_priority=True,
@@ -248,7 +251,11 @@ def dispatch_product_notifications(product_id, request_id, requested_by_id=None)
                         )
                         for notification_id in ids
                     ]
-                )
+
+                if settings.PUSH_DELIVERY_ASYNC:
+                    deliver()
+                else:
+                    transaction.on_commit(deliver)
 
     if validation_error:
         raise ValidationError({"detail": validation_error})

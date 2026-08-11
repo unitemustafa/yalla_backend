@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path, include
+from .schema_views import AdminDocsView, AdminSchemaView
 
 from .share_views import market_share, offer_share, product_share
 from .health import liveness, readiness
@@ -21,6 +22,18 @@ urlpatterns = [
     path("health/", liveness, name="health"),
     path("healthz/", liveness, name="healthz"),
     path("readyz/", readiness, name="readyz"),
+    path(
+        "api/schema/",
+        AdminSchemaView.as_view(),
+        name="api-schema",
+    ),
+    path(
+        "api/docs/",
+        AdminDocsView.as_view(
+            url_name="api-schema",
+        ),
+        name="api-docs",
+    ),
     path("share/products/<int:product_id>/", product_share, name="product-share"),
     path("share/offers/<int:offer_id>/", offer_share, name="offer-share"),
     path("share/markets/<int:market_id>/", market_share, name="market-share"),
@@ -37,6 +50,10 @@ urlpatterns = [
     path("api/v1/dashboard/", include("dashboard.urls")),
     path("api/v1/addresses/", include("locations.address_urls")),
     path("api/v1/locations/", include("locations.urls")),
+    path(
+        "api/v2/",
+        include(("config.v2_urls", "v2"), namespace="v2"),
+    ),
 ]
 
 if settings.DEBUG:

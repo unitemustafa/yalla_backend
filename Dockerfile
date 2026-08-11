@@ -26,4 +26,4 @@ USER app
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "python manage.py migrate --noinput && exec gunicorn --config config/gunicorn.conf.py config.wsgi:application"]
+CMD ["gunicorn", "--config", "config/gunicorn.conf.py", "config.wsgi:application"]

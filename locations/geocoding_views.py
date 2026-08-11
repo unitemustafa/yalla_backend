@@ -3,7 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.views import IsAdminRole
+from accounts.permissions import IsAdminRole
 
 from .geocoding import (
     GeoapifyRateLimited,

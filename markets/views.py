@@ -6,11 +6,13 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.generics import get_object_or_404
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
+from accounts.permissions import IsMarketAdminRole, IsMarketClientRole
+from config.pagination import paginated_list_response
 from catalog.models import Product, ProductAddition, ProductVariant
 from dashboard.models import DashboardSettings
 from locations.models import DeliveryArea, ServiceCity
@@ -23,6 +25,15 @@ from .region import (
     visible_market_queryset,
     visible_offer_queryset,
     visible_product_queryset,
+)
+from .selectors import user_home_address
+from .admin_views import (
+    AdminMarketClassificationDetailView,
+    AdminMarketClassificationListCreateView,
+    AdminMarketDetailView,
+    AdminMarketListCreateView,
+    AdminMarketTypeDetailView,
+    AdminMarketTypeListCreateView,
 )
 from .serializers import (
     AdminMarketClassificationSerializer,
@@ -41,33 +52,8 @@ from .serializers import (
 )
 
 
-class IsAdminRole(BasePermission):
-    message = "Only admin users can manage markets."
-
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.role == User.Role.ADMIN
-        )
-
-
-class IsClientRole(BasePermission):
-    message = "Only client users can access address products."
-
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.role == User.Role.CLIENT
-        )
-
-
-def get_user_home_address(user):
-    return (
-        user.addresses.filter(is_default=True).order_by("-created_at").first()
-        or user.addresses.order_by("-created_at").first()
-    )
+IsAdminRole = IsMarketAdminRole
+IsClientRole = IsMarketClientRole
 
 
 class ProductSearchPagination(PageNumberPagination):
@@ -122,290 +108,6 @@ class LoginDashboardSnapshotView(APIView):
         )
 
 
-class AdminMarketClassificationListCreateView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminRole]
-
-    def get(self, request):
-        classifications = MarketClassification.objects.order_by("name", "id")
-        return Response(
-            AdminMarketClassificationSerializer(
-                classifications,
-                many=True,
-                context={"request": request},
-            ).data
-        )
-
-    def post(self, request):
-        serializer = AdminMarketClassificationSerializer(
-            data=request.data,
-            context={"request": request},
-        )
-        serializer.is_valid(raise_exception=True)
-        classification = serializer.save()
-        return Response(
-            AdminMarketClassificationSerializer(
-                classification,
-                context={"request": request},
-            ).data,
-            status=status.HTTP_201_CREATED,
-        )
-
-
-class AdminMarketClassificationDetailView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminRole]
-
-    def get_classification(self, classification_id):
-        return get_object_or_404(MarketClassification, id=classification_id)
-
-    def get(self, request, classification_id):
-        classification = self.get_classification(classification_id)
-        return Response(
-            AdminMarketClassificationSerializer(
-                classification,
-                context={"request": request},
-            ).data
-        )
-
-    def patch(self, request, classification_id):
-        classification = self.get_classification(classification_id)
-        serializer = AdminMarketClassificationSerializer(
-            classification,
-            data=request.data,
-            partial=True,
-            context={"request": request},
-        )
-        serializer.is_valid(raise_exception=True)
-        classification = serializer.save()
-        return Response(
-            AdminMarketClassificationSerializer(
-                classification,
-                context={"request": request},
-            ).data
-        )
-
-    def delete(self, request, classification_id):
-        classification = self.get_classification(classification_id)
-        try:
-            classification.delete()
-        except ProtectedError:
-            classification.is_active = False
-            classification.save(update_fields=("is_active",))
-            return Response(
-                {
-                    "action": "archived",
-                    "detail": (
-                        "تمت أرشفة فئة المحل وتعطيلها لأنها مستخدمة "
-                        "بواسطة محلات حالية."
-                    ),
-                },
-                status=status.HTTP_200_OK,
-            )
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-
-class AdminMarketTypeListCreateView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminRole]
-
-    def get(self, request):
-        market_types = MarketType.objects.select_related(
-            "classification"
-        ).annotate(
-            market_count=Count("markets", distinct=True)
-        )
-        classification_id = request.query_params.get("classification_id")
-        if classification_id:
-            market_types = market_types.filter(
-                classification_id=classification_id
-            )
-        return Response(
-            MarketTypeSerializer(
-                market_types.order_by(
-                    "classification__name",
-                    "sort_order",
-                    "id",
-                ),
-                many=True,
-                context={"request": request},
-            ).data
-        )
-
-    def post(self, request):
-        serializer = MarketTypeSerializer(
-            data=request.data,
-            context={"request": request},
-        )
-        serializer.is_valid(raise_exception=True)
-        market_type = serializer.save()
-        return Response(
-            MarketTypeSerializer(
-                market_type,
-                context={"request": request},
-            ).data,
-            status=status.HTTP_201_CREATED,
-        )
-
-
-class AdminMarketTypeDetailView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminRole]
-
-    def get_market_type(self, market_type_id):
-        return get_object_or_404(
-            MarketType.objects.select_related("classification").annotate(
-                market_count=Count("markets", distinct=True)
-            ),
-            id=market_type_id,
-        )
-
-    def get(self, request, market_type_id):
-        return Response(
-            MarketTypeSerializer(
-                self.get_market_type(market_type_id),
-                context={"request": request},
-            ).data
-        )
-
-    def patch(self, request, market_type_id):
-        serializer = MarketTypeSerializer(
-            self.get_market_type(market_type_id),
-            data=request.data,
-            partial=True,
-            context={"request": request},
-        )
-        serializer.is_valid(raise_exception=True)
-        market_type = serializer.save()
-        return Response(
-            MarketTypeSerializer(
-                market_type,
-                context={"request": request},
-            ).data
-        )
-
-    def delete(self, request, market_type_id):
-        self.get_market_type(market_type_id).delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-
-class AdminMarketListCreateView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminRole]
-
-    def get(self, request):
-        protected_markets = Market.objects.filter(pk=OuterRef("pk")).filter(
-            Q(orders__isnull=False)
-            | Q(order_sections__isnull=False)
-            | Q(products__variants__order_items__isnull=False)
-            | Q(products__variants__offer_items__isnull=False)
-        )
-        markets = (
-            Market.objects.annotate(
-                deletion_mode_is_archive=Exists(protected_markets),
-            )
-            .select_related("classification")
-            .prefetch_related(
-                "service_cities",
-                "delivery_areas",
-                "subcategory_assignments__subcategory",
-                "market_types",
-            )
-            .order_by("name", "id")
-        )
-        if request.query_params.get("archived") in {"true", "1"}:
-            markets = markets.filter(archived_at__isnull=False)
-        else:
-            markets = markets.filter(archived_at__isnull=True)
-        return Response(
-            AdminMarketSerializer(
-                markets,
-                many=True,
-                context={"request": request},
-            ).data
-        )
-
-    def post(self, request):
-        serializer = AdminMarketSerializer(
-            data=request.data,
-            context={"request": request},
-        )
-        serializer.is_valid(raise_exception=True)
-        market = serializer.save()
-        return Response(
-            AdminMarketSerializer(
-                market,
-                context={"request": request},
-            ).data,
-            status=status.HTTP_201_CREATED,
-        )
-
-
-class AdminMarketDetailView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminRole]
-
-    def get_market(self, market_id):
-        return get_object_or_404(
-            Market.objects.select_related("classification").prefetch_related(
-                "service_cities",
-                "delivery_areas",
-                "subcategory_assignments__subcategory",
-                "market_types",
-            ),
-            id=market_id,
-        )
-
-    def get(self, request, market_id):
-        market = self.get_market(market_id)
-        return Response(
-            AdminMarketSerializer(
-                market,
-                context={"request": request},
-            ).data
-        )
-
-    def patch(self, request, market_id):
-        market = self.get_market(market_id)
-        if request.data.get("restore") is True:
-            market.archived_at = None
-            market.save(update_fields=("archived_at", "updated_at"))
-            return Response(
-                AdminMarketSerializer(
-                    market,
-                    context={"request": request},
-                ).data
-            )
-        serializer = AdminMarketSerializer(
-            market,
-            data=request.data,
-            partial=True,
-            context={"request": request},
-        )
-        serializer.is_valid(raise_exception=True)
-        market = serializer.save()
-        return Response(
-            AdminMarketSerializer(
-                market,
-                context={"request": request},
-            ).data
-        )
-
-    def delete(self, request, market_id):
-        market = self.get_market(market_id)
-        try:
-            market.delete()
-        except ProtectedError:
-            market.status = Market.Status.INACTIVE
-            market.archived_at = timezone.now()
-            market.save(update_fields=("status", "archived_at", "updated_at"))
-            return Response(
-                {
-                    "action": "archived",
-                    "detail": (
-                        "تمت أرشفة المحل بدلًا من حذفه لأنه مرتبط "
-                        "بسجل طلبات سابق."
-                    ),
-                },
-                status=status.HTTP_200_OK,
-            )
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-
 class HomeView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -414,7 +116,7 @@ class HomeView(APIView):
         if current_selection is None:
             return no_market_region_selection_response()
 
-        address = get_user_home_address(request.user)
+        address = user_home_address(request.user)
         market_ids = list(
             visible_market_queryset(request.user).values_list("id", flat=True)
         )
@@ -836,13 +538,10 @@ class MarketLikeListView(APIView):
             .distinct()
             .order_by("name", "id")
         )
-        return Response(
-            HomeMarketSerializer(
-                markets,
-                many=True,
-                context={"request": request},
-            ).data,
-            status=status.HTTP_200_OK,
+        return paginated_list_response(
+            request,
+            markets,
+            HomeMarketSerializer,
         )
 
 

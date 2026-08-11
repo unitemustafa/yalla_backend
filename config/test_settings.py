@@ -34,6 +34,11 @@ EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 # unrelated endpoint suites independent from an external Redis process.
 RATE_LIMIT_MODE = "off"
 
+# Expected 4xx branches are exercised heavily; keep test output readable while
+# assertLogs continues to opt in for the specific loggers it verifies.
+LOGGING["root"]["level"] = "CRITICAL"
+LOGGING["loggers"]["django"]["level"] = "CRITICAL"
+
 # Password strength belongs to production. Tests only need deterministic
 # hashing semantics, and the production hasher makes the full suite needlessly
 # CPU-bound because every test creates several users.

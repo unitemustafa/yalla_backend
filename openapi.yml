@@ -1,0 +1,6825 @@
+openapi: 3.0.3
+info:
+  title: Yalla Backend API
+  version: 1.0.0
+  description: Versioned API contract for Yalla clients and dashboard.
+paths:
+  /api/v1/addresses/:
+    get:
+      operationId: v1_addresses_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_addresses_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/addresses/{address_id}/:
+    patch:
+      operationId: v1_addresses_partial_update_by_address_id
+      parameters:
+      - in: path
+        name: address_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_addresses_destroy_by_address_id
+      parameters:
+      - in: path
+        name: address_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/addresses/{address_id}/default/:
+    patch:
+      operationId: v1_addresses_default_partial_update_by_address_id
+      parameters:
+      - in: path
+        name: address_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/addresses/default/:
+    get:
+      operationId: v1_addresses_default_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/admin/order-review/blocker/:
+    get:
+      operationId: v1_admin_order_review_blocker_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/admin/orders/{order_id}/approve/:
+    post:
+      operationId: v1_admin_orders_approve_create_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/admin/orders/{order_id}/reject/:
+    post:
+      operationId: v1_admin_orders_reject_create_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/admin/orders/{order_id}/service-city-representatives/:
+    get:
+      operationId: v1_admin_orders_service_city_representatives_retrieve_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/check-email/:
+    get:
+      operationId: v1_auth_check_email_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/check-phone/:
+    get:
+      operationId: v1_auth_check_phone_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/check-username/:
+    get:
+      operationId: v1_auth_check_username_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/client/profile/:
+    put:
+      operationId: v1_auth_client_profile_update
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_auth_client_profile_partial_update
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_auth_client_profile_destroy
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/auth/forgot-password/:
+    post:
+      operationId: v1_auth_forgot_password_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/login/:
+    post:
+      operationId: v1_auth_login_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Login'
+          description: ''
+  /api/v1/auth/login/admin/:
+    post:
+      operationId: v1_auth_login_admin_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminLoginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminLoginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminLoginRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminLogin'
+          description: ''
+  /api/v1/auth/login/client/:
+    post:
+      operationId: v1_auth_login_client_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientLoginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ClientLoginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ClientLoginRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientLogin'
+          description: ''
+  /api/v1/auth/login/representative/:
+    post:
+      operationId: v1_auth_login_representative_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RepresentativeLoginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RepresentativeLoginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RepresentativeLoginRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepresentativeLogin'
+          description: ''
+  /api/v1/auth/logout/:
+    post:
+      operationId: v1_auth_logout_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/me/:
+    get:
+      operationId: v1_auth_me_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_auth_me_partial_update
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/refresh/:
+    post:
+      operationId: v1_auth_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailTokenRefreshRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EmailTokenRefreshRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EmailTokenRefreshRequest'
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailTokenRefresh'
+          description: ''
+  /api/v1/auth/representatives/:
+    get:
+      operationId: v1_auth_representatives_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/resend-verification/:
+    post:
+      operationId: v1_auth_resend_verification_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/reset-password/:
+    post:
+      operationId: v1_auth_reset_password_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/signup/:
+    post:
+      operationId: v1_auth_signup_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/users/:
+    get:
+      operationId: v1_auth_users_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_auth_users_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/users/{user_id}/:
+    get:
+      operationId: v1_auth_users_retrieve_by_user_id
+      parameters:
+      - in: path
+        name: user_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_auth_users_partial_update_by_user_id
+      parameters:
+      - in: path
+        name: user_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/verify-email/:
+    post:
+      operationId: v1_auth_verify_email_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/catalog/addition-classifications/:
+    get:
+      operationId: v1_catalog_addition_classifications_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_catalog_addition_classifications_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/catalog/addition-classifications/{classification_id}/:
+    get:
+      operationId: v1_catalog_addition_classifications_retrieve_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_catalog_addition_classifications_partial_update_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_catalog_addition_classifications_destroy_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/catalog/category-attributes/:
+    get:
+      operationId: v1_catalog_category_attributes_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_catalog_category_attributes_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/catalog/category-attributes/{attribute_id}/:
+    get:
+      operationId: v1_catalog_category_attributes_retrieve_by_attribute_id
+      parameters:
+      - in: path
+        name: attribute_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_catalog_category_attributes_partial_update_by_attribute_id
+      parameters:
+      - in: path
+        name: attribute_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_catalog_category_attributes_destroy_by_attribute_id
+      parameters:
+      - in: path
+        name: attribute_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/catalog/category-classifications/:
+    get:
+      operationId: v1_catalog_category_classifications_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_catalog_category_classifications_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/catalog/category-classifications/{classification_id}/:
+    get:
+      operationId: v1_catalog_category_classifications_retrieve_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_catalog_category_classifications_partial_update_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_catalog_category_classifications_destroy_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/catalog/category-options/:
+    get:
+      operationId: v1_catalog_category_options_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_catalog_category_options_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/catalog/category-options/{option_id}/:
+    get:
+      operationId: v1_catalog_category_options_retrieve_by_option_id
+      parameters:
+      - in: path
+        name: option_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_catalog_category_options_partial_update_by_option_id
+      parameters:
+      - in: path
+        name: option_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_catalog_category_options_destroy_by_option_id
+      parameters:
+      - in: path
+        name: option_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/catalog/product-additions/:
+    get:
+      operationId: v1_catalog_product_additions_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_catalog_product_additions_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/catalog/product-additions/{addition_id}/:
+    get:
+      operationId: v1_catalog_product_additions_retrieve_by_addition_id
+      parameters:
+      - in: path
+        name: addition_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_catalog_product_additions_partial_update_by_addition_id
+      parameters:
+      - in: path
+        name: addition_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_catalog_product_additions_destroy_by_addition_id
+      parameters:
+      - in: path
+        name: addition_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/catalog/product-categories/:
+    get:
+      operationId: v1_catalog_product_categories_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_catalog_product_categories_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/catalog/product-categories/{category_id}/:
+    get:
+      operationId: v1_catalog_product_categories_retrieve_by_category_id
+      parameters:
+      - in: path
+        name: category_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_catalog_product_categories_partial_update_by_category_id
+      parameters:
+      - in: path
+        name: category_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_catalog_product_categories_destroy_by_category_id
+      parameters:
+      - in: path
+        name: category_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/catalog/products/:
+    get:
+      operationId: v1_catalog_products_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_catalog_products_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/catalog/products/{product_id}/:
+    get:
+      operationId: v1_catalog_products_retrieve_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    put:
+      operationId: v1_catalog_products_update_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_catalog_products_partial_update_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_catalog_products_destroy_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/catalog/products/{product_id}/images/:
+    post:
+      operationId: v1_catalog_products_images_create_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/catalog/products/{product_id}/images/{image_id}/:
+    patch:
+      operationId: v1_catalog_products_images_partial_update_by_product_id_and_image_id
+      parameters:
+      - in: path
+        name: image_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_catalog_products_images_destroy_by_product_id_and_image_id
+      parameters:
+      - in: path
+        name: image_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/catalog/products/{product_id}/images/reorder/:
+    post:
+      operationId: v1_catalog_products_images_reorder_create_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/catalog/products/{product_id}/like/:
+    post:
+      operationId: v1_catalog_products_like_create_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/catalog/products/{product_id}/send-notification/:
+    post:
+      operationId: v1_catalog_products_send_notification_create_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/catalog/products/{product_id}/unlike/:
+    delete:
+      operationId: v1_catalog_products_unlike_destroy_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/catalog/products/likes/:
+    get:
+      operationId: v1_catalog_products_likes_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/catalog/store-subcategories/:
+    get:
+      operationId: v1_catalog_store_subcategories_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_catalog_store_subcategories_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/catalog/store-subcategories/{subcategory_id}/:
+    get:
+      operationId: v1_catalog_store_subcategories_retrieve_by_subcategory_id
+      parameters:
+      - in: path
+        name: subcategory_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_catalog_store_subcategories_partial_update_by_subcategory_id
+      parameters:
+      - in: path
+        name: subcategory_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_catalog_store_subcategories_destroy_by_subcategory_id
+      parameters:
+      - in: path
+        name: subcategory_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/courier/orders/:
+    get:
+      operationId: v1_courier_orders_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/courier/orders/{order_id}/:
+    get:
+      operationId: v1_courier_orders_retrieve_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/courier/orders/{order_id}/status/:
+    patch:
+      operationId: v1_courier_orders_status_partial_update_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/dashboard/overview/:
+    get:
+      operationId: v1_dashboard_overview_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/dashboard/settings/:
+    get:
+      operationId: v1_dashboard_settings_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_dashboard_settings_partial_update
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/:
+    get:
+      operationId: v1_home_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/classifications/:
+    get:
+      operationId: v1_home_classifications_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/classifications/{classification_id}/markets/:
+    get:
+      operationId: v1_home_classifications_markets_retrieve_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/classifications/featured/:
+    get:
+      operationId: v1_home_classifications_featured_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/classifications/normal/:
+    get:
+      operationId: v1_home_classifications_normal_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/classifications/popular/:
+    get:
+      operationId: v1_home_classifications_popular_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/login-dashboard-snapshot/:
+    get:
+      operationId: v1_home_login_dashboard_snapshot_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/market-classifications/:
+    get:
+      operationId: v1_home_market_classifications_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_home_market_classifications_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/market-classifications/{classification_id}/:
+    get:
+      operationId: v1_home_market_classifications_retrieve_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_home_market_classifications_partial_update_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_home_market_classifications_destroy_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/home/market-types/:
+    get:
+      operationId: v1_home_market_types_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_home_market_types_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/market-types/{market_type_id}/:
+    get:
+      operationId: v1_home_market_types_retrieve_by_market_type_id
+      parameters:
+      - in: path
+        name: market_type_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_home_market_types_partial_update_by_market_type_id
+      parameters:
+      - in: path
+        name: market_type_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_home_market_types_destroy_by_market_type_id
+      parameters:
+      - in: path
+        name: market_type_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/home/markets/:
+    get:
+      operationId: v1_home_markets_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_home_markets_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/markets/{market_id}/:
+    get:
+      operationId: v1_home_markets_retrieve_by_market_id
+      parameters:
+      - in: path
+        name: market_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_home_markets_partial_update_by_market_id
+      parameters:
+      - in: path
+        name: market_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_home_markets_destroy_by_market_id
+      parameters:
+      - in: path
+        name: market_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/home/markets/{market_id}/like/:
+    post:
+      operationId: v1_home_markets_like_create_by_market_id
+      parameters:
+      - in: path
+        name: market_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/markets/{market_id}/storefront/:
+    get:
+      operationId: v1_home_markets_storefront_retrieve_by_market_id
+      parameters:
+      - in: path
+        name: market_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/markets/{market_id}/unlike/:
+    delete:
+      operationId: v1_home_markets_unlike_destroy_by_market_id
+      parameters:
+      - in: path
+        name: market_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/home/markets/likes/:
+    get:
+      operationId: v1_home_markets_likes_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/products/:
+    get:
+      operationId: v1_home_products_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/products/{product_id}/:
+    get:
+      operationId: v1_home_products_retrieve_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/search/:
+    get:
+      operationId: v1_home_search_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/locations/addresses/:
+    get:
+      operationId: v1_locations_addresses_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_locations_addresses_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/locations/addresses/{address_id}/:
+    patch:
+      operationId: v1_locations_addresses_partial_update_by_address_id
+      parameters:
+      - in: path
+        name: address_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_locations_addresses_destroy_by_address_id
+      parameters:
+      - in: path
+        name: address_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/locations/addresses/{address_id}/default/:
+    patch:
+      operationId: v1_locations_addresses_default_partial_update_by_address_id
+      parameters:
+      - in: path
+        name: address_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/locations/addresses/default/:
+    get:
+      operationId: v1_locations_addresses_default_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/locations/delivery-areas/:
+    get:
+      operationId: v1_locations_delivery_areas_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDeliveryAreaList'
+          description: ''
+    post:
+      operationId: v1_locations_delivery_areas_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryAreaRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DeliveryAreaRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DeliveryAreaRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryArea'
+          description: ''
+  /api/v1/locations/delivery-areas/{area_id}/:
+    get:
+      operationId: v1_locations_delivery_areas_retrieve_by_area_id
+      parameters:
+      - in: path
+        name: area_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryArea'
+          description: ''
+    put:
+      operationId: v1_locations_delivery_areas_update_by_area_id
+      parameters:
+      - in: path
+        name: area_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryAreaRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DeliveryAreaRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DeliveryAreaRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryArea'
+          description: ''
+    patch:
+      operationId: v1_locations_delivery_areas_partial_update_by_area_id
+      parameters:
+      - in: path
+        name: area_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDeliveryAreaRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDeliveryAreaRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDeliveryAreaRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryArea'
+          description: ''
+    delete:
+      operationId: v1_locations_delivery_areas_destroy_by_area_id
+      parameters:
+      - in: path
+        name: area_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/locations/geocoding/autocomplete/:
+    get:
+      operationId: v1_locations_geocoding_autocomplete_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/locations/geocoding/reverse/:
+    get:
+      operationId: v1_locations_geocoding_reverse_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/locations/service-cities/:
+    get:
+      operationId: v1_locations_service_cities_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedServiceCityList'
+          description: ''
+    post:
+      operationId: v1_locations_service_cities_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceCityRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ServiceCityRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ServiceCityRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceCity'
+          description: ''
+  /api/v1/locations/service-cities/{city_id}/:
+    get:
+      operationId: v1_locations_service_cities_retrieve_by_city_id
+      parameters:
+      - in: path
+        name: city_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceCity'
+          description: ''
+    put:
+      operationId: v1_locations_service_cities_update_by_city_id
+      parameters:
+      - in: path
+        name: city_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceCityRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ServiceCityRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ServiceCityRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceCity'
+          description: ''
+    patch:
+      operationId: v1_locations_service_cities_partial_update_by_city_id
+      parameters:
+      - in: path
+        name: city_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedServiceCityRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedServiceCityRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedServiceCityRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceCity'
+          description: ''
+    delete:
+      operationId: v1_locations_service_cities_destroy_by_city_id
+      parameters:
+      - in: path
+        name: city_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/locations/service-cities/coverage-lookup/:
+    get:
+      operationId: v1_locations_service_cities_coverage_lookup_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/market-region/detect/:
+    post:
+      operationId: v1_market_region_detect_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/market-region/me/:
+    get:
+      operationId: v1_market_region_me_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_market_region_me_partial_update
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/market-region/options/:
+    get:
+      operationId: v1_market_region_options_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/notifications/:
+    get:
+      operationId: v1_notifications_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/notifications/{notification_id}/:
+    delete:
+      operationId: v1_notifications_destroy_by_notification_id
+      parameters:
+      - in: path
+        name: notification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/notifications/{notification_id}/read/:
+    patch:
+      operationId: v1_notifications_read_partial_update_by_notification_id
+      parameters:
+      - in: path
+        name: notification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/notifications/clear-read/:
+    delete:
+      operationId: v1_notifications_clear_read_destroy
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/notifications/devices/register/:
+    post:
+      operationId: v1_notifications_devices_register_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/notifications/devices/unregister/:
+    delete:
+      operationId: v1_notifications_devices_unregister_destroy
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/notifications/mark-all-read/:
+    post:
+      operationId: v1_notifications_mark_all_read_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/notifications/unread-count/:
+    get:
+      operationId: v1_notifications_unread_count_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/offers/:
+    get:
+      operationId: v1_offers_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_offers_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/offers/{offer_id}/:
+    get:
+      operationId: v1_offers_retrieve_by_offer_id
+      parameters:
+      - in: path
+        name: offer_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_offers_partial_update_by_offer_id
+      parameters:
+      - in: path
+        name: offer_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_offers_destroy_by_offer_id
+      parameters:
+      - in: path
+        name: offer_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/offers/{offer_id}/image/:
+    post:
+      operationId: v1_offers_image_create_by_offer_id
+      parameters:
+      - in: path
+        name: offer_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/offers/{offer_id}/send-notification/:
+    post:
+      operationId: v1_offers_send_notification_create_by_offer_id
+      parameters:
+      - in: path
+        name: offer_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/orders/:
+    get:
+      operationId: v1_orders_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedOrderListList'
+          description: ''
+    post:
+      operationId: v1_orders_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminOrderCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminOrderCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminOrderCreateRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOrderCreate'
+          description: ''
+  /api/v1/orders/{order_id}/:
+    get:
+      operationId: v1_orders_retrieve_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+          description: ''
+    put:
+      operationId: v1_orders_update_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OrderRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OrderRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+          description: ''
+    patch:
+      operationId: v1_orders_partial_update_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedOrderRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedOrderRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedOrderRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+          description: ''
+    delete:
+      operationId: v1_orders_destroy_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/orders/{order_id}/assignment/:
+    patch:
+      operationId: v1_orders_assignment_partial_update_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/orders/{order_id}/delivery-price/:
+    patch:
+      operationId: v1_orders_delivery_price_partial_update_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/orders/{order_id}/delivery-price/accept/:
+    post:
+      operationId: v1_orders_delivery_price_accept_create_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/orders/{order_id}/status/:
+    patch:
+      operationId: v1_orders_status_partial_update_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/orders/create/:
+    post:
+      operationId: v1_orders_create_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/orders/my/:
+    get:
+      operationId: v1_orders_my_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedOrderList'
+          description: ''
+  /api/v1/orders/preview/:
+    post:
+      operationId: v1_orders_preview_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/partners/admin/applications/:
+    get:
+      operationId: v1_partners_admin_applications_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/partners/admin/applications/{application_id}/:
+    patch:
+      operationId: v1_partners_admin_applications_partial_update_by_application_id
+      parameters:
+      - in: path
+        name: application_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/partners/applications/:
+    get:
+      operationId: v1_partners_applications_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_partners_applications_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/addresses/:
+    get:
+      operationId: v2_addresses_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_addresses_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/addresses/{address_id}/:
+    patch:
+      operationId: v2_addresses_partial_update_by_address_id
+      parameters:
+      - in: path
+        name: address_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_addresses_destroy_by_address_id
+      parameters:
+      - in: path
+        name: address_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/addresses/{address_id}/default/:
+    patch:
+      operationId: v2_addresses_default_partial_update_by_address_id
+      parameters:
+      - in: path
+        name: address_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/addresses/default/:
+    get:
+      operationId: v2_addresses_default_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/admin/order-review/blocker/:
+    get:
+      operationId: v2_admin_order_review_blocker_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/admin/orders/{order_id}/approve/:
+    post:
+      operationId: v2_admin_orders_approve_create_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/admin/orders/{order_id}/reject/:
+    post:
+      operationId: v2_admin_orders_reject_create_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/admin/orders/{order_id}/service-city-representatives/:
+    get:
+      operationId: v2_admin_orders_service_city_representatives_retrieve_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/check-email/:
+    get:
+      operationId: v2_auth_check_email_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/check-phone/:
+    get:
+      operationId: v2_auth_check_phone_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/check-username/:
+    get:
+      operationId: v2_auth_check_username_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/client/profile/:
+    put:
+      operationId: v2_auth_client_profile_update
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_auth_client_profile_partial_update
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_auth_client_profile_destroy
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/auth/forgot-password/:
+    post:
+      operationId: v2_auth_forgot_password_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/login/:
+    post:
+      operationId: v2_auth_login_create
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Login'
+          description: ''
+  /api/v2/auth/login/admin/:
+    post:
+      operationId: v2_auth_login_admin_create
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminLoginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminLoginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminLoginRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminLogin'
+          description: ''
+  /api/v2/auth/login/client/:
+    post:
+      operationId: v2_auth_login_client_create
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientLoginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ClientLoginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ClientLoginRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientLogin'
+          description: ''
+  /api/v2/auth/login/representative/:
+    post:
+      operationId: v2_auth_login_representative_create
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RepresentativeLoginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RepresentativeLoginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RepresentativeLoginRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepresentativeLogin'
+          description: ''
+  /api/v2/auth/logout/:
+    post:
+      operationId: v2_auth_logout_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/me/:
+    get:
+      operationId: v2_auth_me_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_auth_me_partial_update
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/refresh/:
+    post:
+      operationId: v2_auth_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailTokenRefreshRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EmailTokenRefreshRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EmailTokenRefreshRequest'
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailTokenRefresh'
+          description: ''
+  /api/v2/auth/representatives/:
+    get:
+      operationId: v2_auth_representatives_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/resend-verification/:
+    post:
+      operationId: v2_auth_resend_verification_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/reset-password/:
+    post:
+      operationId: v2_auth_reset_password_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/signup/:
+    post:
+      operationId: v2_auth_signup_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/users/:
+    get:
+      operationId: v2_auth_users_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_auth_users_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/users/{user_id}/:
+    get:
+      operationId: v2_auth_users_retrieve_by_user_id
+      parameters:
+      - in: path
+        name: user_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_auth_users_partial_update_by_user_id
+      parameters:
+      - in: path
+        name: user_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/verify-email/:
+    post:
+      operationId: v2_auth_verify_email_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v2/catalog/addition-classifications/:
+    get:
+      operationId: v2_catalog_addition_classifications_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_catalog_addition_classifications_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/catalog/addition-classifications/{classification_id}/:
+    get:
+      operationId: v2_catalog_addition_classifications_retrieve_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_catalog_addition_classifications_partial_update_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_catalog_addition_classifications_destroy_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/catalog/category-attributes/:
+    get:
+      operationId: v2_catalog_category_attributes_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_catalog_category_attributes_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/catalog/category-attributes/{attribute_id}/:
+    get:
+      operationId: v2_catalog_category_attributes_retrieve_by_attribute_id
+      parameters:
+      - in: path
+        name: attribute_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_catalog_category_attributes_partial_update_by_attribute_id
+      parameters:
+      - in: path
+        name: attribute_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_catalog_category_attributes_destroy_by_attribute_id
+      parameters:
+      - in: path
+        name: attribute_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/catalog/category-classifications/:
+    get:
+      operationId: v2_catalog_category_classifications_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_catalog_category_classifications_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/catalog/category-classifications/{classification_id}/:
+    get:
+      operationId: v2_catalog_category_classifications_retrieve_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_catalog_category_classifications_partial_update_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_catalog_category_classifications_destroy_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/catalog/category-options/:
+    get:
+      operationId: v2_catalog_category_options_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_catalog_category_options_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/catalog/category-options/{option_id}/:
+    get:
+      operationId: v2_catalog_category_options_retrieve_by_option_id
+      parameters:
+      - in: path
+        name: option_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_catalog_category_options_partial_update_by_option_id
+      parameters:
+      - in: path
+        name: option_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_catalog_category_options_destroy_by_option_id
+      parameters:
+      - in: path
+        name: option_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/catalog/product-additions/:
+    get:
+      operationId: v2_catalog_product_additions_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_catalog_product_additions_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/catalog/product-additions/{addition_id}/:
+    get:
+      operationId: v2_catalog_product_additions_retrieve_by_addition_id
+      parameters:
+      - in: path
+        name: addition_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_catalog_product_additions_partial_update_by_addition_id
+      parameters:
+      - in: path
+        name: addition_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_catalog_product_additions_destroy_by_addition_id
+      parameters:
+      - in: path
+        name: addition_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/catalog/product-categories/:
+    get:
+      operationId: v2_catalog_product_categories_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_catalog_product_categories_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/catalog/product-categories/{category_id}/:
+    get:
+      operationId: v2_catalog_product_categories_retrieve_by_category_id
+      parameters:
+      - in: path
+        name: category_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_catalog_product_categories_partial_update_by_category_id
+      parameters:
+      - in: path
+        name: category_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_catalog_product_categories_destroy_by_category_id
+      parameters:
+      - in: path
+        name: category_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/catalog/products/:
+    get:
+      operationId: v2_catalog_products_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_catalog_products_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/catalog/products/{product_id}/:
+    get:
+      operationId: v2_catalog_products_retrieve_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    put:
+      operationId: v2_catalog_products_update_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_catalog_products_partial_update_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_catalog_products_destroy_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/catalog/products/{product_id}/images/:
+    post:
+      operationId: v2_catalog_products_images_create_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/catalog/products/{product_id}/images/{image_id}/:
+    patch:
+      operationId: v2_catalog_products_images_partial_update_by_product_id_and_image_id
+      parameters:
+      - in: path
+        name: image_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_catalog_products_images_destroy_by_product_id_and_image_id
+      parameters:
+      - in: path
+        name: image_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/catalog/products/{product_id}/images/reorder/:
+    post:
+      operationId: v2_catalog_products_images_reorder_create_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/catalog/products/{product_id}/like/:
+    post:
+      operationId: v2_catalog_products_like_create_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/catalog/products/{product_id}/send-notification/:
+    post:
+      operationId: v2_catalog_products_send_notification_create_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/catalog/products/{product_id}/unlike/:
+    delete:
+      operationId: v2_catalog_products_unlike_destroy_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/catalog/products/likes/:
+    get:
+      operationId: v2_catalog_products_likes_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/catalog/store-subcategories/:
+    get:
+      operationId: v2_catalog_store_subcategories_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_catalog_store_subcategories_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/catalog/store-subcategories/{subcategory_id}/:
+    get:
+      operationId: v2_catalog_store_subcategories_retrieve_by_subcategory_id
+      parameters:
+      - in: path
+        name: subcategory_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_catalog_store_subcategories_partial_update_by_subcategory_id
+      parameters:
+      - in: path
+        name: subcategory_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_catalog_store_subcategories_destroy_by_subcategory_id
+      parameters:
+      - in: path
+        name: subcategory_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/courier/orders/:
+    get:
+      operationId: v2_courier_orders_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/courier/orders/{order_id}/:
+    get:
+      operationId: v2_courier_orders_retrieve_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/courier/orders/{order_id}/status/:
+    patch:
+      operationId: v2_courier_orders_status_partial_update_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/dashboard/overview/:
+    get:
+      operationId: v2_dashboard_overview_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/dashboard/settings/:
+    get:
+      operationId: v2_dashboard_settings_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_dashboard_settings_partial_update
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/:
+    get:
+      operationId: v2_home_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/classifications/:
+    get:
+      operationId: v2_home_classifications_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/classifications/{classification_id}/markets/:
+    get:
+      operationId: v2_home_classifications_markets_retrieve_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/classifications/featured/:
+    get:
+      operationId: v2_home_classifications_featured_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/classifications/normal/:
+    get:
+      operationId: v2_home_classifications_normal_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/classifications/popular/:
+    get:
+      operationId: v2_home_classifications_popular_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/login-dashboard-snapshot/:
+    get:
+      operationId: v2_home_login_dashboard_snapshot_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/market-classifications/:
+    get:
+      operationId: v2_home_market_classifications_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_home_market_classifications_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/market-classifications/{classification_id}/:
+    get:
+      operationId: v2_home_market_classifications_retrieve_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_home_market_classifications_partial_update_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_home_market_classifications_destroy_by_classification_id
+      parameters:
+      - in: path
+        name: classification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/home/market-types/:
+    get:
+      operationId: v2_home_market_types_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_home_market_types_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/market-types/{market_type_id}/:
+    get:
+      operationId: v2_home_market_types_retrieve_by_market_type_id
+      parameters:
+      - in: path
+        name: market_type_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_home_market_types_partial_update_by_market_type_id
+      parameters:
+      - in: path
+        name: market_type_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_home_market_types_destroy_by_market_type_id
+      parameters:
+      - in: path
+        name: market_type_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/home/markets/:
+    get:
+      operationId: v2_home_markets_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_home_markets_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/markets/{market_id}/:
+    get:
+      operationId: v2_home_markets_retrieve_by_market_id
+      parameters:
+      - in: path
+        name: market_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_home_markets_partial_update_by_market_id
+      parameters:
+      - in: path
+        name: market_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_home_markets_destroy_by_market_id
+      parameters:
+      - in: path
+        name: market_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/home/markets/{market_id}/like/:
+    post:
+      operationId: v2_home_markets_like_create_by_market_id
+      parameters:
+      - in: path
+        name: market_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/markets/{market_id}/storefront/:
+    get:
+      operationId: v2_home_markets_storefront_retrieve_by_market_id
+      parameters:
+      - in: path
+        name: market_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/markets/{market_id}/unlike/:
+    delete:
+      operationId: v2_home_markets_unlike_destroy_by_market_id
+      parameters:
+      - in: path
+        name: market_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/home/markets/likes/:
+    get:
+      operationId: v2_home_markets_likes_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/products/:
+    get:
+      operationId: v2_home_products_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/products/{product_id}/:
+    get:
+      operationId: v2_home_products_retrieve_by_product_id
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/search/:
+    get:
+      operationId: v2_home_search_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/locations/addresses/:
+    get:
+      operationId: v2_locations_addresses_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_locations_addresses_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/locations/addresses/{address_id}/:
+    patch:
+      operationId: v2_locations_addresses_partial_update_by_address_id
+      parameters:
+      - in: path
+        name: address_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_locations_addresses_destroy_by_address_id
+      parameters:
+      - in: path
+        name: address_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/locations/addresses/{address_id}/default/:
+    patch:
+      operationId: v2_locations_addresses_default_partial_update_by_address_id
+      parameters:
+      - in: path
+        name: address_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/locations/addresses/default/:
+    get:
+      operationId: v2_locations_addresses_default_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/locations/delivery-areas/:
+    get:
+      operationId: v2_locations_delivery_areas_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDeliveryAreaList'
+          description: ''
+    post:
+      operationId: v2_locations_delivery_areas_create
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryAreaRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DeliveryAreaRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DeliveryAreaRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryArea'
+          description: ''
+  /api/v2/locations/delivery-areas/{area_id}/:
+    get:
+      operationId: v2_locations_delivery_areas_retrieve_by_area_id
+      parameters:
+      - in: path
+        name: area_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryArea'
+          description: ''
+    put:
+      operationId: v2_locations_delivery_areas_update_by_area_id
+      parameters:
+      - in: path
+        name: area_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryAreaRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DeliveryAreaRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DeliveryAreaRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryArea'
+          description: ''
+    patch:
+      operationId: v2_locations_delivery_areas_partial_update_by_area_id
+      parameters:
+      - in: path
+        name: area_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDeliveryAreaRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDeliveryAreaRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDeliveryAreaRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryArea'
+          description: ''
+    delete:
+      operationId: v2_locations_delivery_areas_destroy_by_area_id
+      parameters:
+      - in: path
+        name: area_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/locations/geocoding/autocomplete/:
+    get:
+      operationId: v2_locations_geocoding_autocomplete_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/locations/geocoding/reverse/:
+    get:
+      operationId: v2_locations_geocoding_reverse_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/locations/service-cities/:
+    get:
+      operationId: v2_locations_service_cities_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedServiceCityList'
+          description: ''
+    post:
+      operationId: v2_locations_service_cities_create
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceCityRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ServiceCityRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ServiceCityRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceCity'
+          description: ''
+  /api/v2/locations/service-cities/{city_id}/:
+    get:
+      operationId: v2_locations_service_cities_retrieve_by_city_id
+      parameters:
+      - in: path
+        name: city_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceCity'
+          description: ''
+    put:
+      operationId: v2_locations_service_cities_update_by_city_id
+      parameters:
+      - in: path
+        name: city_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceCityRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ServiceCityRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ServiceCityRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceCity'
+          description: ''
+    patch:
+      operationId: v2_locations_service_cities_partial_update_by_city_id
+      parameters:
+      - in: path
+        name: city_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedServiceCityRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedServiceCityRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedServiceCityRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceCity'
+          description: ''
+    delete:
+      operationId: v2_locations_service_cities_destroy_by_city_id
+      parameters:
+      - in: path
+        name: city_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/locations/service-cities/coverage-lookup/:
+    get:
+      operationId: v2_locations_service_cities_coverage_lookup_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/market-region/detect/:
+    post:
+      operationId: v2_market_region_detect_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/market-region/me/:
+    get:
+      operationId: v2_market_region_me_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_market_region_me_partial_update
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/market-region/options/:
+    get:
+      operationId: v2_market_region_options_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/notifications/:
+    get:
+      operationId: v2_notifications_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/notifications/{notification_id}/:
+    delete:
+      operationId: v2_notifications_destroy_by_notification_id
+      parameters:
+      - in: path
+        name: notification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/notifications/{notification_id}/read/:
+    patch:
+      operationId: v2_notifications_read_partial_update_by_notification_id
+      parameters:
+      - in: path
+        name: notification_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/notifications/clear-read/:
+    delete:
+      operationId: v2_notifications_clear_read_destroy
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/notifications/devices/register/:
+    post:
+      operationId: v2_notifications_devices_register_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/notifications/devices/unregister/:
+    delete:
+      operationId: v2_notifications_devices_unregister_destroy
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/notifications/mark-all-read/:
+    post:
+      operationId: v2_notifications_mark_all_read_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/notifications/unread-count/:
+    get:
+      operationId: v2_notifications_unread_count_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/offers/:
+    get:
+      operationId: v2_offers_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_offers_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/offers/{offer_id}/:
+    get:
+      operationId: v2_offers_retrieve_by_offer_id
+      parameters:
+      - in: path
+        name: offer_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_offers_partial_update_by_offer_id
+      parameters:
+      - in: path
+        name: offer_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_offers_destroy_by_offer_id
+      parameters:
+      - in: path
+        name: offer_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/offers/{offer_id}/image/:
+    post:
+      operationId: v2_offers_image_create_by_offer_id
+      parameters:
+      - in: path
+        name: offer_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/offers/{offer_id}/send-notification/:
+    post:
+      operationId: v2_offers_send_notification_create_by_offer_id
+      parameters:
+      - in: path
+        name: offer_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/orders/:
+    get:
+      operationId: v2_orders_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedOrderListList'
+          description: ''
+    post:
+      operationId: v2_orders_create
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminOrderCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminOrderCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminOrderCreateRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOrderCreate'
+          description: ''
+  /api/v2/orders/{order_id}/:
+    get:
+      operationId: v2_orders_retrieve_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+          description: ''
+    put:
+      operationId: v2_orders_update_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OrderRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OrderRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+          description: ''
+    patch:
+      operationId: v2_orders_partial_update_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedOrderRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedOrderRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedOrderRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+          description: ''
+    delete:
+      operationId: v2_orders_destroy_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/orders/{order_id}/assignment/:
+    patch:
+      operationId: v2_orders_assignment_partial_update_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/orders/{order_id}/delivery-price/:
+    patch:
+      operationId: v2_orders_delivery_price_partial_update_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/orders/{order_id}/delivery-price/accept/:
+    post:
+      operationId: v2_orders_delivery_price_accept_create_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/orders/{order_id}/status/:
+    patch:
+      operationId: v2_orders_status_partial_update_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/orders/create/:
+    post:
+      operationId: v2_orders_create_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/orders/my/:
+    get:
+      operationId: v2_orders_my_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedOrderList'
+          description: ''
+  /api/v2/orders/preview/:
+    post:
+      operationId: v2_orders_preview_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/partners/admin/applications/:
+    get:
+      operationId: v2_partners_admin_applications_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/partners/admin/applications/{application_id}/:
+    patch:
+      operationId: v2_partners_admin_applications_partial_update_by_application_id
+      parameters:
+      - in: path
+        name: application_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/partners/applications/:
+    get:
+      operationId: v2_partners_applications_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_partners_applications_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+components:
+  schemas:
+    AdminLogin:
+      type: object
+      description: Dashboard-only login input; other login APIs keep their existing
+        schema.
+      properties:
+        email:
+          type: string
+        remember:
+          type: boolean
+          default: false
+    AdminLoginRequest:
+      type: object
+      description: Dashboard-only login input; other login APIs keep their existing
+        schema.
+      properties:
+        email:
+          type: string
+          minLength: 1
+        identifier:
+          type: string
+          writeOnly: true
+          minLength: 1
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+        remember:
+          type: boolean
+          default: false
+      required:
+      - password
+    AdminOrderCreate:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user_id:
+          type: integer
+        customer:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        delivery_address_id:
+          type: integer
+          nullable: true
+        delivery_address:
+          type: object
+          additionalProperties: {}
+          nullable: true
+          readOnly: true
+        assigned_representative_id:
+          type: integer
+          readOnly: true
+        assigned_representative:
+          allOf:
+          - $ref: '#/components/schemas/AssignedRepresentativeSummary'
+          readOnly: true
+        market_id:
+          type: integer
+        market:
+          allOf:
+          - $ref: '#/components/schemas/MarketSummary'
+          readOnly: true
+        order_scope:
+          readOnly: true
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/OrderScopeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        service_city_id:
+          type: integer
+          nullable: true
+        service_city:
+          allOf:
+          - $ref: '#/components/schemas/ServiceCitySummary'
+          readOnly: true
+        delivery_area_id:
+          type: integer
+          readOnly: true
+          nullable: true
+        delivery_area:
+          allOf:
+          - $ref: '#/components/schemas/DeliveryAreaSummary'
+          readOnly: true
+        delivery_type:
+          allOf:
+          - $ref: '#/components/schemas/DeliveryTypeEnum'
+          readOnly: true
+        fulfillment_type:
+          allOf:
+          - $ref: '#/components/schemas/FulfillmentTypeEnum'
+          readOnly: true
+        external_shipping_status:
+          allOf:
+          - $ref: '#/components/schemas/ExternalShippingStatusEnum'
+          readOnly: true
+        delivery_price_status:
+          type: string
+          readOnly: true
+        eta_min_minutes:
+          type: integer
+          readOnly: true
+          nullable: true
+        eta_max_minutes:
+          type: integer
+          readOnly: true
+          nullable: true
+        payment_method:
+          type: string
+          maxLength: 50
+        discount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        description:
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/OrderStatusEnum'
+          readOnly: true
+        review_status:
+          allOf:
+          - $ref: '#/components/schemas/ReviewStatusEnum'
+          readOnly: true
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+          nullable: true
+        subtotal_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        total_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        image:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+        assigned_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        delivered_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        delivery_note:
+          type: string
+        delivery_proof:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+        approved_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        approved_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        rejected_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        rejected_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        rejection_reason:
+          type: string
+          readOnly: true
+        is_multi_market:
+          type: boolean
+          readOnly: true
+        market_count:
+          type: integer
+          readOnly: true
+        market_names_summary:
+          type: string
+          readOnly: true
+        market_sections:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        grouped_items:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        grouped_offers:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        pickup_stops:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderEvent'
+          readOnly: true
+        allowed_statuses:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminOrderItemCreate'
+        offers:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminOrderOfferCreate'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - allowed_statuses
+      - approved_at
+      - approved_by
+      - assigned_at
+      - assigned_representative
+      - assigned_representative_id
+      - created_at
+      - customer
+      - delivered_at
+      - delivery_address
+      - delivery_area
+      - delivery_area_id
+      - delivery_price
+      - delivery_price_status
+      - delivery_proof
+      - delivery_type
+      - discount
+      - eta_max_minutes
+      - eta_min_minutes
+      - external_shipping_status
+      - fulfillment_type
+      - grouped_items
+      - grouped_offers
+      - history
+      - id
+      - image
+      - is_multi_market
+      - market
+      - market_count
+      - market_names_summary
+      - market_sections
+      - order_scope
+      - payment_method
+      - pickup_stops
+      - rejected_at
+      - rejected_by
+      - rejection_reason
+      - review_status
+      - service_city
+      - status
+      - subtotal_price
+      - total_price
+      - updated_at
+      - user_id
+    AdminOrderCreateRequest:
+      type: object
+      properties:
+        user_id:
+          type: integer
+        delivery_address_id:
+          type: integer
+          nullable: true
+        market_id:
+          type: integer
+        service_city_id:
+          type: integer
+          nullable: true
+        payment_method:
+          type: string
+          minLength: 1
+          maxLength: 50
+        description:
+          type: string
+        delivery_note:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminOrderItemCreateRequest'
+        offers:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminOrderOfferCreateRequest'
+      required:
+      - payment_method
+      - user_id
+    AdminOrderItemCreate:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        variant_id:
+          type: integer
+        quantity:
+          type: integer
+          minimum: 1
+      required:
+      - id
+      - quantity
+      - variant_id
+    AdminOrderItemCreateRequest:
+      type: object
+      properties:
+        variant_id:
+          type: integer
+        quantity:
+          type: integer
+          minimum: 1
+      required:
+      - quantity
+      - variant_id
+    AdminOrderOfferCreate:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        offer_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - offer_id
+    AdminOrderOfferCreateRequest:
+      type: object
+      properties:
+        offer_id:
+          type: integer
+      required:
+      - offer_id
+    AssignedRepresentativeSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        phone:
+          type: string
+          maxLength: 30
+        avatar:
+          type: string
+          nullable: true
+          readOnly: true
+        avatar_url:
+          type: string
+          nullable: true
+          readOnly: true
+        service_city_id:
+          type: integer
+          readOnly: true
+        service_city:
+          type: object
+          additionalProperties: {}
+          nullable: true
+          readOnly: true
+        is_available:
+          type: boolean
+          readOnly: true
+        vehicle_type:
+          type: string
+          readOnly: true
+        plate_number:
+          type: string
+          readOnly: true
+      required:
+      - avatar
+      - avatar_url
+      - id
+      - is_available
+      - name
+      - phone
+      - plate_number
+      - service_city
+      - service_city_id
+      - vehicle_type
+    AssignedRepresentativeSummaryRequest:
+      type: object
+      properties:
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        phone:
+          type: string
+          minLength: 1
+          maxLength: 30
+      required:
+      - phone
+    BlankEnum:
+      enum:
+      - ''
+    ClientLogin:
+      type: object
+      description: Client-only session choice; omitted values are temporary by default.
+      properties:
+        email:
+          type: string
+        remember:
+          type: boolean
+          default: false
+    ClientLoginRequest:
+      type: object
+      description: Client-only session choice; omitted values are temporary by default.
+      properties:
+        email:
+          type: string
+          minLength: 1
+        identifier:
+          type: string
+          writeOnly: true
+          minLength: 1
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+        remember:
+          type: boolean
+          default: false
+      required:
+      - password
+    DeliveryArea:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        service_city_id:
+          type: integer
+        service_city_name:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        center_latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,7})?$
+          nullable: true
+        center_longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,7})?$
+          nullable: true
+        radius_km:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+          nullable: true
+        boundary_geojson:
+          nullable: true
+        boundary_bbox:
+          nullable: true
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        eta_min_minutes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        eta_max_minutes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        is_active:
+          type: boolean
+          default: true
+        archived_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        deletion_mode:
+          type: string
+          readOnly: true
+      required:
+      - archived_at
+      - deletion_mode
+      - delivery_price
+      - id
+      - name
+      - service_city_id
+      - service_city_name
+    DeliveryAreaRequest:
+      type: object
+      properties:
+        service_city_id:
+          type: integer
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        center_latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,7})?$
+          nullable: true
+        center_longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,7})?$
+          nullable: true
+        radius_km:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+          nullable: true
+        boundary_geojson:
+          nullable: true
+        boundary_bbox:
+          nullable: true
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        eta_min_minutes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        eta_max_minutes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        is_active:
+          type: boolean
+          default: true
+      required:
+      - delivery_price
+      - name
+      - service_city_id
+    DeliveryAreaSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        service_city_id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        is_active:
+          type: boolean
+      required:
+      - delivery_price
+      - id
+      - name
+      - service_city_id
+    DeliveryAreaSummaryRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        is_active:
+          type: boolean
+      required:
+      - delivery_price
+      - name
+    DeliveryTypeEnum:
+      enum:
+      - fixed_area
+      - delivery
+      type: string
+      description: |-
+        * `fixed_area` - Fixed area
+        * `delivery` - Delivery
+    EmailTokenRefresh:
+      type: object
+      properties:
+        refresh:
+          type: string
+        access:
+          type: string
+          readOnly: true
+      required:
+      - access
+    EmailTokenRefreshRequest:
+      type: object
+      properties:
+        refresh:
+          type: string
+          minLength: 1
+        refreshToken:
+          type: string
+          writeOnly: true
+          minLength: 1
+    EventTypeEnum:
+      enum:
+      - order_created
+      - review_approved
+      - review_rejected
+      - status_changed
+      - assigned
+      - unassigned
+      - delivery_price_changed
+      - delivery_quote_sent
+      - delivery_quote_accepted
+      - cancelled
+      type: string
+      description: |-
+        * `order_created` - Order created
+        * `review_approved` - Review approved
+        * `review_rejected` - Review rejected
+        * `status_changed` - Status changed
+        * `assigned` - Assigned
+        * `unassigned` - Unassigned
+        * `delivery_price_changed` - Delivery price changed
+        * `delivery_quote_sent` - Delivery quote sent
+        * `delivery_quote_accepted` - Delivery quote accepted
+        * `cancelled` - Cancelled
+    ExternalShippingStatusEnum:
+      enum:
+      - not_required
+      - pending_quote
+      - awaiting_customer_approval
+      - quoted
+      type: string
+      description: |-
+        * `not_required` - Not required
+        * `pending_quote` - Pending quote
+        * `awaiting_customer_approval` - Awaiting customer approval
+        * `quoted` - Quoted
+    FulfillmentTypeEnum:
+      enum:
+      - direct
+      - external_shipping
+      type: string
+      description: |-
+        * `direct` - Direct delivery
+        * `external_shipping` - External shipping
+    Login:
+      type: object
+      properties:
+        email:
+          type: string
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          minLength: 1
+        identifier:
+          type: string
+          writeOnly: true
+          minLength: 1
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - password
+    MarketSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        branch:
+          type: string
+          maxLength: 255
+        status:
+          $ref: '#/components/schemas/MarketSummaryStatusEnum'
+      required:
+      - id
+      - name
+    MarketSummaryRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        branch:
+          type: string
+          maxLength: 255
+        status:
+          $ref: '#/components/schemas/MarketSummaryStatusEnum'
+      required:
+      - name
+    MarketSummaryStatusEnum:
+      enum:
+      - active
+      - inactive
+      type: string
+      description: |-
+        * `active` - Active
+        * `inactive` - Inactive
+    NullEnum:
+      enum:
+      - null
+    Order:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user_id:
+          type: integer
+        customer:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        delivery_address_id:
+          type: integer
+          nullable: true
+        delivery_address:
+          type: object
+          additionalProperties: {}
+          nullable: true
+          readOnly: true
+        assigned_representative_id:
+          type: integer
+          readOnly: true
+        assigned_representative:
+          allOf:
+          - $ref: '#/components/schemas/AssignedRepresentativeSummary'
+          readOnly: true
+        market_id:
+          type: integer
+        market:
+          allOf:
+          - $ref: '#/components/schemas/MarketSummary'
+          readOnly: true
+        order_scope:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/OrderScopeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        service_city_id:
+          type: integer
+          nullable: true
+        service_city:
+          allOf:
+          - $ref: '#/components/schemas/ServiceCitySummary'
+          readOnly: true
+        delivery_area_id:
+          type: integer
+          nullable: true
+        delivery_area:
+          allOf:
+          - $ref: '#/components/schemas/DeliveryAreaSummary'
+          readOnly: true
+        delivery_type:
+          $ref: '#/components/schemas/DeliveryTypeEnum'
+        fulfillment_type:
+          allOf:
+          - $ref: '#/components/schemas/FulfillmentTypeEnum'
+          readOnly: true
+        external_shipping_status:
+          allOf:
+          - $ref: '#/components/schemas/ExternalShippingStatusEnum'
+          readOnly: true
+        delivery_price_status:
+          type: string
+          readOnly: true
+        eta_min_minutes:
+          type: integer
+          readOnly: true
+          nullable: true
+        eta_max_minutes:
+          type: integer
+          readOnly: true
+          nullable: true
+        payment_method:
+          type: string
+          maxLength: 50
+        discount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        description:
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/OrderStatusEnum'
+          readOnly: true
+        review_status:
+          allOf:
+          - $ref: '#/components/schemas/ReviewStatusEnum'
+          readOnly: true
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        subtotal_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        total_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        image:
+          type: string
+          format: uri
+          nullable: true
+        assigned_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        delivered_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        delivery_note:
+          type: string
+        delivery_proof:
+          type: string
+          format: uri
+          nullable: true
+        approved_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        approved_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        rejected_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        rejected_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        rejection_reason:
+          type: string
+          readOnly: true
+        is_multi_market:
+          type: boolean
+          readOnly: true
+        market_count:
+          type: integer
+          readOnly: true
+        market_names_summary:
+          type: string
+          readOnly: true
+        market_sections:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        grouped_items:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        grouped_offers:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        pickup_stops:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderEvent'
+          readOnly: true
+        allowed_statuses:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        offers:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderOffer'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - allowed_statuses
+      - approved_at
+      - approved_by
+      - assigned_at
+      - assigned_representative
+      - assigned_representative_id
+      - created_at
+      - customer
+      - delivered_at
+      - delivery_address
+      - delivery_area
+      - delivery_price_status
+      - eta_max_minutes
+      - eta_min_minutes
+      - external_shipping_status
+      - fulfillment_type
+      - grouped_items
+      - grouped_offers
+      - history
+      - id
+      - is_multi_market
+      - market
+      - market_count
+      - market_names_summary
+      - market_sections
+      - payment_method
+      - pickup_stops
+      - rejected_at
+      - rejected_by
+      - rejection_reason
+      - review_status
+      - service_city
+      - status
+      - updated_at
+      - user_id
+    OrderEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        event_type:
+          $ref: '#/components/schemas/EventTypeEnum'
+        from_status:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/OrderStatusEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        to_status:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/OrderStatusEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        actor:
+          type: object
+          additionalProperties: {}
+          nullable: true
+          readOnly: true
+        note:
+          type: string
+        metadata: {}
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actor
+      - created_at
+      - event_type
+      - id
+    OrderEventRequest:
+      type: object
+      properties:
+        event_type:
+          $ref: '#/components/schemas/EventTypeEnum'
+        from_status:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/OrderStatusEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        to_status:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/OrderStatusEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        note:
+          type: string
+        metadata: {}
+      required:
+      - event_type
+    OrderItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        section_id:
+          type: integer
+          readOnly: true
+        variant_id:
+          type: integer
+        product_name:
+          type: string
+          readOnly: true
+        variant_name:
+          type: string
+          nullable: true
+          readOnly: true
+        quantity:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        unit_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+      required:
+      - id
+      - product_name
+      - quantity
+      - section_id
+      - unit_price
+      - variant_id
+      - variant_name
+    OrderItemRequest:
+      type: object
+      properties:
+        variant_id:
+          type: integer
+        quantity:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        unit_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+      required:
+      - quantity
+      - unit_price
+      - variant_id
+    OrderList:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        customer:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/OrderStatusEnum'
+        review_status:
+          $ref: '#/components/schemas/ReviewStatusEnum'
+        order_scope:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/OrderScopeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        market:
+          allOf:
+          - $ref: '#/components/schemas/MarketSummary'
+          readOnly: true
+        market_count:
+          type: integer
+          readOnly: true
+        market_names_summary:
+          type: string
+          readOnly: true
+        has_offer:
+          type: boolean
+          readOnly: true
+        offer_titles:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        delivery_address:
+          type: object
+          additionalProperties: {}
+          nullable: true
+          readOnly: true
+        delivery_type:
+          $ref: '#/components/schemas/DeliveryTypeEnum'
+        fulfillment_type:
+          $ref: '#/components/schemas/FulfillmentTypeEnum'
+        external_shipping_status:
+          $ref: '#/components/schemas/ExternalShippingStatusEnum'
+        delivery_price_status:
+          type: string
+          readOnly: true
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        subtotal_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        discount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        total_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        assigned_representative_id:
+          type: integer
+          nullable: true
+          readOnly: true
+        assigned_representative:
+          allOf:
+          - $ref: '#/components/schemas/AssignedRepresentativeSummary'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - assigned_representative
+      - assigned_representative_id
+      - created_at
+      - customer
+      - delivery_address
+      - delivery_price_status
+      - has_offer
+      - id
+      - market
+      - market_count
+      - market_names_summary
+      - offer_titles
+      - updated_at
+    OrderOffer:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        section_id:
+          type: integer
+          readOnly: true
+        offer_id:
+          type: integer
+        offer:
+          allOf:
+          - $ref: '#/components/schemas/OrderOfferSummary'
+          readOnly: true
+        discount_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - offer
+      - offer_id
+      - section_id
+    OrderOfferRequest:
+      type: object
+      properties:
+        offer_id:
+          type: integer
+        discount_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+      required:
+      - offer_id
+    OrderOfferSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        title:
+          type: string
+          readOnly: true
+        type:
+          allOf:
+          - $ref: '#/components/schemas/TypeEnum'
+          readOnly: true
+        discount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+      required:
+      - discount
+      - id
+      - title
+      - type
+    OrderRequest:
+      type: object
+      properties:
+        user_id:
+          type: integer
+        delivery_address_id:
+          type: integer
+          nullable: true
+        market_id:
+          type: integer
+        order_scope:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/OrderScopeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        service_city_id:
+          type: integer
+          nullable: true
+        delivery_area_id:
+          type: integer
+          nullable: true
+        delivery_type:
+          $ref: '#/components/schemas/DeliveryTypeEnum'
+        payment_method:
+          type: string
+          minLength: 1
+          maxLength: 50
+        discount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        description:
+          type: string
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        subtotal_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        total_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        image:
+          type: string
+          format: binary
+          nullable: true
+        delivery_note:
+          type: string
+        delivery_proof:
+          type: string
+          format: binary
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItemRequest'
+        offers:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderOfferRequest'
+      required:
+      - payment_method
+      - user_id
+    OrderScopeEnum:
+      enum:
+      - general
+      - service_city
+      type: string
+      description: |-
+        * `general` - General
+        * `service_city` - Service city
+    OrderStatusEnum:
+      enum:
+      - pending
+      - confirmed
+      - assigned
+      - picked_up
+      - delivered
+      - failed_delivery
+      - cancelled
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `confirmed` - Confirmed
+        * `assigned` - Assigned
+        * `picked_up` - Picked Up
+        * `delivered` - Delivered
+        * `failed_delivery` - Failed Delivery
+        * `cancelled` - Cancelled
+    PaginatedDeliveryAreaList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryArea'
+    PaginatedOrderList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Order'
+    PaginatedOrderListList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderList'
+    PaginatedServiceCityList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceCity'
+    PatchedDeliveryAreaRequest:
+      type: object
+      properties:
+        service_city_id:
+          type: integer
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        center_latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,7})?$
+          nullable: true
+        center_longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,7})?$
+          nullable: true
+        radius_km:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+          nullable: true
+        boundary_geojson:
+          nullable: true
+        boundary_bbox:
+          nullable: true
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        eta_min_minutes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        eta_max_minutes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        is_active:
+          type: boolean
+          default: true
+    PatchedOrderRequest:
+      type: object
+      properties:
+        user_id:
+          type: integer
+        delivery_address_id:
+          type: integer
+          nullable: true
+        market_id:
+          type: integer
+        order_scope:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/OrderScopeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        service_city_id:
+          type: integer
+          nullable: true
+        delivery_area_id:
+          type: integer
+          nullable: true
+        delivery_type:
+          $ref: '#/components/schemas/DeliveryTypeEnum'
+        payment_method:
+          type: string
+          minLength: 1
+          maxLength: 50
+        discount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        description:
+          type: string
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        subtotal_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        total_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        image:
+          type: string
+          format: binary
+          nullable: true
+        delivery_note:
+          type: string
+        delivery_proof:
+          type: string
+          format: binary
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItemRequest'
+        offers:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderOfferRequest'
+    PatchedServiceCityRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        center_latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,7})?$
+          nullable: true
+        center_longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,7})?$
+          nullable: true
+        radius_km:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+          nullable: true
+        boundary_geojson:
+          nullable: true
+        boundary_bbox:
+          nullable: true
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        is_active:
+          type: boolean
+    RepresentativeLogin:
+      type: object
+      description: Courier-app session choice; omitted values are temporary by default.
+      properties:
+        email:
+          type: string
+        remember:
+          type: boolean
+          default: false
+    RepresentativeLoginRequest:
+      type: object
+      description: Courier-app session choice; omitted values are temporary by default.
+      properties:
+        email:
+          type: string
+          minLength: 1
+        identifier:
+          type: string
+          writeOnly: true
+          minLength: 1
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+        remember:
+          type: boolean
+          default: false
+      required:
+      - password
+    ReviewStatusEnum:
+      enum:
+      - pending_review
+      - approved
+      - rejected
+      type: string
+      description: |-
+        * `pending_review` - Pending Review
+        * `approved` - Approved
+        * `rejected` - Rejected
+    ServiceCity:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        center_latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,7})?$
+          nullable: true
+        center_longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,7})?$
+          nullable: true
+        radius_km:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+          nullable: true
+        boundary_geojson:
+          nullable: true
+        boundary_bbox:
+          nullable: true
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        is_active:
+          type: boolean
+        archived_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        deletion_mode:
+          type: string
+          readOnly: true
+        delivery_area_count:
+          type: integer
+          readOnly: true
+        market_count:
+          type: integer
+          readOnly: true
+        offer_count:
+          type: integer
+          readOnly: true
+      required:
+      - archived_at
+      - deletion_mode
+      - delivery_area_count
+      - id
+      - market_count
+      - name
+      - offer_count
+    ServiceCityRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        center_latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,7})?$
+          nullable: true
+        center_longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,7})?$
+          nullable: true
+        radius_km:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+          nullable: true
+        boundary_geojson:
+          nullable: true
+        boundary_bbox:
+          nullable: true
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        is_active:
+          type: boolean
+      required:
+      - name
+    ServiceCitySummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        is_active:
+          type: boolean
+      required:
+      - id
+      - name
+    ServiceCitySummaryRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        delivery_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        is_active:
+          type: boolean
+      required:
+      - name
+    TypeEnum:
+      enum:
+      - package
+      - flash
+      - discount
+      - announcement
+      - delivery
+      type: string
+      description: |-
+        * `package` - Package
+        * `flash` - Flash
+        * `discount` - Discount
+        * `announcement` - Announcement
+        * `delivery` - Delivery
+  securitySchemes:
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

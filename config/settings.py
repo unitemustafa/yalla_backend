@@ -85,6 +85,7 @@ if IS_PRODUCTION:
 
 # Application definition
 INSTALLED_APPS = [
+    'config.apps.ConfigAppConfig',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -99,6 +100,7 @@ INSTALLED_APPS = [
     'accounts',
     'corsheaders',
     'rest_framework',
+    'drf_spectacular',
     'rest_framework_simplejwt.token_blacklist',
     "locations",
     "markets",
@@ -112,6 +114,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'config.observability.RequestContextMiddleware',
+    'config.request_limits.RequestBodyLimitMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -247,6 +251,19 @@ GEOAPIFY_API_KEY = os.environ.get("GEOAPIFY_API_KEY", "").strip()
 GEOAPIFY_CONNECT_TIMEOUT = float(
     os.environ.get("GEOAPIFY_CONNECT_TIMEOUT", "3")
 )
+RATE_LIMIT_FAIL_CLOSED_SCOPES = frozenset(
+    item.strip()
+    for item in os.environ.get(
+        "RATE_LIMIT_FAIL_CLOSED_SCOPES",
+        (
+            "login_ip,login_identifier,admin_login_ip,"
+            "admin_login_identifier,signup_ip,signup_email,"
+            "otp_send_ip,otp_send_identifier,otp_verify_ip,"
+            "otp_verify_identifier,refresh_ip,refresh_token"
+        ),
+    ).split(",")
+    if item.strip()
+)
 GEOAPIFY_READ_TIMEOUT = float(
     os.environ.get("GEOAPIFY_READ_TIMEOUT", "5")
 )
@@ -363,8 +380,87 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_CLASSES': (
         'config.rate_limit.YallaRateThrottle',
     ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
     'EXCEPTION_HANDLER': 'config.api_exceptions.api_exception_handler',
+    'DEFAULT_SCHEMA_CLASS': 'config.schema.YallaAutoSchema',
+    'DEFAULT_PAGINATION_CLASS': 'config.pagination.V2PageNumberPagination',
+    'PAGE_SIZE': 50,
 }
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Yalla Backend API",
+    "DESCRIPTION": "Versioned API contract for Yalla clients and dashboard.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "ENUM_NAME_OVERRIDES": {
+        "OrderStatusEnum": "orders.models.Order.Status",
+    },
+    "PREPROCESSING_HOOKS": [
+        "config.schema.remove_duplicate_optional_slash_routes",
+    ],
+    # CI generates and validates the complete schema explicitly. Keeping this
+    # separate prevents advisory schema warnings from masking Django's own
+    # security deployment checks.
+    "ENABLE_DJANGO_DEPLOY_CHECK": False,
+}
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "request_id": {"()": "config.observability.RequestIdFilter"},
+    },
+    "formatters": {
+        "json": {"()": "config.observability.JsonFormatter"},
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "filters": ["request_id"],
+            "formatter": "json",
+        },
+    },
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": os.environ.get("DJANGO_LOG_LEVEL", "INFO"),
+            "propagate": False,
+        },
+    },
+}
+
+CELERY_BROKER_URL = os.environ.get(
+    "CELERY_BROKER_URL",
+    RATE_LIMIT_REDIS_URL or "redis://127.0.0.1:6379/2",
+)
+CELERY_RESULT_BACKEND = None
+CELERY_TASK_IGNORE_RESULT = True
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_TASK_SERIALIZER = "json"
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_BEAT_SCHEDULE = {
+    "publish-pending-push-outbox": {
+        "task": "notifications.tasks.publish_pending_push_outbox",
+        "schedule": 60.0,
+    },
+}
+PUSH_DELIVERY_ASYNC = os.environ.get(
+    "PUSH_DELIVERY_ASYNC",
+    "True" if IS_PRODUCTION else "False",
+).lower() == "true"
+if IS_PRODUCTION and not PUSH_DELIVERY_ASYNC:
+    raise ImproperlyConfigured(
+        "PUSH_DELIVERY_ASYNC must be True in production."
+    )
+PUSH_OUTBOX_MAX_ATTEMPTS = int(
+    os.environ.get("PUSH_OUTBOX_MAX_ATTEMPTS", "6")
+)
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
@@ -400,6 +496,24 @@ AUTH_OTP_EXPIRY_SECONDS = 10 * 60
 AUTH_OTP_INCLUDE_IN_RESPONSE = (
     os.environ.get("AUTH_OTP_INCLUDE_IN_RESPONSE", "False") == "True"
 )
+if IS_PRODUCTION and AUTH_OTP_INCLUDE_IN_RESPONSE:
+    raise ImproperlyConfigured(
+        "AUTH_OTP_INCLUDE_IN_RESPONSE must be False in production."
+    )
 AUTH_UNVERIFIED_USER_RETENTION_HOURS = int(
     os.environ.get("AUTH_UNVERIFIED_USER_RETENTION_HOURS", "24")
+)
+
+
+# Application-side request limits complement the mandatory ingress limit. The
+# middleware can reject requests with Content-Length before multipart parsing;
+# the reverse proxy must also reject oversized chunked requests.
+API_MAX_REQUEST_BODY_SIZE = int(
+    os.environ.get("API_MAX_REQUEST_BODY_SIZE", str(2 * 1024 * 1024))
+)
+API_SINGLE_UPLOAD_REQUEST_SIZE = int(
+    os.environ.get("API_SINGLE_UPLOAD_REQUEST_SIZE", str(8 * 1024 * 1024))
+)
+API_PRODUCT_UPLOAD_REQUEST_SIZE = int(
+    os.environ.get("API_PRODUCT_UPLOAD_REQUEST_SIZE", str(55 * 1024 * 1024))
 )

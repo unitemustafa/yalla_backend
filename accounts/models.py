@@ -17,6 +17,9 @@ class VerifiedUserManager(UserManager):
 
     def create_superuser(self, username, email=None, password=None, **extra_fields):
         extra_fields.setdefault("is_verified", True)
+        # A Django superuser must also be an application admin. Force the
+        # value so a caller cannot create an internally inconsistent account.
+        extra_fields["role"] = User.Role.ADMIN
         return super().create_superuser(
             username,
             email=email,
@@ -95,6 +98,16 @@ class User(AbstractUser):
                     )
                 ),
                 name="accounts_user_market_region_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(role="admin")
+                    | (
+                        models.Q(is_staff=False)
+                        & models.Q(is_superuser=False)
+                    )
+                ),
+                name="accounts_user_privileged_role_valid",
             ),
         ]
 

@@ -13,6 +13,7 @@ from .api_exceptions import api_exception_handler
 from . import rate_limit
 from .rate_limit_checks import check_rate_limit_configuration
 from .rate_limit import (
+    RateLimitBackendUnavailable,
     RateLimitDecision,
     RateRule,
     YallaRateThrottle,
@@ -89,6 +90,10 @@ class RateLimitSystemCheckTests(SimpleTestCase):
     )
     def test_enforce_accepts_an_independent_rate_limit_secret(self):
         self.assertNotIn("rate_limit.E007", self._check_ids())
+
+    @override_settings(RATE_LIMIT_FAIL_CLOSED_SCOPES=("not_a_scope",))
+    def test_unknown_fail_closed_scope_is_rejected(self):
+        self.assertIn("rate_limit.E008", self._check_ids())
 
 
 class ClientIpTests(SimpleTestCase):
@@ -281,6 +286,39 @@ class RateLimitCoreTests(SimpleTestCase):
         request.user = AnonymousUser()
 
         view = SimpleNamespace(rate_limit_scopes=())
+        self.assertTrue(YallaRateThrottle().allow_request(request, view))
+
+    @override_settings(
+        RATE_LIMIT_MODE="enforce",
+        RATE_LIMIT_FAIL_CLOSED_SCOPES=("login_ip",),
+    )
+    @patch("config.rate_limit.evaluate_rate_limit")
+    def test_auth_scope_fails_closed_when_redis_is_unavailable(self, evaluate):
+        evaluate.return_value = RateLimitDecision(
+            allowed=True,
+            backend_error=True,
+        )
+        request = self.factory.post("/api/v1/auth/login/client/")
+        request.user = AnonymousUser()
+        view = SimpleNamespace(rate_limit_scopes=("login_ip",))
+
+        with self.assertRaises(RateLimitBackendUnavailable):
+            YallaRateThrottle().allow_request(request, view)
+
+    @override_settings(
+        RATE_LIMIT_MODE="enforce",
+        RATE_LIMIT_FAIL_CLOSED_SCOPES=("login_ip",),
+    )
+    @patch("config.rate_limit.evaluate_rate_limit")
+    def test_normal_api_scope_still_fails_open_on_redis_outage(self, evaluate):
+        evaluate.return_value = RateLimitDecision(
+            allowed=True,
+            backend_error=True,
+        )
+        request = self.factory.get("/api/v1/catalog/categories/")
+        request.user = AnonymousUser()
+        view = SimpleNamespace(rate_limit_scopes=())
+
         self.assertTrue(YallaRateThrottle().allow_request(request, view))
 
 

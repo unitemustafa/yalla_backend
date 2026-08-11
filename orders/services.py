@@ -15,6 +15,18 @@ ADMIN_STATUS_TRANSITIONS = {
     Order.Status.PICKED_UP: (Order.Status.CANCELLED,),
 }
 
+COURIER_STATUSES = frozenset(Order.Status.values)
+
+COURIER_TRANSITIONS = {
+    Order.Status.ASSIGNED: frozenset({Order.Status.PICKED_UP}),
+    Order.Status.PICKED_UP: frozenset(
+        {
+            Order.Status.DELIVERED,
+            Order.Status.FAILED_DELIVERY,
+        }
+    ),
+}
+
 
 def allowed_statuses_for_order(order):
     if order.status in (
@@ -72,7 +84,7 @@ def resolve_order_target_user(request, *, action, lock=False):
             raise AccountInactive()
         return current_user
 
-    if user.role == User.Role.ADMIN or user.is_staff:
+    if user.role == User.Role.ADMIN:
         if user_id in (None, ""):
             raise serializers.ValidationError(
                 {"user_id": "Select an active client user."}

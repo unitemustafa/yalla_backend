@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
+from config.pagination import paginated_list_response
 from markets.region import (
     current_market_region_selection,
     no_market_region_selection_response,
@@ -68,12 +69,10 @@ class OfferListCreateView(APIView):
                 queryset = queryset.filter(archived_at__isnull=False)
             else:
                 queryset = queryset.filter(archived_at__isnull=True)
-            return Response(
-                AdminOfferSerializer(
-                    queryset,
-                    many=True,
-                    context={"request": request},
-                ).data
+            return paginated_list_response(
+                request,
+                queryset,
+                AdminOfferSerializer,
             )
         if request.user.role != User.Role.CLIENT:
             raise PermissionDenied("Only admin or client users can access offers.")
@@ -105,12 +104,10 @@ class OfferListCreateView(APIView):
             )
             .order_by("-announcement_priority", "-created_at", "-id")
         )
-        return Response(
-            HomeOfferSerializer(
-                offers,
-                many=True,
-                context={"request": request},
-            ).data
+        return paginated_list_response(
+            request,
+            offers,
+            HomeOfferSerializer,
         )
 
     def post(self, request):

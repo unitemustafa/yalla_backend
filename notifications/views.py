@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
+from config.pagination import paginated_list_response
 
 from .models import ClientDevice, Notification
 from .serializers import (
@@ -91,12 +92,10 @@ class NotificationListView(APIView):
             visible_notifications(request.user),
             request.query_params,
         ).select_related("offer__market").order_by("-created_at", "-id")
-        return Response(
-            NotificationSerializer(
-                notifications,
-                many=True,
-                context={"request": request},
-            ).data
+        return paginated_list_response(
+            request,
+            notifications,
+            NotificationSerializer,
         )
 
 

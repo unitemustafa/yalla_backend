@@ -1,15 +1,17 @@
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Count, Exists, OuterRef, Q
 from django.db.models.deletion import ProtectedError
 from django.utils import timezone
 from rest_framework import generics
-from rest_framework.permissions import IsAuthenticated, SAFE_METHODS
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.views import APIView
 
-from accounts.views import IsAdminRole
+from accounts.permissions import DeliveryAreaPermission, IsAdminRole
 from accounts.models import CourierProfile, User
+from config.pagination import paginated_list_response
 from orders.models import Order
 from notifications.delivery_area_services import (
     schedule_delivery_area_created_notifications,
@@ -161,15 +163,6 @@ class ServiceCityDetailView(
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class DeliveryAreaPermission(IsAuthenticated):
-    def has_permission(self, request, view):
-        if not super().has_permission(request, view):
-            return False
-        if request.method in SAFE_METHODS:
-            return True
-        return request.user.role == request.user.Role.ADMIN
-
-
 class DeliveryAreaListCreateView(generics.ListCreateAPIView):
     permission_classes = [DeliveryAreaPermission]
     serializer_class = DeliveryAreaSerializer
@@ -237,12 +230,14 @@ class DeliveryAreaDetailView(
         was_active = serializer.instance.is_active
         area = serializer.save()
         if was_active != area.is_active:
-            transaction.on_commit(
-                lambda area_id=area.id, is_active=area.is_active: _send_delivery_area_status_change(
-                    area_id,
-                    is_active,
-                )
+            _schedule_delivery_area_status_change(
+                area.id,
+                area.is_active,
             )
+
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
 
     def archive(self, area, detail):
         was_active = area.is_active
@@ -250,12 +245,7 @@ class DeliveryAreaDetailView(
             area.is_active = False
             area.archived_at = timezone.now()
             area.save(update_fields=("is_active", "archived_at"))
-            transaction.on_commit(
-                lambda area_id=area.id: _send_delivery_area_status_change(
-                    area_id,
-                    False,
-                )
-            )
+            _schedule_delivery_area_status_change(area.id, False)
         elif area.archived_at is None:
             area.archived_at = timezone.now()
             area.save(update_fields=("archived_at",))
@@ -327,14 +317,23 @@ class DeliveryAreaDetailView(
         return super().patch(request, *args, **kwargs)
 
 
-def _send_delivery_area_status_change(area_id, is_active):
+def _send_delivery_area_status_change(area_id, is_active, *, reraise=False):
     from notifications.push import send_delivery_area_status_changed_event
 
     try:
         send_delivery_area_status_changed_event(area_id, is_active)
     except Exception:
         # A refresh when the user reopens the app remains the fallback.
-        pass
+        if reraise:
+            raise
+
+
+def _schedule_delivery_area_status_change(area_id, is_active):
+    callback = lambda: _send_delivery_area_status_change(area_id, is_active)
+    if settings.PUSH_DELIVERY_ASYNC:
+        _send_delivery_area_status_change(area_id, is_active, reraise=True)
+    else:
+        transaction.on_commit(callback)
 
 
 class DeliveryAreaListView(APIView):
@@ -344,7 +343,11 @@ class DeliveryAreaListView(APIView):
 
     def get(self, request):
         areas = DeliveryArea.objects.order_by("name", "id")
-        return Response(DeliveryAreaSerializer(areas, many=True).data)
+        return paginated_list_response(
+            request,
+            areas,
+            DeliveryAreaSerializer,
+        )
 
 
 def address_queryset_for_request(request):
@@ -384,7 +387,11 @@ class AddressListCreateView(APIView):
 
     def get(self, request):
         addresses = address_queryset_for_request(request)
-        return Response(AddressSerializer(addresses, many=True).data)
+        return paginated_list_response(
+            request,
+            addresses,
+            AddressSerializer,
+        )
 
     @transaction.atomic
     def post(self, request):

@@ -167,12 +167,10 @@ class DeliveryAreaCreatedNotificationTests(APITestCase):
         )
         self.assertEqual(push.call_count, 2)
 
-    def test_admin_courier_and_staff_accounts_are_not_notified(self):
+    def test_admin_and_courier_accounts_are_not_notified(self):
         courier = self.create_user("courier", User.Role.REPRESENTATIVE)
-        staff_client = self.create_user("staff-client", is_staff=True)
         self.add_address(self.admin)
         self.add_address(courier)
-        self.add_address(staff_client)
 
         response, _ = self.post_area()
 

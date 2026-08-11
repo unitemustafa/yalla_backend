@@ -4,11 +4,13 @@ from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.generics import get_object_or_404
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import BasePermission, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
+from accounts.permissions import IsCatalogAdminRole, IsCatalogClientRole
+from config.pagination import paginated_list_response
 
 from .models import (
     AdditionClassification,
@@ -43,26 +45,8 @@ from .product_images import (
 )
 
 
-class IsAdminRole(BasePermission):
-    message = "Only admin users can manage catalog data."
-
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.role == User.Role.ADMIN
-        )
-
-
-class IsClientRole(BasePermission):
-    message = "Only client users can like products."
-
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.role == User.Role.CLIENT
-        )
+IsAdminRole = IsCatalogAdminRole
+IsClientRole = IsCatalogClientRole
 
 
 def product_queryset():
@@ -105,12 +89,10 @@ class StoreSubcategoryListCreateView(APIView):
             queryset = queryset.filter(is_active=True)
         elif is_active in {"false", "0"}:
             queryset = queryset.filter(is_active=False)
-        return Response(
-            StoreSubcategorySerializer(
-                queryset,
-                many=True,
-                context={"request": request},
-            ).data
+        return paginated_list_response(
+            request,
+            queryset,
+            StoreSubcategorySerializer,
         )
 
     def post(self, request):
@@ -191,8 +173,10 @@ class AdditionClassificationListCreateView(APIView):
 
     def get(self, request):
         classifications = AdditionClassification.objects.order_by("name", "id")
-        return Response(
-            AdditionClassificationSerializer(classifications, many=True).data
+        return paginated_list_response(
+            request,
+            classifications,
+            AdditionClassificationSerializer,
         )
 
     def post(self, request):
@@ -254,8 +238,10 @@ class CategoryClassificationListCreateView(APIView):
 
     def get(self, request):
         classifications = CategoryClassification.objects.order_by("name", "id")
-        return Response(
-            CategoryClassificationSerializer(classifications, many=True).data
+        return paginated_list_response(
+            request,
+            classifications,
+            CategoryClassificationSerializer,
         )
 
     def post(self, request):
@@ -319,7 +305,11 @@ class ProductCategoryListCreateView(APIView):
         categories = ProductCategory.objects.select_related(
             "classification",
         ).order_by("name", "id")
-        return Response(ProductCategorySerializer(categories, many=True).data)
+        return paginated_list_response(
+            request,
+            categories,
+            ProductCategorySerializer,
+        )
 
     def post(self, request):
         serializer = ProductCategorySerializer(data=request.data)
@@ -386,7 +376,11 @@ class CategoryAttributeListCreateView(APIView):
             .prefetch_related("options")
             .order_by("category__name", "name", "id")
         )
-        return Response(AdminCategoryAttributeSerializer(attributes, many=True).data)
+        return paginated_list_response(
+            request,
+            attributes,
+            AdminCategoryAttributeSerializer,
+        )
 
     def post(self, request):
         serializer = AdminCategoryAttributeSerializer(data=request.data)
@@ -451,7 +445,11 @@ class CategoryOptionListCreateView(APIView):
         options = CategoryOption.objects.select_related(
             "attribute__category",
         ).order_by("attribute__name", "value", "id")
-        return Response(AdminCategoryOptionSerializer(options, many=True).data)
+        return paginated_list_response(
+            request,
+            options,
+            AdminCategoryOptionSerializer,
+        )
 
     def post(self, request):
         serializer = AdminCategoryOptionSerializer(data=request.data)
@@ -520,12 +518,10 @@ class ProductListCreateView(APIView):
             queryset = queryset.filter(archived_at__isnull=False)
         else:
             queryset = queryset.filter(archived_at__isnull=True)
-        return Response(
-            AdminProductSerializer(
-                queryset,
-                many=True,
-                context={"request": request},
-            ).data
+        return paginated_list_response(
+            request,
+            queryset,
+            AdminProductSerializer,
         )
 
     def post(self, request):
@@ -758,12 +754,10 @@ class ProductLikeListView(APIView):
             .filter(liked_by=request.user)
             .order_by("name", "id")
         )
-        return Response(
-            LikedProductSerializer(
-                products,
-                many=True,
-                context={"request": request},
-            ).data
+        return paginated_list_response(
+            request,
+            products,
+            LikedProductSerializer,
         )
 
 
@@ -809,7 +803,11 @@ class ProductAdditionListCreateView(APIView):
             .prefetch_related("products")
             .order_by("name_ar", "id")
         )
-        return Response(ProductAdditionSerializer(additions, many=True).data)
+        return paginated_list_response(
+            request,
+            additions,
+            ProductAdditionSerializer,
+        )
 
     def post(self, request):
         serializer = ProductAdditionSerializer(data=request.data)
