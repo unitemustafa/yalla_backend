@@ -6,10 +6,16 @@ from datetime import timedelta
 from pathlib import Path
 import os
 import dj_database_url
+from dotenv import load_dotenv
 
 from .cloudinary_settings import build_cloudinary_storage_settings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Local development keeps secrets in a git-ignored .env file. Values already
+# supplied by the shell or hosting platform remain authoritative.
+if os.environ.get("APP_ENV", "development").strip().lower() == "development":
+    load_dotenv(BASE_DIR / ".env", override=False)
 
 
 # SECURITY
