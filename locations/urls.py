@@ -1,5 +1,10 @@
 from django.urls import path
 
+from .geocoding_views import (
+    CityCoverageLookupView,
+    GeocodingAutocompleteView,
+    GeocodingReverseView,
+)
 from .views import (
     AddressDefaultView,
     AddressDetailView,
@@ -12,6 +17,21 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        "geocoding/autocomplete/",
+        GeocodingAutocompleteView.as_view(),
+        name="geocoding-autocomplete",
+    ),
+    path(
+        "geocoding/reverse/",
+        GeocodingReverseView.as_view(),
+        name="geocoding-reverse",
+    ),
+    path(
+        "service-cities/coverage-lookup/",
+        CityCoverageLookupView.as_view(),
+        name="service-city-coverage-lookup",
+    ),
     path(
         "service-cities/",
         ServiceCityListCreateView.as_view(),

@@ -3,6 +3,8 @@ import logging
 from django.db import transaction
 from rest_framework import serializers
 
+from config.image_validation import validate_safe_image
+
 from catalog.product_images import (
     delete_storage_file_if_unreferenced,
     schedule_storage_cleanup,
@@ -40,7 +42,7 @@ def validate_offer_image_upload(value):
         raise serializers.ValidationError(
             "Offer images must be 5 MB or smaller."
         )
-    return value
+    return validate_safe_image(value)
 
 
 def replace_offer_image(offer_id, upload):

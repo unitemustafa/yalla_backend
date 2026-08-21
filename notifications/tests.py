@@ -8,7 +8,13 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from catalog.models import CategoryClassification, Product, ProductCategory, ProductVariant
+from catalog.models import (
+    CategoryClassification,
+    Product,
+    ProductCategory,
+    ProductVariant,
+    StoreSubcategory,
+)
 from locations.models import Address, DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
 from offers.models import Offer
@@ -95,8 +101,14 @@ class NotificationAPITests(APITestCase):
             classification=category_classification,
             name="Main",
         )
+        subcategory = StoreSubcategory.objects.create(
+            name_ar="تنبيهات",
+            name_en="Notifications",
+        )
+        self.market.subcategories.add(subcategory)
         product = Product.objects.create(
             market=self.market,
+            subcategory=subcategory,
             category=category,
             name="Notification Product",
         )

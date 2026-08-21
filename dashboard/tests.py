@@ -21,6 +21,7 @@ from catalog.models import (
     Product,
     ProductCategory,
     ProductVariant,
+    StoreSubcategory,
 )
 from locations.models import DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
@@ -335,8 +336,15 @@ class DashboardOverviewAPITests(APITestCase):
             classification=category_classification,
             name="Fresh Food",
         )
+        subcategory = StoreSubcategory.objects.create(
+            name_ar="بيانات الداشبورد",
+            name_en="Dashboard Data",
+        )
+        self.main_market.subcategories.add(subcategory)
+        self.second_market.subcategories.add(subcategory)
         self.apples = Product.objects.create(
             market=self.main_market,
+            subcategory=subcategory,
             category=category,
             name="Red Apples",
         )
@@ -352,6 +360,7 @@ class DashboardOverviewAPITests(APITestCase):
         )
         self.juice = Product.objects.create(
             market=self.second_market,
+            subcategory=subcategory,
             category=category,
             name="Orange Juice",
         )

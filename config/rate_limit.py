@@ -15,6 +15,7 @@ from django.conf import settings
 from django.http import JsonResponse
 from django_redis import get_redis_connection
 from redis.exceptions import NoScriptError, RedisError
+from rest_framework.exceptions import APIException
 from rest_framework.throttling import BaseThrottle
 
 
@@ -130,6 +131,15 @@ class RateLimitDecision:
     backend_error: bool = False
 
 
+class RateLimitBackendUnavailable(APIException):
+    status_code = 503
+    default_code = "rate_limit_backend_unavailable"
+    default_detail = {
+        "code": "rate_limit_backend_unavailable",
+        "detail": "Authentication service is temporarily unavailable.",
+    }
+
+
 POLICIES = {
     "api_anon": PolicyDefinition("fixed", "ip"),
     "api_user": PolicyDefinition("fixed", "user"),
@@ -163,6 +173,8 @@ POLICIES = {
     "notification_send_user": PolicyDefinition("sliding", "user"),
     "snapshot_ip": PolicyDefinition("fixed", "ip"),
     "share_ip": PolicyDefinition("fixed", "ip"),
+    "geocoding_user": PolicyDefinition("sliding", "user"),
+    "geocoding_global": PolicyDefinition("sliding", "global"),
 }
 
 
@@ -283,6 +295,8 @@ def _identity_for_policy(request, policy):
         if not user or not user.is_authenticated:
             return ""
         return _fingerprint("user", user.pk)
+    if policy.identity == "global":
+        return _fingerprint("global", "geoapify")
     value = _request_value(request, policy.fields)
     if not value:
         return ""
@@ -467,6 +481,13 @@ def evaluate_rate_limit(request, scopes):
     )
 
 
+def fail_closed_for_scopes(scopes):
+    configured = frozenset(
+        getattr(settings, "RATE_LIMIT_FAIL_CLOSED_SCOPES", ())
+    )
+    return bool(configured.intersection(scopes))
+
+
 class YallaRateThrottle(BaseThrottle):
     def __init__(self):
         self._wait = None
@@ -475,10 +496,14 @@ class YallaRateThrottle(BaseThrottle):
         mode = rate_limit_mode()
         if mode == "off" or is_rate_limit_exempt(request):
             return True
-        decision = evaluate_rate_limit(
-            request,
-            scopes_for_request(request, view=view),
-        )
+        scopes = scopes_for_request(request, view=view)
+        decision = evaluate_rate_limit(request, scopes)
+        if (
+            mode == "enforce"
+            and decision.backend_error
+            and fail_closed_for_scopes(scopes)
+        ):
+            raise RateLimitBackendUnavailable()
         if decision.allowed or mode == "observe":
             return True
         self._wait = decision.retry_after_seconds
@@ -495,10 +520,25 @@ def rate_limit_view(*explicit_scopes):
             mode = rate_limit_mode()
             if mode == "off" or is_rate_limit_exempt(request):
                 return view_func(request, *args, **kwargs)
-            decision = evaluate_rate_limit(
+            scopes = scopes_for_request(
                 request,
-                scopes_for_request(request, explicit_scopes=explicit_scopes),
+                explicit_scopes=explicit_scopes,
             )
+            decision = evaluate_rate_limit(request, scopes)
+            if (
+                mode == "enforce"
+                and decision.backend_error
+                and fail_closed_for_scopes(scopes)
+            ):
+                return JsonResponse(
+                    {
+                        "code": "rate_limit_backend_unavailable",
+                        "detail": (
+                            "Authentication service is temporarily unavailable."
+                        ),
+                    },
+                    status=503,
+                )
             if decision.allowed or mode == "observe":
                 return view_func(request, *args, **kwargs)
             response = JsonResponse(

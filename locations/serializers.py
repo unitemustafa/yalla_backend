@@ -4,6 +4,11 @@ from rest_framework import serializers
 
 from accounts.models import User
 
+from .coverage import (
+    contains_point,
+    coverage_is_configured,
+    matching_delivery_area,
+)
 from .models import Address, DeliveryArea, ServiceCity
 
 
@@ -11,6 +16,7 @@ class ServiceCitySerializer(serializers.ModelSerializer):
     delivery_area_count = serializers.SerializerMethodField()
     market_count = serializers.SerializerMethodField()
     offer_count = serializers.SerializerMethodField()
+    deletion_mode = serializers.SerializerMethodField()
 
     class Meta:
         model = ServiceCity
@@ -20,32 +26,41 @@ class ServiceCitySerializer(serializers.ModelSerializer):
             "center_latitude",
             "center_longitude",
             "radius_km",
+            "boundary_geojson",
+            "boundary_bbox",
             "delivery_price",
             "is_active",
+            "archived_at",
+            "deletion_mode",
             "delivery_area_count",
             "market_count",
             "offer_count",
         )
         read_only_fields = (
             "id",
+            "archived_at",
+            "deletion_mode",
             "delivery_area_count",
             "market_count",
             "offer_count",
         )
 
-    def get_delivery_area_count(self, instance):
+    def get_deletion_mode(self, instance) -> str:
+        return instance.get_deletion_mode()
+
+    def get_delivery_area_count(self, instance) -> int:
         count = getattr(instance, "delivery_area_count", None)
         if count is not None:
             return count
         return instance.delivery_areas.count()
 
-    def get_market_count(self, instance):
+    def get_market_count(self, instance) -> int:
         count = getattr(instance, "market_count", None)
         if count is not None:
             return count
         return instance.markets.distinct().count()
 
-    def get_offer_count(self, instance):
+    def get_offer_count(self, instance) -> int:
         count = getattr(instance, "offer_count", None)
         if count is not None:
             return count
@@ -87,6 +102,7 @@ class ServiceCitySerializer(serializers.ModelSerializer):
 
 
 class DeliveryAreaSerializer(ServiceCitySerializer):
+    deletion_mode = serializers.SerializerMethodField()
     service_city_id = serializers.PrimaryKeyRelatedField(
         queryset=ServiceCity.objects.all(),
         source="service_city",
@@ -124,10 +140,19 @@ class DeliveryAreaSerializer(ServiceCitySerializer):
             "center_latitude",
             "center_longitude",
             "radius_km",
+            "boundary_geojson",
+            "boundary_bbox",
             "delivery_price",
+            "eta_min_minutes",
+            "eta_max_minutes",
             "is_active",
+            "archived_at",
+            "deletion_mode",
         )
-        read_only_fields = ("id",)
+        read_only_fields = ("id", "archived_at", "deletion_mode")
+
+    def get_deletion_mode(self, instance) -> str:
+        return instance.get_deletion_mode()
 
     def validate_name(self, value):
         value = value.strip()
@@ -181,6 +206,22 @@ class DeliveryAreaSerializer(ServiceCitySerializer):
                         )
                     }
                 )
+        eta_min = attrs.get(
+            "eta_min_minutes",
+            getattr(self.instance, "eta_min_minutes", None),
+        )
+        eta_max = attrs.get(
+            "eta_max_minutes",
+            getattr(self.instance, "eta_max_minutes", None),
+        )
+        if eta_min is not None and eta_max is not None and eta_max < eta_min:
+            raise serializers.ValidationError(
+                {
+                    "eta_max_minutes": (
+                        "Maximum delivery time cannot be less than minimum."
+                    )
+                }
+            )
         return attrs
 
 
@@ -193,7 +234,14 @@ class DeliveryAreaSummarySerializer(serializers.ModelSerializer):
             "id",
             "service_city_id",
             "name",
+            "center_latitude",
+            "center_longitude",
+            "radius_km",
+            "boundary_geojson",
+            "boundary_bbox",
             "delivery_price",
+            "eta_min_minutes",
+            "eta_max_minutes",
             "is_active",
         )
 
@@ -234,6 +282,17 @@ class AddressSerializer(serializers.ModelSerializer):
             "postalCode",
             "latitude",
             "longitude",
+            "formatted_address",
+            "place_id",
+            "address_type",
+            "recipient_name",
+            "recipient_phone",
+            "building_name",
+            "apartment_number",
+            "floor",
+            "company_name",
+            "additional_instructions",
+            "label",
             "details",
             "manual_city",
             "manual_area",
@@ -245,6 +304,7 @@ class AddressSerializer(serializers.ModelSerializer):
             "delivery_area_name",
             "delivery_area_price",
             "delivery_type",
+            "fulfillment_type",
             "delivery_price_preview",
             "is_default",
             "isDefault",
@@ -252,7 +312,11 @@ class AddressSerializer(serializers.ModelSerializer):
         )
 
     def get_phone(self, instance):
-        return getattr(instance.user, "phone", "") or ""
+        return (
+            instance.recipient_phone
+            or getattr(instance.user, "phone", "")
+            or ""
+        )
 
     def get_phoneNumber(self, instance):
         return self.get_phone(instance)
@@ -261,7 +325,7 @@ class AddressSerializer(serializers.ModelSerializer):
         return instance.details.strip() or instance.name
 
     def get_street(self, instance):
-        return self.get_line1(instance)
+        return instance.street.strip() or self.get_line1(instance)
 
     def get_city(self, instance):
         if instance.service_city_id:
@@ -321,6 +385,21 @@ class AddressWriteSerializer(serializers.Serializer):
     )
     name = serializers.CharField(required=False, allow_blank=True)
     details = serializers.CharField(required=False, allow_blank=True)
+    address_type = serializers.ChoiceField(
+        choices=Address.AddressType.choices,
+        required=False,
+    )
+    recipient_name = serializers.CharField(required=False, allow_blank=True)
+    recipient_phone = serializers.CharField(required=False, allow_blank=True)
+    building_name = serializers.CharField(required=False, allow_blank=True)
+    apartment_number = serializers.CharField(required=False, allow_blank=True)
+    floor = serializers.CharField(required=False, allow_blank=True)
+    company_name = serializers.CharField(required=False, allow_blank=True)
+    additional_instructions = serializers.CharField(
+        required=False,
+        allow_blank=True,
+    )
+    label = serializers.CharField(required=False, allow_blank=True)
     manual_city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     manual_area = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     fullName = serializers.CharField(required=False, allow_blank=True)
@@ -333,6 +412,16 @@ class AddressWriteSerializer(serializers.Serializer):
     country = serializers.CharField(required=False, allow_blank=True)
     postalCode = serializers.CharField(required=False, allow_blank=True)
     postal_code = serializers.CharField(required=False, allow_blank=True)
+    formatted_address = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=500,
+    )
+    place_id = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=255,
+    )
     latitude = serializers.DecimalField(
         max_digits=10,
         decimal_places=7,
@@ -372,8 +461,15 @@ class AddressWriteSerializer(serializers.Serializer):
                     {"user_id": "Active client user not found."}
                 )
 
-        name = self._normalized_name(attrs)
+        address_type = attrs.get(
+            "address_type",
+            getattr(self.instance, "address_type", Address.AddressType.APARTMENT),
+        )
+        label = self._field_text(attrs, "label")
+        name = self._normalized_name(attrs) or label or address_type.title()
         details = self._normalized_details(attrs)
+        if not details:
+            details = self._structured_details(attrs)
         if not name:
             raise serializers.ValidationError(
                 {"name": "Address name is required."}
@@ -469,6 +565,40 @@ class AddressWriteSerializer(serializers.Serializer):
                     {"manual_city": "Manual city must be empty for ServiceCity addresses."}
                 )
 
+            if (
+                latitude is not None
+                and longitude is not None
+                and coverage_is_configured(service_city)
+                and not contains_point(
+                    service_city,
+                    latitude=latitude,
+                    longitude=longitude,
+                )
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "latitude": (
+                            "Outside the delivery area. Adjust the location."
+                        )
+                    }
+                )
+
+            if latitude is not None and longitude is not None:
+                coordinate_area = matching_delivery_area(
+                    service_city,
+                    latitude=latitude,
+                    longitude=longitude,
+                )
+                if coordinate_area is not None:
+                    delivery_area = coordinate_area
+                    manual_area = None
+                elif (
+                    delivery_area is not None
+                    and coverage_is_configured(delivery_area)
+                ):
+                    # Never apply another area's fixed price to this point.
+                    delivery_area = None
+
             if delivery_area is not None:
                 if manual_area:
                     raise serializers.ValidationError(
@@ -504,6 +634,49 @@ class AddressWriteSerializer(serializers.Serializer):
         attrs["normalized_service_city"] = service_city
         attrs["normalized_delivery_area"] = delivery_area
         attrs["normalized_delivery_type"] = delivery_type
+        attrs["normalized_fulfillment_type"] = (
+            Address.FulfillmentType.DIRECT
+            if delivery_type == Address.DeliveryType.FIXED_AREA
+            else Address.FulfillmentType.EXTERNAL_SHIPPING
+        )
+        attrs["normalized_address_type"] = address_type
+        attrs["normalized_recipient_name"] = self._field_text(
+            attrs,
+            "recipient_name",
+        )
+        attrs["normalized_recipient_phone"] = self._field_text(
+            attrs,
+            "recipient_phone",
+        )
+        attrs["normalized_building_name"] = self._field_text(
+            attrs,
+            "building_name",
+        )
+        attrs["normalized_street"] = self._field_text(attrs, "street")
+        attrs["normalized_apartment_number"] = self._field_text(
+            attrs,
+            "apartment_number",
+        )
+        attrs["normalized_floor"] = self._field_text(attrs, "floor")
+        attrs["normalized_company_name"] = self._field_text(
+            attrs,
+            "company_name",
+        )
+        attrs["normalized_additional_instructions"] = self._field_text(
+            attrs,
+            "additional_instructions",
+        )
+        attrs["normalized_label"] = label
+        attrs["normalized_formatted_address"] = self._clean_text(
+            attrs["formatted_address"]
+            if "formatted_address" in attrs
+            else getattr(self.instance, "formatted_address", "")
+        )
+        attrs["normalized_place_id"] = self._clean_text(
+            attrs["place_id"]
+            if "place_id" in attrs
+            else getattr(self.instance, "place_id", "")
+        )
         attrs["normalized_default"] = attrs.get(
             "is_default",
             attrs.get(
@@ -522,9 +695,24 @@ class AddressWriteSerializer(serializers.Serializer):
             manual_area=validated_data["normalized_manual_area"],
             latitude=validated_data["normalized_latitude"],
             longitude=validated_data["normalized_longitude"],
+            formatted_address=validated_data["normalized_formatted_address"],
+            place_id=validated_data["normalized_place_id"],
             service_city=validated_data["normalized_service_city"],
             delivery_area=validated_data["normalized_delivery_area"],
             delivery_type=validated_data["normalized_delivery_type"],
+            fulfillment_type=validated_data["normalized_fulfillment_type"],
+            address_type=validated_data["normalized_address_type"],
+            recipient_name=validated_data["normalized_recipient_name"],
+            recipient_phone=validated_data["normalized_recipient_phone"],
+            building_name=validated_data["normalized_building_name"],
+            street=validated_data["normalized_street"],
+            apartment_number=validated_data["normalized_apartment_number"],
+            floor=validated_data["normalized_floor"],
+            company_name=validated_data["normalized_company_name"],
+            additional_instructions=validated_data[
+                "normalized_additional_instructions"
+            ],
+            label=validated_data["normalized_label"],
             is_default=validated_data["normalized_default"],
         )
 
@@ -535,9 +723,24 @@ class AddressWriteSerializer(serializers.Serializer):
         instance.manual_area = validated_data["normalized_manual_area"]
         instance.latitude = validated_data["normalized_latitude"]
         instance.longitude = validated_data["normalized_longitude"]
+        instance.formatted_address = validated_data["normalized_formatted_address"]
+        instance.place_id = validated_data["normalized_place_id"]
         instance.service_city = validated_data["normalized_service_city"]
         instance.delivery_area = validated_data["normalized_delivery_area"]
         instance.delivery_type = validated_data["normalized_delivery_type"]
+        instance.fulfillment_type = validated_data["normalized_fulfillment_type"]
+        instance.address_type = validated_data["normalized_address_type"]
+        instance.recipient_name = validated_data["normalized_recipient_name"]
+        instance.recipient_phone = validated_data["normalized_recipient_phone"]
+        instance.building_name = validated_data["normalized_building_name"]
+        instance.street = validated_data["normalized_street"]
+        instance.apartment_number = validated_data["normalized_apartment_number"]
+        instance.floor = validated_data["normalized_floor"]
+        instance.company_name = validated_data["normalized_company_name"]
+        instance.additional_instructions = validated_data[
+            "normalized_additional_instructions"
+        ]
+        instance.label = validated_data["normalized_label"]
         instance.is_default = validated_data["normalized_default"]
         instance.save(
             update_fields=[
@@ -547,9 +750,22 @@ class AddressWriteSerializer(serializers.Serializer):
                 "manual_area",
                 "latitude",
                 "longitude",
+                "formatted_address",
+                "place_id",
                 "service_city",
                 "delivery_area",
                 "delivery_type",
+                "fulfillment_type",
+                "address_type",
+                "recipient_name",
+                "recipient_phone",
+                "building_name",
+                "street",
+                "apartment_number",
+                "floor",
+                "company_name",
+                "additional_instructions",
+                "label",
                 "is_default",
             ]
         )
@@ -561,6 +777,15 @@ class AddressWriteSerializer(serializers.Serializer):
             return None
         value = str(value).strip()
         return value or None
+
+    @staticmethod
+    def _clean_text(value):
+        return str(value or "").strip()
+
+    def _field_text(self, attrs, key):
+        if key in attrs:
+            return self._clean_text(attrs[key])
+        return self._clean_text(getattr(self.instance, key, ""))
 
     def _normalized_name(self, attrs):
         explicit_name = (
@@ -583,6 +808,17 @@ class AddressWriteSerializer(serializers.Serializer):
         if self.instance is not None:
             return self.instance.details.strip()
         return ""
+
+    def _structured_details(self, attrs):
+        values = [
+            self._field_text(attrs, "street"),
+            self._field_text(attrs, "building_name"),
+            self._field_text(attrs, "apartment_number"),
+            self._field_text(attrs, "floor"),
+            self._field_text(attrs, "company_name"),
+            self._field_text(attrs, "additional_instructions"),
+        ]
+        return ", ".join(value for value in values if value)
 
     def _address_detail_text(self, attrs):
         line1 = str(

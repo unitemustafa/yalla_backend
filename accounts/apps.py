@@ -8,3 +8,4 @@ class UsersConfig(AppConfig):
         # Importing registers deployment checks without opening a Redis
         # connection during Django startup.
         from config import rate_limit_checks  # noqa: F401
+        from . import schema  # noqa: F401

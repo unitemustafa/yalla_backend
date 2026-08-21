@@ -1,6 +1,7 @@
 from django.core.validators import FileExtensionValidator
 from django.db import models
 from django.db.models import Q
+from django.db.models.functions import Lower
 
 
 class CategoryClassification(models.Model):
@@ -17,6 +18,37 @@ class ProductCategory(models.Model):
     type = models.CharField(max_length=100, blank=True)
     description = models.TextField(blank=True)
     image = models.ImageField(upload_to="categories/", blank=True, null=True)
+
+
+class StoreSubcategory(models.Model):
+    name_ar = models.CharField(max_length=100)
+    name_en = models.CharField(max_length=100)
+    description_ar = models.TextField(blank=True)
+    description_en = models.TextField(blank=True)
+    image = models.ImageField(
+        upload_to="store-subcategories/",
+        blank=True,
+        null=True,
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("name_ar", "id")
+        constraints = (
+            models.UniqueConstraint(
+                Lower("name_ar"),
+                name="catalog_store_subcategory_name_ar_ci_unique",
+            ),
+            models.UniqueConstraint(
+                Lower("name_en"),
+                name="catalog_store_subcategory_name_en_ci_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name_ar
 
 
 class CategoryAttribute(models.Model):
@@ -55,6 +87,11 @@ class Product(models.Model):
         blank=True,
         null=True,
     )
+    subcategory = models.ForeignKey(
+        StoreSubcategory,
+        on_delete=models.PROTECT,
+        related_name="products",
+    )
     theme = models.CharField(
         max_length=20,
         choices=Theme.choices,
@@ -76,6 +113,10 @@ class Product(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    archived_at = models.DateTimeField(blank=True, null=True, db_index=True)
+
+    def get_deletion_mode(self):
+        return "archive"
 
 
 class ProductImage(models.Model):

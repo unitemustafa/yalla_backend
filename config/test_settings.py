@@ -5,6 +5,7 @@ import tempfile
 # Force tests to remain completely local.
 # Never inherit a production database or production secret.
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+os.environ["APP_ENV"] = "test"
 os.environ["DEBUG"] = "True"
 os.environ["SECRET_KEY"] = (
     "yalla-test-only-secret-key-2026-"
@@ -32,6 +33,11 @@ EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 # Rate limiter behavior has focused unit tests with a fake Redis client. Keep
 # unrelated endpoint suites independent from an external Redis process.
 RATE_LIMIT_MODE = "off"
+
+# Expected 4xx branches are exercised heavily; keep test output readable while
+# assertLogs continues to opt in for the specific loggers it verifies.
+LOGGING["root"]["level"] = "CRITICAL"
+LOGGING["loggers"]["django"]["level"] = "CRITICAL"
 
 # Password strength belongs to production. Tests only need deterministic
 # hashing semantics, and the production hasher makes the full suite needlessly

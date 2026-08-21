@@ -6,6 +6,7 @@ from datetime import timedelta
 from pathlib import Path
 import os
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 from .cloudinary_settings import build_cloudinary_storage_settings
@@ -19,19 +20,78 @@ if os.environ.get("APP_ENV", "development").strip().lower() == "development":
 
 
 # SECURITY
-SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key")
-DEBUG = os.environ.get("DEBUG", "False") == "True"
+APP_ENV = os.environ.get("APP_ENV", "development").strip().lower()
+IS_PRODUCTION = APP_ENV == "production"
+DEBUG = os.environ.get(
+    "DEBUG",
+    "False" if IS_PRODUCTION else "True",
+).lower() == "true"
+SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
+if not SECRET_KEY:
+    if IS_PRODUCTION:
+        raise ImproperlyConfigured("SECRET_KEY is required in production.")
+    SECRET_KEY = "dev-only-secret-key-not-for-production"
+if IS_PRODUCTION and (
+    len(SECRET_KEY) < 50 or SECRET_KEY.startswith(("dev-", "replace-"))
+):
+    raise ImproperlyConfigured(
+        "SECRET_KEY must be a unique random value of at least 50 characters."
+    )
 
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").split(",")
 
-CSRF_TRUSTED_ORIGINS = os.environ.get(
-    "CSRF_TRUSTED_ORIGINS",
-    "https://*.ondigitalocean.app"
-).split(",")
+def _environment_list(name, default=""):
+    return [
+        item.strip()
+        for item in os.environ.get(name, default).split(",")
+        if item.strip()
+    ]
+
+
+ALLOWED_HOSTS = _environment_list(
+    "ALLOWED_HOSTS",
+    "localhost,127.0.0.1" if not IS_PRODUCTION else "",
+)
+CSRF_TRUSTED_ORIGINS = _environment_list("CSRF_TRUSTED_ORIGINS")
+CORS_ALLOWED_ORIGINS = _environment_list("CORS_ALLOWED_ORIGINS")
+CORS_ALLOW_ALL_ORIGINS = (
+    not IS_PRODUCTION
+    and os.environ.get("CORS_ALLOW_ALL_ORIGINS", "True").lower() == "true"
+)
+
+if IS_PRODUCTION:
+    if DEBUG:
+        raise ImproperlyConfigured("DEBUG must be False in production.")
+    if not ALLOWED_HOSTS or "*" in ALLOWED_HOSTS:
+        raise ImproperlyConfigured(
+            "Set ALLOWED_HOSTS to the exact production host names."
+        )
+    if not CORS_ALLOWED_ORIGINS:
+        raise ImproperlyConfigured(
+            "CORS_ALLOWED_ORIGINS must contain the dashboard HTTPS origin."
+        )
+    if any(not origin.startswith("https://") for origin in CORS_ALLOWED_ORIGINS):
+        raise ImproperlyConfigured(
+            "Every production CORS_ALLOWED_ORIGINS value must use HTTPS."
+        )
+
+SECURE_SSL_REDIRECT = IS_PRODUCTION
+SESSION_COOKIE_SECURE = IS_PRODUCTION
+CSRF_COOKIE_SECURE = IS_PRODUCTION
+SECURE_HSTS_SECONDS = int(
+    os.environ.get("SECURE_HSTS_SECONDS", "31536000" if IS_PRODUCTION else "0")
+)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = IS_PRODUCTION
+SECURE_HSTS_PRELOAD = IS_PRODUCTION
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+X_FRAME_OPTIONS = "DENY"
+if IS_PRODUCTION:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 
 # Application definition
 INSTALLED_APPS = [
+    'config.apps.ConfigAppConfig',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -46,6 +106,7 @@ INSTALLED_APPS = [
     'accounts',
     'corsheaders',
     'rest_framework',
+    'drf_spectacular',
     'rest_framework_simplejwt.token_blacklist',
     "locations",
     "markets",
@@ -59,6 +120,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'config.observability.RequestContextMiddleware',
+    'config.request_limits.RequestBodyLimitMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -70,8 +133,6 @@ MIDDLEWARE = [
 ]
 
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
-
-CORS_ALLOW_ALL_ORIGINS = True
 
 ROOT_URLCONF = 'config.urls'
 
@@ -94,9 +155,13 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 
 # Database
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+if IS_PRODUCTION and not DATABASE_URL:
+    raise ImproperlyConfigured("DATABASE_URL is required in production.")
+
 DATABASES = {
     "default": dj_database_url.config(
-        default=os.environ.get("DATABASE_URL"),
+        default=DATABASE_URL or None,
         conn_max_age=0 if DEBUG else 600,
         ssl_require=not DEBUG,
     )
@@ -108,6 +173,12 @@ DATABASES = {
 # RATE_LIMIT_MODE after provisioning a non-sharded Redis/Valkey primary.
 RATE_LIMIT_REDIS_URL = os.environ.get("RATE_LIMIT_REDIS_URL", "").strip()
 RATE_LIMIT_MODE = os.environ.get("RATE_LIMIT_MODE", "off").strip().lower()
+if IS_PRODUCTION and (
+    not RATE_LIMIT_REDIS_URL or RATE_LIMIT_MODE != "enforce"
+):
+    raise ImproperlyConfigured(
+        "Production requires RATE_LIMIT_REDIS_URL and RATE_LIMIT_MODE=enforce."
+    )
 RATE_LIMIT_ENFORCE_SCOPES = tuple(
     item.strip()
     for item in os.environ.get("RATE_LIMIT_ENFORCE_SCOPES", "").split(",")
@@ -178,7 +249,30 @@ RATE_LIMIT_POLICY_RATES = {
     ),
     "snapshot_ip": _rate_limit_rates("snapshot_ip", "60/5m"),
     "share_ip": _rate_limit_rates("share_ip", "60/5m"),
+    "geocoding_user": _rate_limit_rates("geocoding_user", "30/1m"),
+    "geocoding_global": _rate_limit_rates("geocoding_global", "4/1s"),
 }
+
+GEOAPIFY_API_KEY = os.environ.get("GEOAPIFY_API_KEY", "").strip()
+GEOAPIFY_CONNECT_TIMEOUT = float(
+    os.environ.get("GEOAPIFY_CONNECT_TIMEOUT", "3")
+)
+RATE_LIMIT_FAIL_CLOSED_SCOPES = frozenset(
+    item.strip()
+    for item in os.environ.get(
+        "RATE_LIMIT_FAIL_CLOSED_SCOPES",
+        (
+            "login_ip,login_identifier,admin_login_ip,"
+            "admin_login_identifier,signup_ip,signup_email,"
+            "otp_send_ip,otp_send_identifier,otp_verify_ip,"
+            "otp_verify_identifier,refresh_ip,refresh_token"
+        ),
+    ).split(",")
+    if item.strip()
+)
+GEOAPIFY_READ_TIMEOUT = float(
+    os.environ.get("GEOAPIFY_READ_TIMEOUT", "5")
+)
 
 CACHES = {
     "default": {
@@ -208,7 +302,29 @@ CACHES = {
                 "retry_on_timeout": False,
             },
         },
-    }
+    },
+    "geocoding": (
+        {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": RATE_LIMIT_REDIS_URL,
+            "KEY_PREFIX": "yalla-geocoding",
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "IGNORE_EXCEPTIONS": False,
+                "SOCKET_CONNECT_TIMEOUT": float(
+                    os.environ.get("RATE_LIMIT_CONNECT_TIMEOUT", "0.5")
+                ),
+                "SOCKET_TIMEOUT": float(
+                    os.environ.get("RATE_LIMIT_SOCKET_TIMEOUT", "0.2")
+                ),
+            },
+        }
+        if RATE_LIMIT_REDIS_URL
+        else {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "yalla-geocoding-cache",
+        }
+    ),
 }
 
 
@@ -270,8 +386,87 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_CLASSES': (
         'config.rate_limit.YallaRateThrottle',
     ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
     'EXCEPTION_HANDLER': 'config.api_exceptions.api_exception_handler',
+    'DEFAULT_SCHEMA_CLASS': 'config.schema.YallaAutoSchema',
+    'DEFAULT_PAGINATION_CLASS': 'config.pagination.V2PageNumberPagination',
+    'PAGE_SIZE': 50,
 }
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Yalla Backend API",
+    "DESCRIPTION": "Versioned API contract for Yalla clients and dashboard.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "ENUM_NAME_OVERRIDES": {
+        "OrderStatusEnum": "orders.models.Order.Status",
+    },
+    "PREPROCESSING_HOOKS": [
+        "config.schema.remove_duplicate_optional_slash_routes",
+    ],
+    # CI generates and validates the complete schema explicitly. Keeping this
+    # separate prevents advisory schema warnings from masking Django's own
+    # security deployment checks.
+    "ENABLE_DJANGO_DEPLOY_CHECK": False,
+}
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "request_id": {"()": "config.observability.RequestIdFilter"},
+    },
+    "formatters": {
+        "json": {"()": "config.observability.JsonFormatter"},
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "filters": ["request_id"],
+            "formatter": "json",
+        },
+    },
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": os.environ.get("DJANGO_LOG_LEVEL", "INFO"),
+            "propagate": False,
+        },
+    },
+}
+
+CELERY_BROKER_URL = os.environ.get(
+    "CELERY_BROKER_URL",
+    RATE_LIMIT_REDIS_URL or "redis://127.0.0.1:6379/2",
+)
+CELERY_RESULT_BACKEND = None
+CELERY_TASK_IGNORE_RESULT = True
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_TASK_SERIALIZER = "json"
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_BEAT_SCHEDULE = {
+    "publish-pending-push-outbox": {
+        "task": "notifications.tasks.publish_pending_push_outbox",
+        "schedule": 60.0,
+    },
+}
+PUSH_DELIVERY_ASYNC = os.environ.get(
+    "PUSH_DELIVERY_ASYNC",
+    "True" if IS_PRODUCTION else "False",
+).lower() == "true"
+if IS_PRODUCTION and not PUSH_DELIVERY_ASYNC:
+    raise ImproperlyConfigured(
+        "PUSH_DELIVERY_ASYNC must be True in production."
+    )
+PUSH_OUTBOX_MAX_ATTEMPTS = int(
+    os.environ.get("PUSH_OUTBOX_MAX_ATTEMPTS", "6")
+)
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
@@ -307,6 +502,24 @@ AUTH_OTP_EXPIRY_SECONDS = 10 * 60
 AUTH_OTP_INCLUDE_IN_RESPONSE = (
     os.environ.get("AUTH_OTP_INCLUDE_IN_RESPONSE", "False") == "True"
 )
+if IS_PRODUCTION and AUTH_OTP_INCLUDE_IN_RESPONSE:
+    raise ImproperlyConfigured(
+        "AUTH_OTP_INCLUDE_IN_RESPONSE must be False in production."
+    )
 AUTH_UNVERIFIED_USER_RETENTION_HOURS = int(
     os.environ.get("AUTH_UNVERIFIED_USER_RETENTION_HOURS", "24")
+)
+
+
+# Application-side request limits complement the mandatory ingress limit. The
+# middleware can reject requests with Content-Length before multipart parsing;
+# the reverse proxy must also reject oversized chunked requests.
+API_MAX_REQUEST_BODY_SIZE = int(
+    os.environ.get("API_MAX_REQUEST_BODY_SIZE", str(2 * 1024 * 1024))
+)
+API_SINGLE_UPLOAD_REQUEST_SIZE = int(
+    os.environ.get("API_SINGLE_UPLOAD_REQUEST_SIZE", str(8 * 1024 * 1024))
+)
+API_PRODUCT_UPLOAD_REQUEST_SIZE = int(
+    os.environ.get("API_PRODUCT_UPLOAD_REQUEST_SIZE", str(55 * 1024 * 1024))
 )

@@ -5,6 +5,8 @@ from django.db.models import Max
 from django.utils import timezone
 from rest_framework import serializers
 
+from config.image_validation import validate_safe_image
+
 from .models import Product, ProductImage
 
 
@@ -32,7 +34,7 @@ def validate_product_image_upload(value):
         raise serializers.ValidationError(
             "Product images must be 5 MB or smaller."
         )
-    return value
+    return validate_safe_image(value)
 
 
 def _sync_legacy_image(product):

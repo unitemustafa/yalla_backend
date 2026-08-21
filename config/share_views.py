@@ -1,9 +1,12 @@
+from django.db.models import Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.html import escape
 from django.views.decorators.http import require_GET
 
 from catalog.models import Product
+from markets.models import Market
 from offers.models import Offer
 
 from .rate_limit import rate_limit_view
@@ -87,7 +90,12 @@ def _share_landing_response(
 @rate_limit_view("share_ip")
 def product_share(request, product_id):
     product = get_object_or_404(
-        Product.objects.select_related("market"),
+        Product.objects.select_related("market").filter(
+            archived_at__isnull=True,
+            is_available=True,
+            market__archived_at__isnull=True,
+            market__status=Market.Status.ACTIVE,
+        ),
         id=product_id,
     )
     return _share_landing_response(
@@ -103,7 +111,22 @@ def product_share(request, product_id):
 @require_GET
 @rate_limit_view("share_ip")
 def offer_share(request, offer_id):
-    offer = get_object_or_404(Offer, id=offer_id)
+    now = timezone.now()
+    offer = get_object_or_404(
+        Offer.objects.filter(
+            archived_at__isnull=True,
+            status=Offer.Status.ACTIVE,
+            start_time__lte=now,
+            end_time__gt=now,
+        ).filter(
+            Q(market__isnull=True)
+            | Q(
+                market__archived_at__isnull=True,
+                market__status=Market.Status.ACTIVE,
+            )
+        ),
+        id=offer_id,
+    )
     return _share_landing_response(
         request,
         content_type="offers",
@@ -111,4 +134,27 @@ def offer_share(request, offer_id):
         title=offer.title,
         description=offer.description,
         image_url=_absolute_image_url(request, offer.image),
+    )
+
+
+@require_GET
+@rate_limit_view("share_ip")
+def market_share(request, market_id):
+    market = get_object_or_404(
+        Market.objects.filter(
+            archived_at__isnull=True,
+            status=Market.Status.ACTIVE,
+        ),
+        id=market_id,
+    )
+    return _share_landing_response(
+        request,
+        content_type="markets",
+        content_id=market.id,
+        title=market.name,
+        description=market.description,
+        image_url=_absolute_image_url(
+            request,
+            market.cover_image or market.image,
+        ),
     )

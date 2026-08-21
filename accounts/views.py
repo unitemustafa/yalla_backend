@@ -7,7 +7,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.generics import get_object_or_404
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.token_blacklist.models import (
@@ -17,7 +17,10 @@ from rest_framework_simplejwt.token_blacklist.models import (
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
+from config.pagination import paginated_list_response
+
 from .models import CourierProfile, OneTimePassword
+from .permissions import IsAdminRole, IsClientRole
 from .client_sessions import (
     access_expires_in,
     apply_new_client_session,
@@ -31,6 +34,7 @@ from .serializers import (
     AdminUserWriteSerializer,
     AdminLoginSerializer,
     ClientLoginSerializer,
+    DeleteAccountSerializer,
     EmailOTPSerializer,
     EmailTokenRefreshSerializer,
     ForgotPasswordSerializer,
@@ -54,28 +58,6 @@ from .services import (
 from .exceptions import EmailVerificationRequired
 
 User = get_user_model()
-
-
-class IsAdminRole(BasePermission):
-    message = "Only admin users can manage users."
-
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.role == User.Role.ADMIN
-        )
-
-
-class IsClientRole(BasePermission):
-    message = "Only client users can update client information."
-
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.role == User.Role.CLIENT
-        )
 
 
 def token_payload(user, request=None, admin_session_lifetime=None, remember=False):
@@ -455,6 +437,21 @@ class ClientProfileView(APIView):
     def put(self, request):
         return self.update(request)
 
+    def delete(self, request):
+        serializer = DeleteAccountSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        from .deletion import permanently_delete_client_account
+
+        permanently_delete_client_account(request.user)
+        return Response(
+            {"detail": "Account deleted successfully."},
+            status=status.HTTP_200_OK,
+        )
+
 
 class AdminUserListCreateView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
@@ -463,10 +460,18 @@ class AdminUserListCreateView(APIView):
     def get(self, request):
         users = (
             User.objects.filter(deleted_at__isnull=True)
-            .select_related("market_region_service_city")
+            .select_related(
+                "market_region_service_city",
+                "courier_profile__delivery_area",
+                "courier_profile__service_city",
+            )
             .order_by("-created_at", "-id")
         )
-        return Response(AdminUserSerializer(users, many=True).data)
+        return paginated_list_response(
+            request,
+            users,
+            AdminUserSerializer,
+        )
 
     @transaction.atomic
     def post(self, request):
@@ -495,7 +500,11 @@ class AdminRepresentativeListView(APIView):
             )
             .order_by("-created_at", "-id")
         )
-        return Response(AdminUserSerializer(representatives, many=True).data)
+        return paginated_list_response(
+            request,
+            representatives,
+            AdminUserSerializer,
+        )
 
 
 class AdminUserDetailView(APIView):

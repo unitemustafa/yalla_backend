@@ -1,7 +1,8 @@
 import logging
 import uuid
 
-from django.db.models import ProtectedError
+from django.db.models import Exists, OuterRef, ProtectedError, Q
+from django.utils import timezone
 
 from rest_framework import serializers, status
 from rest_framework.exceptions import PermissionDenied
@@ -12,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
+from config.pagination import paginated_list_response
 from markets.region import (
     current_market_region_selection,
     no_market_region_selection_response,
@@ -31,8 +33,14 @@ class OfferListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        protected_offers = Offer.objects.filter(pk=OuterRef("pk")).filter(
+            Q(order_offers__isnull=False)
+            | Q(notification_dispatches__isnull=False)
+        )
         return (
-            Offer.objects.select_related(
+            Offer.objects.annotate(
+                deletion_mode_is_archive=Exists(protected_offers),
+            ).select_related(
                 "market__classification",
             )
             .prefetch_related(
@@ -56,12 +64,15 @@ class OfferListCreateView(APIView):
 
     def get(self, request):
         if request.user.role == User.Role.ADMIN:
-            return Response(
-                AdminOfferSerializer(
-                    self.get_queryset(),
-                    many=True,
-                    context={"request": request},
-                ).data
+            queryset = self.get_queryset()
+            if request.query_params.get("archived") in {"true", "1"}:
+                queryset = queryset.filter(archived_at__isnull=False)
+            else:
+                queryset = queryset.filter(archived_at__isnull=True)
+            return paginated_list_response(
+                request,
+                queryset,
+                AdminOfferSerializer,
             )
         if request.user.role != User.Role.CLIENT:
             raise PermissionDenied("Only admin or client users can access offers.")
@@ -93,12 +104,10 @@ class OfferListCreateView(APIView):
             )
             .order_by("-announcement_priority", "-created_at", "-id")
         )
-        return Response(
-            HomeOfferSerializer(
-                offers,
-                many=True,
-                context={"request": request},
-            ).data
+        return paginated_list_response(
+            request,
+            offers,
+            HomeOfferSerializer,
         )
 
     def post(self, request):
@@ -200,6 +209,16 @@ class OfferDetailView(APIView):
         if request.FILES.get("image") and set(request.data.keys()) == {"image"}:
             return update_offer_image_response(request, offer_id)
         offer = self.get_offer(offer_id)
+        if request.data.get("restore") is True:
+            offer.archived_at = None
+            offer.save(update_fields=("archived_at", "updated_at"))
+            offer = self.get_queryset().get(id=offer.id)
+            return Response(
+                AdminOfferSerializer(
+                    offer,
+                    context={"request": request},
+                ).data
+            )
         serializer = AdminOfferSerializer(
             offer,
             data=request.data,
@@ -222,14 +241,20 @@ class OfferDetailView(APIView):
         try:
             offer.delete()
         except ProtectedError:
+            offer.status = Offer.Status.INACTIVE
+            offer.archived_at = timezone.now()
+            offer.save(update_fields=("status", "archived_at", "updated_at"))
             return Response(
-                {"detail": "Cannot delete offer while orders are using it."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {
+                    "action": "archived",
+                    "detail": (
+                        "تمت أرشفة العرض بدلًا من حذفه لأنه مرتبط "
+                        "بسجل طلبات سابق."
+                    ),
+                },
+                status=status.HTTP_200_OK,
             )
-        return Response(
-            {"details": "Deleted Successfully"},
-            status=status.HTTP_200_OK,
-        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @staticmethod
     def _require_admin(request):

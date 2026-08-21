@@ -1,17 +1,12 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.contrib.auth import get_user_model
-from django.utils import timezone
 from rest_framework import serializers
 
 from catalog.models import ProductVariant
 from locations.models import Address, DeliveryArea, ServiceCity
 from markets.models import Market
 from markets.region import (
-    GENERAL_OFFER_IN_SERVICE_CITY_MESSAGE,
-    MIXED_MARKET_SCOPE_MESSAGE,
-    MIXED_SERVICE_CITY_MARKETS_MESSAGE,
-    SERVICE_CITY_OFFER_IN_GENERAL_MESSAGE,
     address_matches_market_region,
     current_market_region_selection,
     order_region_validation_error,
@@ -21,6 +16,7 @@ from offers.models import Offer
 
 from .models import Order, OrderEvent, OrderItem, OrderMarketSection, OrderOffer
 from .services import allowed_statuses_for_order
+from .write_validation import OrderWriteValidationMixin
 
 User = get_user_model()
 
@@ -141,62 +137,15 @@ class OrderPreviewSerializer(serializers.Serializer):
         has_explicit_address = "delivery_address" in attrs
         items = attrs.get("items", [])
         offers = attrs.get("offers", [])
-
-        if not items and not offers:
-            raise serializers.ValidationError(
-                {"items": "Choose at least one product variant or offer."}
-            )
-
-        if any(item["offer"].type == Offer.OfferType.ANNOUNCEMENT for item in offers):
-            raise serializers.ValidationError(
-                {"offers": "Announcements are external links and cannot be added to an order."}
-            )
-
-        region_error = order_region_validation_error(
-            user,
-            [item["variant"] for item in items],
-            [item["offer"] for item in offers],
-        )
-        if region_error:
-            raise serializers.ValidationError(region_error)
-
-        available_offer_ids = set(
-            visible_offer_queryset(user).filter(
-                id__in=[item["offer"].id for item in offers]
-            ).values_list("id", flat=True)
-        )
-        unavailable_offer_ids = [
-            item["offer"].id
-            for item in offers
-            if item["offer"].id not in available_offer_ids
-        ]
-        if unavailable_offer_ids:
-            raise serializers.ValidationError(
-                {"offers": "One or more offers are no longer available."}
-            )
+        self._validate_selected_content(user, items, offers)
 
         current_selection = current_market_region_selection(user)
-        address = attrs.get("delivery_address")
-        if address is not None and address.user_id != user.id:
-            raise serializers.ValidationError(
-                {"address_id": "Address does not belong to the authenticated user."}
-            )
-        if address is not None and not self._address_is_allowed_for_scope(
-            address,
+        address = self._validated_address(
+            user,
             current_selection,
-        ):
-            raise serializers.ValidationError(self._address_region_mismatch_error())
-        if address is None and not has_explicit_address:
-            address = self._default_address(user, current_selection)
-        if address is None:
-            raise serializers.ValidationError(
-                {
-                    "requires_address_selection": True,
-                    "address_id": (
-                        "Choose an address for the currently selected market region."
-                    ),
-                }
-            )
+            attrs.get("delivery_address"),
+            has_explicit_address=has_explicit_address,
+        )
 
         order_scope = current_selection["mode"]
         request_service_city = attrs.get("service_city")
@@ -235,6 +184,70 @@ class OrderPreviewSerializer(serializers.Serializer):
         attrs.update(delivery_context)
         return attrs
 
+    def _validate_selected_content(self, user, items, offers):
+        if not items and not offers:
+            raise serializers.ValidationError(
+                {"items": "Choose at least one product variant or offer."}
+            )
+        if any(
+            item["offer"].type == Offer.OfferType.ANNOUNCEMENT
+            for item in offers
+        ):
+            raise serializers.ValidationError(
+                {
+                    "offers": (
+                        "Announcements are external links and cannot be added "
+                        "to an order."
+                    )
+                }
+            )
+        region_error = order_region_validation_error(
+            user,
+            [item["variant"] for item in items],
+            [item["offer"] for item in offers],
+        )
+        if region_error:
+            raise serializers.ValidationError(region_error)
+        available_offer_ids = set(
+            visible_offer_queryset(user)
+            .filter(id__in=[item["offer"].id for item in offers])
+            .values_list("id", flat=True)
+        )
+        if any(item["offer"].id not in available_offer_ids for item in offers):
+            raise serializers.ValidationError(
+                {"offers": "One or more offers are no longer available."}
+            )
+
+    def _validated_address(
+        self,
+        user,
+        current_selection,
+        address,
+        *,
+        has_explicit_address,
+    ):
+        if address is not None and address.user_id != user.id:
+            raise serializers.ValidationError(
+                {"address_id": "Address does not belong to the authenticated user."}
+            )
+        if address is not None and not self._address_is_allowed_for_scope(
+            address,
+            current_selection,
+        ):
+            raise serializers.ValidationError(self._address_region_mismatch_error())
+        if address is None and not has_explicit_address:
+            address = self._default_address(user, current_selection)
+        if address is None:
+            raise serializers.ValidationError(
+                {
+                    "requires_address_selection": True,
+                    "address_id": (
+                        "Choose an address for the currently selected market region."
+                    ),
+                }
+            )
+        return address
+
     def preview_data(self):
         user = self.validated_data["user"]
         current_selection = self.validated_data["current_selection"]
@@ -248,132 +261,25 @@ class OrderPreviewSerializer(serializers.Serializer):
         items = self.validated_data.get("items", [])
         offers = self.validated_data.get("offers", [])
         has_free_delivery = self._has_free_delivery_offer(offers)
-        market_groups = {}
-        selected_lines_by_variant = {}
+        market_groups, selected_lines_by_variant = self._product_market_groups(
+            items
+        )
+        self._append_offer_market_groups(
+            market_groups,
+            selected_lines_by_variant,
+            offers,
+        )
 
-        for item in items:
-            variant = item["variant"]
-            product = variant.product
-            quantity = item["quantity"]
-            unit_price = self._product_unit_price(variant)
-            subtotal = unit_price * quantity
-            group = self._market_group(market_groups, product.market)
-            line = {
-                "variant_id": variant.id,
-                "product_id": product.id,
-                "product_name": product.name,
-                "image": self._image_url(product.image),
-                "quantity": quantity,
-                "unit_price": self._money(unit_price),
-                "subtotal": self._money(subtotal),
-            }
-            group["selected_products"].append(line)
-            group["products_subtotal"] += subtotal
-            selected_lines_by_variant.setdefault(variant.id, []).append(
-                {
-                    "line": line,
-                    "subtotal": subtotal,
-                }
-            )
-
-        for item in offers:
-            offer = item["offer"]
-            for offer_group in self._offer_product_rows_by_market(
-                offer,
-                selected_lines_by_variant,
-            ).values():
-                group = self._market_group(market_groups, offer_group["market"])
-                group["products_subtotal"] += offer_group[
-                    "added_products_subtotal"
-                ]
-                discount_amount = self._percentage_amount(
-                    offer_group["offer_products_subtotal"],
-                    offer.discount,
-                )
-                group["total_offer_discounts"] += discount_amount
-                group["selected_offers"].append(
-                    {
-                        "id": offer.id,
-                        "title": offer.title,
-                        "description": offer.description,
-                        "image": self._image_url(offer.image),
-                        "type": offer.type,
-                        "discount_percentage": self._money(offer.discount),
-                        "offer_products_subtotal": self._money(
-                            offer_group["offer_products_subtotal"]
-                        ),
-                        "discount_amount": self._money(discount_amount),
-                        "products": offer_group["products"],
-                    }
-                )
-
-        market_groups_data = []
-        subtotal = Decimal("0.00")
-        discount_total = Decimal("0.00")
-        delivery_total = Decimal("0.00")
-        grand_total = Decimal("0.00")
-
-        fixed_delivery_applied = False
-        for market_id in sorted(market_groups):
-            group = market_groups[market_id]
-            delivery_available = self._market_serves_city(
-                group["market"],
-                service_city,
-                order_scope,
-            )
-            if delivery_available and has_free_delivery and not fixed_delivery_applied:
-                delivery_price = Decimal("0.00")
-            else:
-                delivery_price = (
-                    fixed_delivery_price
-                    if delivery_available
-                    and delivery_type == Order.DeliveryType.FIXED_AREA
-                    and not fixed_delivery_applied
-                    else None
-                )
-            if delivery_price is not None:
-                fixed_delivery_applied = True
-            delivery_price_total = delivery_price or Decimal("0.00")
-            market_total = (
-                group["products_subtotal"]
-                - group["total_offer_discounts"]
-                + delivery_price_total
-            )
-            subtotal += group["products_subtotal"]
-            discount_total += group["total_offer_discounts"]
-            delivery_total += delivery_price_total
-            grand_total += market_total
-            market_groups_data.append(
-                {
-                    "market": {
-                        "id": group["market"].id,
-                        "name": group["market"].name,
-                        "branch": group["market"].branch,
-                    },
-                    "service_city": self._service_city_data(service_city),
-                    "delivery_area": (
-                        DeliveryAreaSummarySerializer(delivery_area).data
-                        if delivery_area is not None
-                        else None
-                    ),
-                    "delivery_type": delivery_type,
-                    "delivery_price": self._money_nullable(delivery_price),
-                    "delivery_message": delivery_message,
-                    "delivery_available": delivery_available,
-                    "selected_products": group["selected_products"],
-                    "selected_offers": group["selected_offers"],
-                    "pricing": {
-                        "products_subtotal": self._money(
-                            group["products_subtotal"]
-                        ),
-                        "total_offer_discounts": self._money(
-                            group["total_offer_discounts"]
-                        ),
-                        "delivery_price": self._money_nullable(delivery_price),
-                        "market_total": self._money(market_total),
-                    },
-                }
-            )
+        market_groups_data, summary = self._preview_market_groups(
+            market_groups,
+            service_city=service_city,
+            order_scope=order_scope,
+            delivery_area=delivery_area,
+            delivery_type=delivery_type,
+            fixed_delivery_price=fixed_delivery_price,
+            delivery_message=delivery_message,
+            has_free_delivery=has_free_delivery,
+        )
 
         addresses = user.addresses.select_related(
             "service_city",
@@ -407,13 +313,153 @@ class OrderPreviewSerializer(serializers.Serializer):
                 group["market"]["name"] for group in market_groups_data
             ),
             "market_groups": market_groups_data,
-            "summary": {
-                "subtotal": self._money(subtotal),
-                "discount_total": self._money(discount_total),
-                "delivery_total": self._money(delivery_total),
-                "grand_total": self._money(grand_total),
-            },
+            "summary": summary,
         }
+
+    def _preview_market_groups(
+        self,
+        market_groups,
+        *,
+        service_city,
+        order_scope,
+        delivery_area,
+        delivery_type,
+        fixed_delivery_price,
+        delivery_message,
+        has_free_delivery,
+    ):
+        groups_data = []
+        totals = {
+            "subtotal": Decimal("0.00"),
+            "discount_total": Decimal("0.00"),
+            "delivery_total": Decimal("0.00"),
+            "grand_total": Decimal("0.00"),
+        }
+        fixed_delivery_applied = False
+        for market_id in sorted(market_groups):
+            group = market_groups[market_id]
+            delivery_available = self._market_serves_city(
+                group["market"], service_city, order_scope
+            )
+            if delivery_available and has_free_delivery and not fixed_delivery_applied:
+                delivery_price = Decimal("0.00")
+            else:
+                delivery_price = (
+                    fixed_delivery_price
+                    if delivery_available
+                    and delivery_type == Order.DeliveryType.FIXED_AREA
+                    and not fixed_delivery_applied
+                    else None
+                )
+            if delivery_price is not None:
+                fixed_delivery_applied = True
+            delivery_price_total = delivery_price or Decimal("0.00")
+            market_total = (
+                group["products_subtotal"]
+                - group["total_offer_discounts"]
+                + delivery_price_total
+            )
+            totals["subtotal"] += group["products_subtotal"]
+            totals["discount_total"] += group["total_offer_discounts"]
+            totals["delivery_total"] += delivery_price_total
+            totals["grand_total"] += market_total
+            groups_data.append(
+                {
+                    "market": {
+                        "id": group["market"].id,
+                        "name": group["market"].name,
+                        "branch": group["market"].branch,
+                    },
+                    "service_city": self._service_city_data(service_city),
+                    "delivery_area": (
+                        DeliveryAreaSummarySerializer(delivery_area).data
+                        if delivery_area is not None
+                        else None
+                    ),
+                    "delivery_type": delivery_type,
+                    "delivery_price": self._money_nullable(delivery_price),
+                    "delivery_message": delivery_message,
+                    "delivery_available": delivery_available,
+                    "selected_products": group["selected_products"],
+                    "selected_offers": group["selected_offers"],
+                    "pricing": {
+                        "products_subtotal": self._money(
+                            group["products_subtotal"]
+                        ),
+                        "total_offer_discounts": self._money(
+                            group["total_offer_discounts"]
+                        ),
+                        "delivery_price": self._money_nullable(delivery_price),
+                        "market_total": self._money(market_total),
+                    },
+                }
+            )
+        summary = {name: self._money(value) for name, value in totals.items()}
+        return groups_data, summary
+
+    def _product_market_groups(self, items):
+        market_groups = {}
+        selected_lines_by_variant = {}
+        for item in items:
+            variant = item["variant"]
+            product = variant.product
+            quantity = item["quantity"]
+            unit_price = self._product_unit_price(variant)
+            subtotal = unit_price * quantity
+            group = self._market_group(market_groups, product.market)
+            line = {
+                "variant_id": variant.id,
+                "product_id": product.id,
+                "product_name": product.name,
+                "image": self._image_url(product.image),
+                "quantity": quantity,
+                "unit_price": self._money(unit_price),
+                "subtotal": self._money(subtotal),
+            }
+            group["selected_products"].append(line)
+            group["products_subtotal"] += subtotal
+            selected_lines_by_variant.setdefault(variant.id, []).append(
+                {"line": line, "subtotal": subtotal}
+            )
+        return market_groups, selected_lines_by_variant
+
+    def _append_offer_market_groups(
+        self,
+        market_groups,
+        selected_lines_by_variant,
+        offers,
+    ):
+        for item in offers:
+            offer = item["offer"]
+            offer_groups = self._offer_product_rows_by_market(
+                offer,
+                selected_lines_by_variant,
+            )
+            for offer_group in offer_groups.values():
+                group = self._market_group(market_groups, offer_group["market"])
+                group["products_subtotal"] += offer_group[
+                    "added_products_subtotal"
+                ]
+                discount_amount = self._percentage_amount(
+                    offer_group["offer_products_subtotal"],
+                    offer.discount,
+                )
+                group["total_offer_discounts"] += discount_amount
+                group["selected_offers"].append(
+                    {
+                        "id": offer.id,
+                        "title": offer.title,
+                        "description": offer.description,
+                        "image": self._image_url(offer.image),
+                        "type": offer.type,
+                        "discount_percentage": self._money(offer.discount),
+                        "offer_products_subtotal": self._money(
+                            offer_group["offer_products_subtotal"]
+                        ),
+                        "discount_amount": self._money(discount_amount),
+                        "products": offer_group["products"],
+                    }
+                )
 
     @staticmethod
     def _default_address(user, current_selection):
@@ -744,6 +790,16 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
             service_city=service_city,
             delivery_area=delivery_area,
             delivery_type=delivery_type,
+            fulfillment_type=(
+                Order.FulfillmentType.DIRECT
+                if parent_delivery_price is not None
+                else Order.FulfillmentType.EXTERNAL_SHIPPING
+            ),
+            external_shipping_status=(
+                Order.ExternalShippingStatus.NOT_REQUIRED
+                if parent_delivery_price is not None
+                else Order.ExternalShippingStatus.PENDING_QUOTE
+            ),
             market=first_group["market"],
             payment_method=payment_method,
             status=Order.Status.PENDING,
@@ -930,10 +986,10 @@ class OrderItemSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("id", "product_name", "variant_name")
 
-    def get_product_name(self, instance):
+    def get_product_name(self, instance) -> str:
         return instance.variant.product.name
 
-    def get_variant_name(self, instance):
+    def get_variant_name(self, instance) -> str | None:
         values = []
         for value in instance.variant.attribute_values.all():
             attribute = (
@@ -1082,20 +1138,20 @@ class AssignedRepresentativeSummarySerializer(serializers.ModelSerializer):
             "plate_number",
         )
 
-    def get_name(self, instance):
+    def get_name(self, instance) -> str:
         return user_summary(instance)["name"]
 
-    def get_avatar(self, instance):
+    def get_avatar(self, instance) -> str | None:
         return self.get_avatar_url(instance)
 
-    def get_avatar_url(self, instance):
+    def get_avatar_url(self, instance) -> str | None:
         if instance.avatar_image:
             request = self.context.get("request")
             url = instance.avatar_image.url
             return request.build_absolute_uri(url) if request is not None else url
         return instance.avatar_url
 
-    def get_service_city(self, instance):
+    def get_service_city(self, instance) -> dict | None:
         profile = getattr(instance, "courier_profile", None)
         service_city = getattr(profile, "service_city", None)
         if service_city is None:
@@ -1119,11 +1175,11 @@ class OrderEventSerializer(serializers.ModelSerializer):
             "created_at",
         )
 
-    def get_actor(self, instance):
+    def get_actor(self, instance) -> dict | None:
         return user_summary(instance.actor) if instance.actor_id else None
 
 
-class OrderSerializer(serializers.ModelSerializer):
+class OrderSerializer(OrderWriteValidationMixin, serializers.ModelSerializer):
     user_id = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(role=User.Role.CLIENT),
         source="user",
@@ -1165,6 +1221,7 @@ class OrderSerializer(serializers.ModelSerializer):
     service_city = ServiceCitySummarySerializer(read_only=True)
     delivery_area = DeliveryAreaSummarySerializer(read_only=True)
     delivery_address = serializers.SerializerMethodField()
+    delivery_price_status = serializers.SerializerMethodField()
     is_multi_market = serializers.SerializerMethodField()
     market_count = serializers.SerializerMethodField()
     market_names_summary = serializers.SerializerMethodField()
@@ -1203,6 +1260,11 @@ class OrderSerializer(serializers.ModelSerializer):
             "delivery_area_id",
             "delivery_area",
             "delivery_type",
+            "fulfillment_type",
+            "external_shipping_status",
+            "delivery_price_status",
+            "eta_min_minutes",
+            "eta_max_minutes",
             "payment_method",
             "discount",
             "description",
@@ -1239,6 +1301,10 @@ class OrderSerializer(serializers.ModelSerializer):
             "id",
             "status",
             "review_status",
+            "fulfillment_type",
+            "external_shipping_status",
+            "eta_min_minutes",
+            "eta_max_minutes",
             "assigned_representative_id",
             "assigned_at",
             "delivered_at",
@@ -1251,7 +1317,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "updated_at",
         )
 
-    def get_customer(self, instance):
+    def get_customer(self, instance) -> dict:
         return user_summary(instance.user)
 
     def to_representation(self, instance):
@@ -1281,7 +1347,7 @@ class OrderSerializer(serializers.ModelSerializer):
         data["offers"] = list(aggregated.values())
         return data
 
-    def get_delivery_address(self, instance):
+    def get_delivery_address(self, instance) -> dict | None:
         address = instance.delivery_address
         if address is None:
             return None
@@ -1312,25 +1378,34 @@ class OrderSerializer(serializers.ModelSerializer):
             ),
         }
 
-    def get_is_multi_market(self, instance):
+    def get_delivery_price_status(self, instance) -> str:
+        if (
+            instance.fulfillment_type == Order.FulfillmentType.DIRECT
+            or instance.external_shipping_status
+            == Order.ExternalShippingStatus.NOT_REQUIRED
+        ):
+            return "fixed"
+        return instance.external_shipping_status
+
+    def get_is_multi_market(self, instance) -> bool:
         return self.get_market_count(instance) > 1
 
-    def get_market_count(self, instance):
+    def get_market_count(self, instance) -> int:
         return len(self._market_sections(instance))
 
-    def get_market_names_summary(self, instance):
+    def get_market_names_summary(self, instance) -> str:
         return ", ".join(
             section.market.name for section in self._market_sections(instance)
         )
 
-    def get_market_sections(self, instance):
+    def get_market_sections(self, instance) -> list[dict]:
         return OrderMarketSectionSerializer(
             self._market_sections(instance),
             many=True,
             context=self.context,
         ).data
 
-    def get_grouped_items(self, instance):
+    def get_grouped_items(self, instance) -> list[dict]:
         return [
             {
                 "market": MarketSummarySerializer(section.market).data,
@@ -1343,7 +1418,7 @@ class OrderSerializer(serializers.ModelSerializer):
             for section in self._market_sections(instance)
         ]
 
-    def get_grouped_offers(self, instance):
+    def get_grouped_offers(self, instance) -> list[dict]:
         return [
             {
                 "market": MarketSummarySerializer(section.market).data,
@@ -1356,7 +1431,7 @@ class OrderSerializer(serializers.ModelSerializer):
             for section in self._market_sections(instance)
         ]
 
-    def get_pickup_stops(self, instance):
+    def get_pickup_stops(self, instance) -> list[dict]:
         return [
             {
                 "market_id": section.market_id,
@@ -1368,7 +1443,7 @@ class OrderSerializer(serializers.ModelSerializer):
             for section in self._market_sections(instance)
         ]
 
-    def get_allowed_statuses(self, instance):
+    def get_allowed_statuses(self, instance) -> list[str]:
         return allowed_statuses_for_order(instance)
 
     def _market_sections(self, instance):
@@ -1390,390 +1465,6 @@ class OrderSerializer(serializers.ModelSerializer):
         sections.sort(key=lambda section: (section.sort_order, section.id))
         setattr(instance, cache_name, sections)
         return sections
-
-    def validate(self, attrs):
-        user = attrs.get("user", getattr(self.instance, "user", None))
-        address = attrs.get(
-            "delivery_address",
-            getattr(self.instance, "delivery_address", None),
-        )
-        market = attrs.get("market", getattr(self.instance, "market", None))
-        service_city = attrs.get(
-            "service_city",
-            getattr(self.instance, "service_city", None),
-        )
-        representative = attrs.get(
-            "assigned_representative",
-            getattr(self.instance, "assigned_representative", None),
-        )
-        items = attrs.get("items")
-        offers = attrs.get("order_offers")
-        order_scope = attrs.get(
-            "order_scope",
-            getattr(self.instance, "order_scope", None),
-        )
-
-        if address and user and address.user_id != user.id:
-            raise serializers.ValidationError(
-                {"delivery_address_id": "Address does not belong to the order user."}
-            )
-        if market is None:
-            market = self._first_market_from_lines(items, offers)
-            if market is not None:
-                attrs["market"] = market
-        if order_scope is None and market is not None:
-            order_scope = (
-                Order.Scope.GENERAL
-                if market.scope == Market.Scope.GENERAL
-                else Order.Scope.SERVICE_CITY
-            )
-            attrs["order_scope"] = order_scope
-        if (
-            service_city is None
-            and order_scope == Order.Scope.SERVICE_CITY
-            and address is not None
-            and address.service_city_id
-        ):
-            service_city = address.service_city
-            attrs["service_city"] = service_city
-        if (
-            service_city is None
-            and order_scope == Order.Scope.SERVICE_CITY
-            and market is not None
-        ):
-            service_city = market.service_cities.filter(is_active=True).first()
-            if service_city is not None:
-                attrs["service_city"] = service_city
-        if order_scope == Order.Scope.GENERAL:
-            service_city = None
-            attrs["service_city"] = None
-        if order_scope == Order.Scope.SERVICE_CITY and service_city is None:
-            raise serializers.ValidationError(
-                {"service_city_id": "Service city is required."}
-            )
-        if address is not None:
-            if order_scope == Order.Scope.GENERAL and not (
-                address.service_city_id is None
-                and address.delivery_area_id is None
-                and bool((address.manual_city or "").strip())
-                and bool((address.manual_area or "").strip())
-            ):
-                raise serializers.ValidationError(
-                    {
-                        "delivery_address_id": (
-                            "General orders require a manual general address."
-                        )
-                    }
-                )
-            if (
-                order_scope == Order.Scope.SERVICE_CITY
-                and address.service_city_id is None
-            ):
-                raise serializers.ValidationError(
-                    {
-                        "delivery_address_id": (
-                            "Delivery address must belong to the service city."
-                        )
-                    }
-                )
-            if (
-                order_scope == Order.Scope.SERVICE_CITY
-                and address.service_city_id != service_city.id
-            ):
-                raise serializers.ValidationError(
-                    {
-                        "service_city_id": (
-                            "Service city must match the delivery address service city."
-                        )
-                    }
-                )
-        if service_city is not None and not service_city.is_active:
-            raise serializers.ValidationError(
-                {"service_city_id": "Service city must be active."}
-            )
-        if (
-            order_scope == Order.Scope.SERVICE_CITY
-            and
-            address is not None
-            and address.service_city_id
-            and address.service_city_id != service_city.id
-        ):
-            raise serializers.ValidationError(
-                {
-                    "service_city_id": (
-                        "Service city must match the delivery address service city."
-                    )
-                }
-            )
-        if self.instance is None or any(
-            field in attrs
-            for field in (
-                "delivery_address",
-                "service_city",
-                "delivery_area",
-                "delivery_type",
-                "delivery_price",
-            )
-        ):
-            self._normalize_delivery_fields(attrs, address, service_city, order_scope)
-        if market and not self._market_matches_order_scope(
-            market,
-            order_scope,
-            service_city,
-        ):
-            raise serializers.ValidationError(
-                {
-                    "market_id": self._market_scope_error_message(
-                        market,
-                        order_scope,
-                        service_city,
-                    )
-                }
-            )
-        if items is not None:
-            invalid_market = next(
-                (
-                    item["variant"].product.market
-                    for item in items
-                    if not self._market_matches_order_scope(
-                        item["variant"].product.market,
-                        order_scope,
-                        service_city,
-                    )
-                ),
-                None,
-            )
-            if invalid_market is not None:
-                raise serializers.ValidationError(
-                    {
-                        "items": self._market_scope_error_message(
-                            invalid_market,
-                            order_scope,
-                            service_city,
-                        )
-                    }
-                )
-        if offers is not None:
-            invalid_offer = next(
-                (
-                    item["offer"]
-                    for item in offers
-                    if not self._offer_matches_order_scope(
-                        item["offer"],
-                        order_scope,
-                        service_city,
-                    )
-                ),
-                None,
-            )
-            if invalid_offer is not None:
-                raise serializers.ValidationError(
-                    {
-                        "offers": self._offer_scope_error_message(
-                            invalid_offer,
-                            order_scope,
-                            service_city,
-                        )
-                    }
-                )
-        if "assigned_representative" in attrs:
-            if representative:
-                review_status = attrs.get(
-                    "review_status",
-                    getattr(
-                        self.instance,
-                        "review_status",
-                        Order.ReviewStatus.PENDING_REVIEW,
-                    ),
-                )
-                if review_status != Order.ReviewStatus.APPROVED:
-                    raise serializers.ValidationError(
-                        {"assigned_representative_id": "Order must be approved before assignment."}
-                    )
-                profile = getattr(representative, "courier_profile", None)
-                if profile is None:
-                    raise serializers.ValidationError(
-                        {"assigned_representative_id": "Representative must have a courier profile."}
-                    )
-                courier_service_city = self._courier_service_city_for_order(
-                    order_scope,
-                    service_city,
-                    attrs.get(
-                        "delivery_area",
-                        getattr(self.instance, "delivery_area", None),
-                    ),
-                )
-                if (
-                    courier_service_city is not None
-                    and profile.service_city_id != courier_service_city.id
-                ):
-                    raise serializers.ValidationError(
-                        {
-                            "assigned_representative_id": (
-                                "هذا المندوب لا يعمل في نفس مدينة الطلب."
-                            )
-                        }
-                    )
-                attrs["status"] = Order.Status.ASSIGNED
-                if not attrs.get("assigned_at"):
-                    attrs["assigned_at"] = timezone.now()
-            else:
-                attrs["assigned_at"] = None
-                if self.instance and self.instance.assigned_representative_id:
-                    attrs["status"] = Order.Status.CONFIRMED
-        return attrs
-
-    def _normalize_delivery_fields(self, attrs, address, service_city, order_scope):
-        if order_scope == Order.Scope.GENERAL:
-            attrs["service_city"] = None
-            attrs["delivery_area"] = None
-            attrs["delivery_type"] = Order.DeliveryType.DELIVERY
-            attrs["delivery_price"] = None
-            return
-
-        if address is not None:
-            if (
-                order_scope == Order.Scope.SERVICE_CITY
-                and address.delivery_type == Address.DeliveryType.FIXED_AREA
-                and address.delivery_area_id
-            ):
-                delivery_area = address.delivery_area
-                if (
-                    delivery_area.is_active
-                    and service_city is not None
-                    and delivery_area.service_city_id == service_city.id
-                ):
-                    attrs["delivery_area"] = delivery_area
-                    attrs["delivery_type"] = Order.DeliveryType.FIXED_AREA
-                    attrs["delivery_price"] = delivery_area.delivery_price
-                    return
-
-            attrs["delivery_area"] = None
-            attrs["delivery_type"] = Order.DeliveryType.DELIVERY
-            attrs["delivery_price"] = None
-            return
-
-        delivery_area = attrs.get(
-            "delivery_area",
-            getattr(self.instance, "delivery_area", None),
-        )
-        delivery_type = attrs.get(
-            "delivery_type",
-            getattr(self.instance, "delivery_type", Order.DeliveryType.DELIVERY),
-        )
-        if delivery_area is not None:
-            if order_scope == Order.Scope.SERVICE_CITY and service_city is None:
-                raise serializers.ValidationError(
-                    {"service_city_id": "Service city is required for fixed-area delivery."}
-                )
-            if not delivery_area.is_active:
-                raise serializers.ValidationError(
-                    {"delivery_area_id": "Delivery area must be active."}
-                )
-            if (
-                order_scope == Order.Scope.SERVICE_CITY
-                and delivery_area.service_city_id != service_city.id
-            ):
-                raise serializers.ValidationError(
-                    {
-                        "delivery_area_id": (
-                            "Delivery area must belong to the service city."
-                        )
-                    }
-                )
-            attrs["delivery_area"] = delivery_area
-            attrs["delivery_type"] = Order.DeliveryType.FIXED_AREA
-            attrs["delivery_price"] = delivery_area.delivery_price
-            return
-
-        if delivery_type == Order.DeliveryType.FIXED_AREA:
-            raise serializers.ValidationError(
-                {"delivery_area_id": "Delivery area is required for fixed-area delivery."}
-            )
-        attrs["delivery_area"] = None
-        attrs["delivery_type"] = Order.DeliveryType.DELIVERY
-        attrs["delivery_price"] = None
-
-    def _market_matches_order_scope(self, market, order_scope, service_city):
-        if market is None or order_scope is None:
-            return False
-        if order_scope == Order.Scope.GENERAL:
-            return market.scope == Market.Scope.GENERAL
-        return (
-            market.scope in [Market.Scope.GENERAL, Market.Scope.SERVICE_CITY]
-            and service_city is not None
-            and market.service_cities.filter(
-                pk=service_city.pk,
-                is_active=True,
-            ).exists()
-        )
-
-    def _offer_matches_order_scope(self, offer, order_scope, service_city):
-        if order_scope == Order.Scope.GENERAL:
-            if not offer.show_in_general:
-                return False
-        elif order_scope == Order.Scope.SERVICE_CITY:
-            if (
-                service_city is None
-                or not offer.service_cities.filter(
-                    pk=service_city.id,
-                    is_active=True,
-                ).exists()
-            ):
-                return False
-        else:
-            return False
-
-        if not self._market_matches_order_scope(
-            offer.market,
-            order_scope,
-            service_city,
-        ):
-            return False
-        return all(
-            self._market_matches_order_scope(
-                product.market,
-                order_scope,
-                service_city,
-            )
-            for product in offer.products.select_related("market").all()
-        )
-
-    def _market_scope_error_message(self, market, order_scope, service_city):
-        if order_scope == Order.Scope.GENERAL:
-            return MIXED_MARKET_SCOPE_MESSAGE
-        if market.scope == Market.Scope.GENERAL:
-            return MIXED_MARKET_SCOPE_MESSAGE
-        return MIXED_SERVICE_CITY_MARKETS_MESSAGE
-
-    def _offer_scope_error_message(self, offer, order_scope, service_city):
-        if order_scope == Order.Scope.GENERAL:
-            if not offer.show_in_general:
-                return SERVICE_CITY_OFFER_IN_GENERAL_MESSAGE
-            return MIXED_MARKET_SCOPE_MESSAGE
-        if (
-            service_city is None
-            or not offer.service_cities.filter(
-                pk=service_city.id,
-                is_active=True,
-            ).exists()
-        ):
-            return GENERAL_OFFER_IN_SERVICE_CITY_MESSAGE
-        return MIXED_SERVICE_CITY_MARKETS_MESSAGE
-
-    @staticmethod
-    def _courier_service_city_for_order(order_scope, service_city, delivery_area):
-        if order_scope == Order.Scope.SERVICE_CITY:
-            return service_city
-        return None
-
-    @staticmethod
-    def _first_market_from_lines(items, offers):
-        if items:
-            return items[0]["variant"].product.market
-        if offers:
-            return offers[0]["offer"].market
-        return None
 
     def create(self, validated_data):
         items = validated_data.pop("items", [])
@@ -1866,6 +1557,7 @@ class OrderListSerializer(serializers.ModelSerializer):
     market_names_summary = serializers.SerializerMethodField()
     has_offer = serializers.SerializerMethodField()
     offer_titles = serializers.SerializerMethodField()
+    delivery_price_status = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -1882,6 +1574,9 @@ class OrderListSerializer(serializers.ModelSerializer):
             "offer_titles",
             "delivery_address",
             "delivery_type",
+            "fulfillment_type",
+            "external_shipping_status",
+            "delivery_price_status",
             "delivery_price",
             "subtotal_price",
             "discount",
@@ -1892,16 +1587,19 @@ class OrderListSerializer(serializers.ModelSerializer):
             "updated_at",
         )
 
-    def get_customer(self, instance):
+    def get_customer(self, instance) -> dict:
         return user_summary(instance.user)
 
-    def get_delivery_address(self, instance):
+    def get_delivery_address(self, instance) -> dict | None:
         return OrderSerializer(context=self.context).get_delivery_address(instance)
 
-    def get_market_count(self, instance):
+    def get_delivery_price_status(self, instance) -> str:
+        return OrderSerializer(context=self.context).get_delivery_price_status(instance)
+
+    def get_market_count(self, instance) -> int:
         return instance.market_sections.count()
 
-    def get_market_names_summary(self, instance):
+    def get_market_names_summary(self, instance) -> str:
         sections = list(instance.market_sections.all())
         if sections:
             return ", ".join(section.market.name for section in sections)
@@ -1910,10 +1608,10 @@ class OrderListSerializer(serializers.ModelSerializer):
     def _order_offers(self, instance):
         return list(instance.order_offers.all())
 
-    def get_has_offer(self, instance):
+    def get_has_offer(self, instance) -> bool:
         return bool(self._order_offers(instance))
 
-    def get_offer_titles(self, instance):
+    def get_offer_titles(self, instance) -> list[str]:
         titles = {}
         for order_offer in self._order_offers(instance):
             if order_offer.offer_id and order_offer.offer.title:
@@ -2013,6 +1711,16 @@ class AdminOrderCreateSerializer(OrderSerializer):
             else validated_data.get("delivery_price")
         )
         validated_data["delivery_price"] = delivery_price
+        validated_data["fulfillment_type"] = (
+            Order.FulfillmentType.DIRECT
+            if delivery_price is not None
+            else Order.FulfillmentType.EXTERNAL_SHIPPING
+        )
+        validated_data["external_shipping_status"] = (
+            Order.ExternalShippingStatus.NOT_REQUIRED
+            if delivery_price is not None
+            else Order.ExternalShippingStatus.PENDING_QUOTE
+        )
         delivery_total = delivery_price or Decimal("0.00")
         total = subtotal + delivery_total - discount
 
@@ -2114,6 +1822,10 @@ class OrderDeliveryPriceSerializer(serializers.Serializer):
         max_digits=10,
         decimal_places=2,
         min_value=Decimal("0.00"),
+    )
+    action = serializers.ChoiceField(
+        choices=("save", "request_approval"),
+        default="save",
     )
 
 

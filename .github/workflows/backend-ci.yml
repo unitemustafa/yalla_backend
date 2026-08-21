@@ -1,0 +1,59 @@
+name: Backend CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: yalla_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d yalla_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      CI_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/yalla_test
+      RATE_LIMIT_REDIS_URL: redis://127.0.0.1:6379/1
+      SECRET_KEY: ci-only-secret-key-that-is-never-used-outside-github-actions-123
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: python manage.py makemigrations --check --dry-run --settings=config.ci_settings
+      - run: python manage.py check --settings=config.ci_settings
+      - run: coverage run --source=accounts,catalog,config,dashboard,locations,markets,notifications,offers,orders,partners manage.py test --settings=config.ci_settings
+      - run: coverage report --omit="*/migrations/*,*test*.py" --fail-under=90
+      - run: python manage.py spectacular --settings=config.ci_settings --file openapi.yml --validate
+      - run: git diff --exit-code -- openapi.yml
+      - run: bandit -r accounts catalog config dashboard locations markets notifications offers orders partners -x "*/migrations/*,*test*.py" -lll -ii
+      - run: pip-audit -r requirements.txt
+      - name: Django production checks
+        env:
+          APP_ENV: production
+          DEBUG: "False"
+          SECRET_KEY: production-like-ci-secret-key-with-more-than-fifty-characters-12345
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/yalla_test
+          ALLOWED_HOSTS: api.example.test
+          CORS_ALLOWED_ORIGINS: https://dashboard.example.test
+          RATE_LIMIT_MODE: enforce
+          RATE_LIMIT_KEY_SECRET: independent-production-like-rate-limit-secret-value
+          RATE_LIMIT_TRUSTED_PROXY_CIDRS: 127.0.0.1/32
+        run: python manage.py check --deploy

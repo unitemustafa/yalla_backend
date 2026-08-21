@@ -15,7 +15,13 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from catalog.models import CategoryClassification, Product, ProductCategory, ProductVariant
+from catalog.models import (
+    CategoryClassification,
+    Product,
+    ProductCategory,
+    ProductVariant,
+    StoreSubcategory,
+)
 from locations.models import ServiceCity
 from markets.models import Market, MarketClassification
 from orders.models import Order, OrderOffer
@@ -108,8 +114,20 @@ class OfferAPITests(APITestCase):
             name="Second City Market",
         )
         self.second_market.service_cities.set([self.city])
+        self.subcategory = StoreSubcategory.objects.create(
+            name_ar="عروض الطعام",
+            name_en="Offer Food",
+        )
+        for market in (
+            self.market,
+            self.general_market,
+            self.remote_market,
+            self.second_market,
+        ):
+            market.subcategories.add(self.subcategory)
         self.product = Product.objects.create(
             market=self.market,
+            subcategory=self.subcategory,
             category=self.category,
             name="Burger",
             description="Burger",
@@ -126,24 +144,28 @@ class OfferAPITests(APITestCase):
         )
         self.second_product = Product.objects.create(
             market=self.market,
+            subcategory=self.subcategory,
             category=self.category,
             name="Fries",
             description="Fries",
         )
         self.general_product = Product.objects.create(
             market=self.general_market,
+            subcategory=self.subcategory,
             category=self.category,
             name="General Product",
             description="General",
         )
         self.remote_product = Product.objects.create(
             market=self.remote_market,
+            subcategory=self.subcategory,
             category=self.category,
             name="Remote Product",
             description="Remote",
         )
         self.second_market_product = Product.objects.create(
             market=self.second_market,
+            subcategory=self.subcategory,
             category=self.category,
             name="Second Market Product",
             description="Second market",
@@ -509,6 +531,37 @@ class OfferAPITests(APITestCase):
         self.assertTrue(response.data["is_multi_market"])
         self.assertEqual(response.data["market_id"], self.market.id)
 
+    def test_client_offer_markets_include_classification_ids(self):
+        self.authenticate(self.admin)
+        created = self.client.post(
+            f"{OFFERS_BASE}/",
+            self.offer_payload(
+                type=Offer.OfferType.PACKAGE,
+                product_ids=[self.product.id, self.second_market_product.id],
+            ),
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.data)
+
+        self.authenticate(self.client_user)
+        response = self.client.get(f"{OFFERS_BASE}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        offer = next(
+            item for item in response.data if item["id"] == created.data["id"]
+        )
+        self.assertEqual(
+            {market["id"] for market in offer["markets"]},
+            {self.market.id, self.second_market.id},
+        )
+        self.assertEqual(
+            {market["classification_id"] for market in offer["markets"]},
+            {
+                self.market.classification_id,
+                self.second_market.classification_id,
+            },
+        )
+
     def test_offer_create_rejects_missing_products(self):
         self.authenticate(self.admin)
 
@@ -724,7 +777,22 @@ class OfferAPITests(APITestCase):
         send_push.assert_called_once()
         logger.exception.assert_called_once()
 
-    def test_admin_delete_rejects_offer_used_by_order(self):
+    def test_admin_delete_removes_unused_offer(self):
+        self.authenticate(self.admin)
+        offer = self.create_offer(cities=[self.city])
+
+        listed_offer = next(
+            item
+            for item in self.client.get(f"{OFFERS_BASE}/").data
+            if item["id"] == offer.id
+        )
+        response = self.client.delete(f"{OFFERS_BASE}/{offer.id}/")
+
+        self.assertEqual(listed_offer["deletion_mode"], "delete")
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Offer.objects.filter(pk=offer.id).exists())
+
+    def test_admin_delete_archives_offer_used_by_order(self):
         self.authenticate(self.admin)
         offer = self.create_offer(cities=[self.city])
         order = Order.objects.create(
@@ -740,12 +808,36 @@ class OfferAPITests(APITestCase):
 
         response = self.client.delete(f"{OFFERS_BASE}/{offer.id}/")
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "archived")
         self.assertEqual(
             response.data["detail"],
-            "Cannot delete offer while orders are using it.",
+            "تمت أرشفة العرض بدلًا من حذفه لأنه مرتبط بسجل طلبات سابق.",
         )
         self.assertTrue(Offer.objects.filter(id=offer.id).exists())
+        offer.refresh_from_db()
+        self.assertEqual(offer.status, Offer.Status.INACTIVE)
+        self.assertIsNotNone(offer.archived_at)
+        self.assertNotIn(
+            offer.id,
+            [item["id"] for item in self.client.get(f"{OFFERS_BASE}/").data],
+        )
+        archived_offer = next(
+            item
+            for item in self.client.get(
+                f"{OFFERS_BASE}/?archived=true"
+            ).data
+            if item["id"] == offer.id
+        )
+        self.assertEqual(archived_offer["deletion_mode"], "archive")
+
+        restore_response = self.client.patch(
+            f"{OFFERS_BASE}/{offer.id}/",
+            {"restore": True},
+            format="json",
+        )
+        self.assertEqual(restore_response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(restore_response.data["archived_at"])
 
     @patch("notifications.offer_services.send_notifications_push")
     def test_push_opt_out_creates_no_notification(self, send_push):

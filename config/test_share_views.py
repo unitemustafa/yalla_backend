@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from catalog.models import Product
+from catalog.models import Product, StoreSubcategory
 from markets.models import Market, MarketClassification
 from offers.models import Offer
 
@@ -17,8 +17,14 @@ class ShareLandingViewTests(TestCase):
             classification=classification,
             name="Share Market",
         )
+        subcategory = StoreSubcategory.objects.create(
+            name_ar="مشاركة",
+            name_en="Sharing",
+        )
+        self.market.subcategories.add(subcategory)
         self.product = Product.objects.create(
             market=self.market,
+            subcategory=subcategory,
             name="Shared product",
             description="Shared safely",
         )
@@ -45,17 +51,44 @@ class ShareLandingViewTests(TestCase):
         self.assertContains(response, "Shared product")
         self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
 
-    def test_offer_share_page_keeps_opening_after_offer_expiry(self):
+    def test_expired_offer_share_page_returns_not_found(self):
         self.offer.end_time = timezone.now() - timedelta(minutes=1)
         self.offer.save(update_fields=["end_time"])
 
         response = self.client.get(reverse("offer-share", args=[self.offer.id]))
 
+        self.assertEqual(response.status_code, 404)
+
+    def test_archived_or_inactive_shared_content_returns_not_found(self):
+        self.product.archived_at = timezone.now()
+        self.product.save(update_fields=["archived_at"])
+        self.market.status = Market.Status.INACTIVE
+        self.market.save(update_fields=["status"])
+
+        self.assertEqual(
+            self.client.get(
+                reverse("product-share", args=[self.product.id])
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(
+                reverse("market-share", args=[self.market.id])
+            ).status_code,
+            404,
+        )
+
+    def test_market_share_page_opens_the_market_deep_link(self):
+        response = self.client.get(
+            reverse("market-share", args=[self.market.id])
+        )
+
         self.assertEqual(response.status_code, 200)
         self.assertContains(
             response,
-            f"yallamarket://offers/{self.offer.id}",
+            f"yallamarket://markets/{self.market.id}",
         )
+        self.assertContains(response, self.market.name)
 
     def test_share_page_escapes_product_content(self):
         self.product.name = '<script>alert("unsafe")</script>'
@@ -76,5 +109,9 @@ class ShareLandingViewTests(TestCase):
         )
         self.assertEqual(
             self.client.get(reverse("offer-share", args=[999999])).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(reverse("market-share", args=[999999])).status_code,
             404,
         )

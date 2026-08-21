@@ -24,6 +24,7 @@ from catalog.models import (
     ProductCategory,
     ProductImage,
     ProductVariant,
+    StoreSubcategory,
     VariantAttributeValue,
 )
 from locations.models import Address, DeliveryArea, ServiceCity
@@ -252,6 +253,10 @@ class HomeAPITests(APITestCase):
             name="Remote bakeries",
             classification_type=MarketClassification.ClassificationType.NORMAL,
         )
+        self.subcategory = StoreSubcategory.objects.create(
+            name_ar="اختبارات السوق",
+            name_en="Market Tests",
+        )
         self.local_market = self._create_market(
             "Local Market",
             self.local_classification,
@@ -267,6 +272,12 @@ class HomeAPITests(APITestCase):
             self.remote_classification,
             self.remote_area,
         )
+        for market in (
+            self.local_market,
+            self.second_local_market,
+            self.remote_market,
+        ):
+            market.subcategories.add(self.subcategory)
 
         category_classification = CategoryClassification.objects.create(
             name="Home test"
@@ -761,6 +772,41 @@ class HomeAPITests(APITestCase):
             farther_city.id,
         )
 
+    def test_market_region_detect_nearest_center_wins_over_broad_neighbour_radius(self):
+        broad_city = ServiceCity.objects.create(
+            name="Broad GPS City",
+            center_latitude=Decimal("10.0000000"),
+            center_longitude=Decimal("10.0000000"),
+            radius_km=Decimal("20.00"),
+        )
+        nearer_city = ServiceCity.objects.create(
+            name="Nearer Small GPS City",
+            center_latitude=Decimal("10.0800000"),
+            center_longitude=Decimal("10.0000000"),
+            radius_km=Decimal("2.00"),
+        )
+        self.authenticate()
+
+        response = self.client.post(
+            "/api/v1/market-region/detect/",
+            {
+                "latitude": "10.0500000",
+                "longitude": "10.0000000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "suggest_switch")
+        self.assertEqual(
+            response.data["detected_region"]["service_city"]["id"],
+            nearer_city.id,
+        )
+        self.assertNotEqual(
+            response.data["detected_region"]["service_city"]["id"],
+            broad_city.id,
+        )
+
     def test_home_requires_saved_market_region(self):
         self.user.market_region_mode = None
         self.user.market_region_service_city = None
@@ -785,6 +831,7 @@ class HomeAPITests(APITestCase):
 
         product_without_price = Product.objects.create(
             market=self.local_market,
+            subcategory=self.subcategory,
             name="Popular product without price",
             is_available=True,
             is_popular=True,
@@ -943,7 +990,11 @@ class HomeAPITests(APITestCase):
             {"name": " صيدليات "},
         )
 
-        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            create_response.status_code,
+            status.HTTP_201_CREATED,
+            create_response.data,
+        )
         self.assertEqual(create_response.data["name"], "صيدليات")
         self.assertEqual(
             create_response.data["classification_type"],
@@ -1098,15 +1149,67 @@ class HomeAPITests(APITestCase):
                 "name": "Market with image",
                 "description": "Market description",
                 "scope": Market.Scope.GENERAL,
+                "subcategory_ids": [self.subcategory.id],
                 "image": market_image_upload(),
+                "cover_image": market_image_upload("cover.png", "red"),
+                "delivery_time_min_minutes": "20",
+                "delivery_time_max_minutes": "35",
             },
             format="multipart",
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(response.data["image"])
+        self.assertTrue(response.data["cover_image"])
         market = Market.objects.get(pk=response.data["id"])
         self.assertTrue(market.image.name.startswith("markets/"))
+
+    def test_admin_market_create_requires_logo_cover_and_delivery_time(self):
+        classification = MarketClassification.objects.create(
+            name="Required storefront fields"
+        )
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{HOME_BASE}/markets/",
+            {
+                "classification_id": classification.id,
+                "name": "Incomplete market",
+                "scope": Market.Scope.GENERAL,
+                "subcategory_ids": [self.subcategory.id],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("image", response.data)
+        self.assertIn("cover_image", response.data)
+        self.assertIn("delivery_time_min_minutes", response.data)
+        self.assertIn("delivery_time_max_minutes", response.data)
+
+    def test_admin_market_rejects_reversed_delivery_time_range(self):
+        classification = MarketClassification.objects.create(
+            name="Invalid delivery time"
+        )
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{HOME_BASE}/markets/",
+            {
+                "classification_id": str(classification.id),
+                "name": "Invalid delivery market",
+                "scope": Market.Scope.GENERAL,
+                "subcategory_ids": [self.subcategory.id],
+                "image": market_image_upload("logo.png"),
+                "cover_image": market_image_upload("cover.png", "red"),
+                "delivery_time_min_minutes": "45",
+                "delivery_time_max_minutes": "20",
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("delivery_time_max_minutes", response.data)
 
     def test_admin_market_classification_rejects_invalid_type(self):
         self.authenticate(self.admin)
@@ -1131,7 +1234,7 @@ class HomeAPITests(APITestCase):
             MarketClassification.ClassificationType.NORMAL,
         )
 
-    def test_market_classification_delete_rejects_used_classification(self):
+    def test_market_classification_delete_archives_used_classification(self):
         self.authenticate(self.admin)
 
         response = self.client.delete(
@@ -1139,7 +1242,10 @@ class HomeAPITests(APITestCase):
             f"{self.local_classification.id}/"
         )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "archived")
+        self.local_classification.refresh_from_db()
+        self.assertFalse(self.local_classification.is_active)
 
     def test_market_crud_requires_admin_role(self):
         self.authenticate()
@@ -1161,12 +1267,22 @@ class HomeAPITests(APITestCase):
                 "branch": " فرع أول ",
                 "status": Market.Status.ACTIVE,
                 "is_popular": True,
-                "delivery_areas": [self.local_area.id],
+                "subcategory_ids": [self.subcategory.id],
+                "delivery_area_ids": [self.local_area.id],
+                "service_city_ids": [self.service_city.id],
+                "image": market_image_upload("logo.png"),
+                "cover_image": market_image_upload("cover.png", "red"),
+                "delivery_time_min_minutes": "20",
+                "delivery_time_max_minutes": "35",
             },
-            format="json",
+            format="multipart",
         )
 
-        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            create_response.status_code,
+            status.HTTP_201_CREATED,
+            create_response.data,
+        )
         self.assertEqual(create_response.data["name"], "سوق جديد")
         self.assertEqual(create_response.data["branch"], "فرع أول")
         self.assertTrue(create_response.data["is_popular"])
@@ -1203,6 +1319,7 @@ class HomeAPITests(APITestCase):
         listed_market = next(
             item for item in list_response.data if item["id"] == market_id
         )
+        self.assertEqual(listed_market["deletion_mode"], "delete")
         self.assertEqual(
             [area["id"] for area in listed_market["delivery_areas"]],
             [self.local_area.id],
@@ -1229,6 +1346,52 @@ class HomeAPITests(APITestCase):
             status.HTTP_404_NOT_FOUND,
         )
 
+    def test_admin_delete_archives_market_used_by_order(self):
+        self.authenticate(self.admin)
+        order = Order.objects.create(
+            user=self.user,
+            market=self.local_market,
+            service_city=self.service_city,
+            order_scope=Order.Scope.SERVICE_CITY,
+            payment_method="cash",
+            subtotal_price=Decimal("100.00"),
+            total_price=Decimal("100.00"),
+        )
+
+        response = self.client.delete(
+            f"{HOME_BASE}/markets/{self.local_market.id}/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "archived")
+        self.local_market.refresh_from_db()
+        self.assertEqual(self.local_market.status, Market.Status.INACTIVE)
+        self.assertIsNotNone(self.local_market.archived_at)
+        self.assertTrue(Order.objects.filter(pk=order.id).exists())
+        self.assertNotIn(
+            self.local_market.id,
+            [
+                item["id"]
+                for item in self.client.get(f"{HOME_BASE}/markets/").data
+            ],
+        )
+        archived_market = next(
+            item
+            for item in self.client.get(
+                f"{HOME_BASE}/markets/?archived=true"
+            ).data
+            if item["id"] == self.local_market.id
+        )
+        self.assertEqual(archived_market["deletion_mode"], "archive")
+
+        restore_response = self.client.patch(
+            f"{HOME_BASE}/markets/{self.local_market.id}/",
+            {"restore": True},
+            format="json",
+        )
+        self.assertEqual(restore_response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(restore_response.data["archived_at"])
+
     def test_admin_market_rejects_general_scope_with_service_city(self):
         classification = MarketClassification.objects.create(name="General only")
         self.authenticate(self.admin)
@@ -1239,9 +1402,14 @@ class HomeAPITests(APITestCase):
                 "classification_id": classification.id,
                 "name": "Invalid general market",
                 "scope": Market.Scope.GENERAL,
+                "subcategory_ids": [self.subcategory.id],
                 "service_city_ids": [self.service_city.id],
+                "image": market_image_upload("logo.png"),
+                "cover_image": market_image_upload("cover.png", "red"),
+                "delivery_time_min_minutes": "20",
+                "delivery_time_max_minutes": "35",
             },
-            format="json",
+            format="multipart",
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -1257,9 +1425,14 @@ class HomeAPITests(APITestCase):
                 "classification_id": classification.id,
                 "name": "Invalid multi-city market",
                 "scope": Market.Scope.SERVICE_CITY,
+                "subcategory_ids": [self.subcategory.id],
                 "service_city_ids": [self.service_city.id, self.remote_city.id],
+                "image": market_image_upload("logo.png"),
+                "cover_image": market_image_upload("cover.png", "red"),
+                "delivery_time_min_minutes": "20",
+                "delivery_time_max_minutes": "35",
             },
-            format="json",
+            format="multipart",
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -1600,16 +1773,81 @@ class HomeAPITests(APITestCase):
                 "classification_type": (
                     MarketClassification.ClassificationType.POPULAR
                 ),
+                "market_types": [],
             },
         )
         self.assertEqual(len(response.data["markets"]), 1)
 
         market = response.data["markets"][0]
         self.assertEqual(market["id"], self.local_market.id)
-        self.assertEqual(len(market["products"]), 3)
-        self.assertTrue(market["products"][0]["variants"])
-        self.assertTrue(market["products"][0]["variants"][0]["price"])
-        self.assertNotIn("market", market["products"][0])
+        self.assertNotIn("products", market)
+
+    def test_storefront_returns_store_metrics_after_product_discount(self):
+        product = self.local_products[0]
+        product.discount = Decimal("20.00")
+        product.save(update_fields=["discount"])
+        self.local_market.description = "Storefront description"
+        self.local_market.delivery_time_min_minutes = 25
+        self.local_market.delivery_time_max_minutes = 35
+        self.local_market.save(
+            update_fields=[
+                "description",
+                "delivery_time_min_minutes",
+                "delivery_time_max_minutes",
+            ]
+        )
+        self.authenticate()
+
+        response = self.client.get(
+            f"{HOME_BASE}/markets/{self.local_market.id}/storefront/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["description"], "Storefront description")
+        self.assertEqual(response.data["delivery_time_min_minutes"], 25)
+        self.assertEqual(response.data["delivery_time_max_minutes"], 35)
+        self.assertEqual(response.data["product_count"], 5)
+        self.assertEqual(
+            Decimal(response.data["minimum_product_price"]),
+            Decimal("80.00"),
+        )
+        self.assertEqual(len(response.data["products"]), 5)
+
+    def test_client_can_add_list_and_remove_a_favorite_market(self):
+        self.authenticate()
+
+        like_response = self.client.post(
+            f"{HOME_BASE}/markets/{self.local_market.id}/like/"
+        )
+        list_response = self.client.get(f"{HOME_BASE}/markets/likes/")
+        storefront_response = self.client.get(
+            f"{HOME_BASE}/markets/{self.local_market.id}/storefront/"
+        )
+        unlike_response = self.client.delete(
+            f"{HOME_BASE}/markets/{self.local_market.id}/unlike/"
+        )
+
+        self.assertEqual(like_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(like_response.data["liked"])
+        self.assertEqual(
+            [market["id"] for market in list_response.data],
+            [self.local_market.id],
+        )
+        self.assertTrue(list_response.data[0]["is_liked"])
+        self.assertTrue(storefront_response.data["is_liked"])
+        self.assertFalse(unlike_response.data["liked"])
+        self.assertFalse(
+            self.local_market.liked_by.filter(id=self.user.id).exists()
+        )
+
+    def test_client_cannot_favorite_market_outside_current_region(self):
+        self.authenticate()
+
+        response = self.client.post(
+            f"{HOME_BASE}/markets/{self.remote_market.id}/like/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_classification_markets_excludes_remote_markets(self):
         self.authenticate()
@@ -2050,11 +2288,13 @@ class HomeAPITests(APITestCase):
         )
         market.delivery_areas.add(area)
         market.service_cities.add(area.service_city)
+        market.subcategories.add(self.subcategory)
         return market
 
     def _create_product(self, name, market, index):
         product = Product.objects.create(
             market=market,
+            subcategory=self.subcategory,
             category=self.category,
             is_popular=True,
             name=name,

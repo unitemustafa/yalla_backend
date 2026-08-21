@@ -6,7 +6,11 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from catalog.models import Product, ProductVariant
-from catalog.serializers import ProductImageSerializer, VariantAttributeValueSerializer
+from catalog.serializers import (
+    ProductImageSerializer,
+    ProductSubcategorySerializer,
+    VariantAttributeValueSerializer,
+)
 from locations.models import ServiceCity
 from markets.models import Market
 from markets.serializers import AdminMarketSerializer, ServiceCitySummarySerializer
@@ -65,6 +69,7 @@ class OfferProductSerializer(serializers.ModelSerializer):
     category_id = serializers.IntegerField(read_only=True)
     market_id = serializers.IntegerField(read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
+    subcategory = ProductSubcategorySerializer(read_only=True)
 
     class Meta:
         model = Product
@@ -72,6 +77,7 @@ class OfferProductSerializer(serializers.ModelSerializer):
             "id",
             "market_id",
             "category_id",
+            "subcategory",
             "is_available",
             "name",
             "description",
@@ -137,6 +143,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
     market_count = serializers.SerializerMethodField()
     markets = serializers.SerializerMethodField()
     market_names_summary = serializers.SerializerMethodField()
+    deletion_mode = serializers.SerializerMethodField()
     market_id = serializers.PrimaryKeyRelatedField(
         queryset=Market.objects.all(),
         source="market",
@@ -188,6 +195,8 @@ class AdminOfferSerializer(serializers.ModelSerializer):
             "announcement_priority",
             "announcement_display_seconds",
             "status",
+            "archived_at",
+            "deletion_mode",
             "effective_status",
             "is_currently_visible",
             "can_send_notification",
@@ -198,7 +207,17 @@ class AdminOfferSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "push_sent_at", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "archived_at",
+            "deletion_mode",
+            "push_sent_at",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_deletion_mode(self, instance):
+        return instance.get_deletion_mode()
 
     def to_internal_value(self, data):
         raw_items = data.get("items") if hasattr(data, "get") else None

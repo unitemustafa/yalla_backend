@@ -1,0 +1,34 @@
+{% extends "legal/base.html" %}
+{% block title %}Privacy Policy — Yalla Market{% endblock %}
+{% block content %}
+  <h1>Privacy Policy</h1>
+  <p class="muted">Effective 27 July 2026</p>
+  <p>This policy explains how Yalla Market collects, uses, shares, and protects personal information when you use our mobile application and related services.</p>
+
+  <h2>Information we collect</h2>
+  <ul>
+    <li>Account information, including your name, username, email address, phone number, password hash, profile photo, gender, and birth date when provided.</li>
+    <li>Delivery information, including saved addresses, recipient details, and location coordinates you choose to provide.</li>
+    <li>Order and service records, such as products, prices, delivery status, support interactions, and partner applications.</li>
+    <li>Device and technical information needed for authentication, security, diagnostics, and push notifications.</li>
+  </ul>
+
+  <h2>How we use information</h2>
+  <p>We use information to create and secure accounts, process and deliver orders, send essential updates, provide support, prevent fraud, maintain service reliability, meet legal obligations, and improve Yalla Market. We do not sell personal information.</p>
+
+  <h2>When information is shared</h2>
+  <p>We share only what is necessary with participating markets, delivery representatives, infrastructure and notification providers, professional advisers, and authorities where legally required. Providers must handle information for the services they perform for us.</p>
+
+  <h2>Retention</h2>
+  <p>Account and saved-delivery data is kept while your account is active. After account deletion, direct identifiers and saved addresses are deleted or anonymized. Limited transaction records may be retained in anonymized form where needed for accounting, disputes, fraud prevention, or legal obligations. Backup copies expire through normal retention cycles.</p>
+
+  <h2>Your choices and rights</h2>
+  <p>You can review or update profile details in the app and control notification permission in device settings. You may delete your account from Account → Delete Account. You may also use our <a href="{% url 'account-deletion' %}">web deletion instructions</a>. Depending on applicable law, you may ask to access, correct, delete, or restrict use of your personal information.</p>
+
+  <h2>Security and children</h2>
+  <p>We use access controls, encrypted transport, password hashing, session revocation, and operational safeguards. No system is completely secure. Yalla Market is not intended for children who cannot legally consent to online services in their jurisdiction.</p>
+
+  <h2>Changes and contact</h2>
+  <p>We may update this policy and will publish the new effective date here. For privacy questions or requests, contact Yalla Market support:</p>
+  <p><a class="button" href="{{ support_whatsapp_url }}" rel="noopener">Contact support on WhatsApp</a></p>
+{% endblock %}

@@ -1,5 +1,6 @@
 from functools import partial
 
+from django.conf import settings
 from django.db import transaction
 
 from orders.models import Order, OrderEvent
@@ -20,6 +21,11 @@ def _content(event_type, order_id, status):
         return (
             "تعذر قبول طلبك",
             f"تم رفض طلبك #{order_id}. افتح التطبيق لمعرفة التفاصيل.",
+        )
+    if event_type == "delivery_quote_sent":
+        return (
+            "سعر التوصيل جاهز",
+            f"تم تحديد سعر توصيل طلبك #{order_id}. افتح الطلب لمراجعته والموافقة عليه.",
         )
     if event_type == "order_cancelled" or status == Order.Status.CANCELLED:
         return "تم إلغاء الطلب", f"تم إلغاء طلبك #{order_id}."
@@ -179,14 +185,16 @@ def create_order_lifecycle_notification(
         },
     )
     if created:
-        transaction.on_commit(
-            partial(
-                send_notification_push,
-                notification.id,
-                high_priority=True,
-                android_channel_id="order_updates",
-            )
+        callback = partial(
+            send_notification_push,
+            notification.id,
+            high_priority=True,
+            android_channel_id="order_updates",
         )
+        if settings.PUSH_DELIVERY_ASYNC:
+            callback()
+        else:
+            transaction.on_commit(callback)
     return notification
 
 

@@ -1,5 +1,6 @@
 import logging
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -9,7 +10,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
-from accounts.views import IsAdminRole
+from accounts.permissions import IsAdminRole
+from config.pagination import paginated_list_response
 from notifications.models import Notification
 
 from .models import PartnerApplication
@@ -70,7 +72,7 @@ def _record_partner_reviewer(application_id, reviewer_id):
         )
 
 
-def _notify_partner_approval(application_id):
+def _notify_partner_approval(application_id, *, reraise=False):
     """Create and deliver the client notification after the status is saved."""
     try:
         application = PartnerApplication.objects.select_related("applicant").get(
@@ -103,6 +105,8 @@ def _notify_partner_approval(application_id):
             "Failed to notify approval for partner application %s.",
             application_id,
         )
+        if reraise:
+            raise
 
 
 class PartnerApplicationListCreateView(APIView):
@@ -114,12 +118,10 @@ class PartnerApplicationListCreateView(APIView):
             .select_related("applicant", "reviewed_by")
             .order_by("-created_at", "-id")
         )
-        return Response(
-            PartnerApplicationSerializer(
-                applications,
-                many=True,
-                context={"request": request},
-            ).data
+        return paginated_list_response(
+            request,
+            applications,
+            PartnerApplicationSerializer,
         )
 
     @transaction.atomic
@@ -168,12 +170,10 @@ class AdminPartnerApplicationListView(APIView):
                 | Q(mobile_number__icontains=search)
             )
 
-        return Response(
-            PartnerApplicationSerializer(
-                applications,
-                many=True,
-                context={"request": request},
-            ).data
+        return paginated_list_response(
+            request,
+            applications,
+            PartnerApplicationSerializer,
         )
 
 
@@ -231,9 +231,12 @@ class AdminPartnerApplicationDetailView(APIView):
             next_status == PartnerApplication.Status.APPROVED
             and previous_status != next_status
         ):
-            transaction.on_commit(
-                lambda: _notify_partner_approval(application.id)
-            )
+            if settings.PUSH_DELIVERY_ASYNC:
+                _notify_partner_approval(application.id, reraise=True)
+            else:
+                transaction.on_commit(
+                    lambda: _notify_partner_approval(application.id)
+                )
 
         application.refresh_from_db()
         return Response(

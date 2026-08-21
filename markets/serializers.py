@@ -1,5 +1,6 @@
-from django.db import transaction
 from rest_framework import serializers
+
+from config.image_validation import validate_safe_image
 
 from catalog.models import (
     Product,
@@ -9,13 +10,15 @@ from catalog.models import (
     ProductAttributeValue,
     ProductCategory,
     ProductVariant,
+    StoreSubcategory,
     VariantAttributeValue,
 )
-from catalog.serializers import ProductImageSerializer
+from catalog.serializers import ProductImageSerializer, ProductSubcategorySerializer
 from locations.models import DeliveryArea, ServiceCity
 from offers.models import Offer
 
-from .models import Market, MarketClassification
+from .models import Market, MarketClassification, MarketSubcategory, MarketType
+from .write_serializers import AdminMarketWriteMixin
 
 
 class AdminMarketClassificationSerializer(serializers.ModelSerializer):
@@ -42,6 +45,9 @@ class AdminMarketClassificationSerializer(serializers.ModelSerializer):
                 "A market classification with this name already exists."
             )
         return name
+
+    def validate_image(self, value):
+        return validate_safe_image(value)
 
     def validate(self, attrs):
         classification_type = attrs.get(
@@ -79,6 +85,70 @@ class AdminMarketClassificationSerializer(serializers.ModelSerializer):
                 )
 
         return attrs
+
+
+class MarketTypeSerializer(serializers.ModelSerializer):
+    classification_id = serializers.PrimaryKeyRelatedField(
+        queryset=MarketClassification.objects.all(),
+        source="classification",
+    )
+    market_count = serializers.IntegerField(read_only=True, default=0)
+
+    class Meta:
+        model = MarketType
+        fields = (
+            "id",
+            "classification_id",
+            "name_ar",
+            "name_en",
+            "image",
+            "sort_order",
+            "is_active",
+            "market_count",
+        )
+        read_only_fields = ("id", "market_count")
+
+    def validate_name_ar(self, value):
+        return value.strip()
+
+    def validate_name_en(self, value):
+        return value.strip()
+
+    def validate_image(self, value):
+        return validate_safe_image(value)
+
+    def validate(self, attrs):
+        classification = attrs.get(
+            "classification",
+            getattr(self.instance, "classification", None),
+        )
+        for field_name in ("name_ar", "name_en"):
+            value = attrs.get(field_name, getattr(self.instance, field_name, ""))
+            if not value or classification is None:
+                continue
+            queryset = MarketType.objects.filter(
+                classification=classification,
+                **{f"{field_name}__iexact": value},
+            )
+            if self.instance is not None:
+                queryset = queryset.exclude(pk=self.instance.pk)
+            if queryset.exists():
+                raise serializers.ValidationError(
+                    {field_name: "A market type with this name already exists."}
+                )
+        return attrs
+
+
+class ClientMarketTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MarketType
+        fields = (
+            "id",
+            "name_ar",
+            "name_en",
+            "image",
+            "sort_order",
+        )
 
 
 class DeliveryAreaSummarySerializer(serializers.ModelSerializer):
@@ -119,10 +189,66 @@ class ServiceCityRelatedField(serializers.PrimaryKeyRelatedField):
         return ServiceCitySummarySerializer(value).data
 
 
+class AssignedStoreSubcategorySerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(source="subcategory_id", read_only=True)
+    name_ar = serializers.CharField(
+        source="subcategory.name_ar",
+        read_only=True,
+    )
+    name_en = serializers.CharField(
+        source="subcategory.name_en",
+        read_only=True,
+    )
+    description_ar = serializers.CharField(
+        source="subcategory.description_ar",
+        read_only=True,
+    )
+    description_en = serializers.CharField(
+        source="subcategory.description_en",
+        read_only=True,
+    )
+    image = serializers.ImageField(
+        source="subcategory.image",
+        read_only=True,
+        allow_null=True,
+    )
+    is_active = serializers.BooleanField(
+        source="subcategory.is_active",
+        read_only=True,
+    )
+
+    class Meta:
+        model = MarketSubcategory
+        fields = (
+            "id",
+            "name_ar",
+            "name_en",
+            "description_ar",
+            "description_en",
+            "image",
+            "is_active",
+            "sort_order",
+        )
+
+
 class HomeMarketSerializer(serializers.ModelSerializer):
     classification_id = serializers.IntegerField(read_only=True)
     service_cities = ServiceCitySummarySerializer(many=True, read_only=True)
     delivery_areas = DeliveryAreaSummarySerializer(many=True, read_only=True)
+    subcategories = serializers.SerializerMethodField()
+    product_count = serializers.IntegerField(read_only=True, default=0)
+    minimum_product_price = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        read_only=True,
+        allow_null=True,
+    )
+    is_liked = serializers.BooleanField(read_only=True, default=False)
+    market_type_ids = serializers.PrimaryKeyRelatedField(
+        source="market_types",
+        many=True,
+        read_only=True,
+    )
 
     class Meta:
         model = Market
@@ -131,14 +257,49 @@ class HomeMarketSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "image",
+            "cover_image",
+            "delivery_time_min_minutes",
+            "delivery_time_max_minutes",
             "branch",
             "scope",
             "status",
             "is_popular",
+            "product_count",
+            "minimum_product_price",
+            "is_liked",
+            "market_type_ids",
             "classification_id",
             "service_cities",
             "delivery_areas",
+            "subcategories",
         )
+
+    def get_subcategories(self, market):
+        if "subcategory_assignments" in getattr(
+            market,
+            "_prefetched_objects_cache",
+            {},
+        ):
+            assignments = sorted(
+                (
+                    assignment
+                    for assignment in market.subcategory_assignments.all()
+                    if assignment.subcategory.is_active
+                ),
+                key=lambda assignment: (
+                    assignment.sort_order,
+                    assignment.id,
+                ),
+            )
+        else:
+            assignments = market.subcategory_assignments.filter(
+                subcategory__is_active=True,
+            ).select_related("subcategory").order_by("sort_order", "id")
+        return AssignedStoreSubcategorySerializer(
+            assignments,
+            many=True,
+            context=self.context,
+        ).data
 
 
 class HomeMarketClassificationSerializer(serializers.ModelSerializer):
@@ -160,11 +321,16 @@ class HomeMarketClassificationSerializer(serializers.ModelSerializer):
         markets = classification.markets.filter(
             id__in=eligible_market_ids,
             status=Market.Status.ACTIVE,
+        ).with_client_metrics(
+            self.context.get("request").user
+            if self.context.get("request") is not None
+            else None
         ).prefetch_related("service_cities", "delivery_areas").order_by("name")
         return HomeMarketSerializer(markets, many=True).data
 
 
-class AdminMarketSerializer(serializers.ModelSerializer):
+class AdminMarketSerializer(AdminMarketWriteMixin, serializers.ModelSerializer):
+    deletion_mode = serializers.SerializerMethodField()
     send_notification = serializers.BooleanField(
         write_only=True,
         required=False,
@@ -200,6 +366,31 @@ class AdminMarketSerializer(serializers.ModelSerializer):
         many=True,
         required=False,
     )
+    subcategory_ids = serializers.PrimaryKeyRelatedField(
+        queryset=StoreSubcategory.objects.all(),
+        many=True,
+        required=False,
+        write_only=True,
+    )
+    subcategories = serializers.SerializerMethodField()
+    market_type_ids = serializers.PrimaryKeyRelatedField(
+        queryset=MarketType.objects.all(),
+        source="market_types",
+        many=True,
+        required=False,
+        write_only=True,
+    )
+    market_types = ClientMarketTypeSerializer(many=True, read_only=True)
+    delivery_time_min_minutes = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        min_value=1,
+    )
+    delivery_time_max_minutes = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        min_value=1,
+    )
 
     class Meta:
         model = Market
@@ -210,18 +401,31 @@ class AdminMarketSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "image",
+            "cover_image",
+            "delivery_time_min_minutes",
+            "delivery_time_max_minutes",
             "branch",
             "scope",
             "status",
+            "archived_at",
+            "deletion_mode",
             "is_popular",
             "send_notification",
             "service_cities",
             "service_city_ids",
             "delivery_areas",
             "delivery_area_ids",
+            "subcategories",
+            "subcategory_ids",
+            "market_types",
+            "market_type_ids",
             "created_at",
             "updated_at",
         )
+        read_only_fields = ("id", "archived_at", "deletion_mode")
+
+    def get_deletion_mode(self, instance):
+        return instance.get_deletion_mode()
 
     def validate_name(self, value):
         return value.strip()
@@ -229,108 +433,21 @@ class AdminMarketSerializer(serializers.ModelSerializer):
     def validate_branch(self, value):
         return value.strip()
 
-    def validate(self, attrs):
-        if "delivery_areas" in self.initial_data and "delivery_area_ids" in self.initial_data:
-            raise serializers.ValidationError(
-                {
-                    "delivery_areas": (
-                        "Use either delivery_areas or delivery_area_ids, not both."
-                    )
-                }
-            )
-        if "service_cities" in self.initial_data and "service_city_ids" in self.initial_data:
-            raise serializers.ValidationError(
-                {
-                    "service_cities": (
-                        "Use either service_cities or service_city_ids, not both."
-                    )
-                }
-            )
+    def validate_image(self, value):
+        return validate_safe_image(value)
 
-        scope = attrs.get(
-            "scope",
-            getattr(self.instance, "scope", Market.Scope.SERVICE_CITY),
-        )
-        service_cities = attrs.get("service_cities")
-        delivery_areas = attrs.get("delivery_areas")
-        if service_cities is None and delivery_areas is not None:
-            service_cities = list(
-                ServiceCity.objects.filter(
-                    delivery_areas__in=delivery_areas,
-                    is_active=True,
-                ).distinct()
-            )
-            attrs["service_cities"] = service_cities
+    def validate_cover_image(self, value):
+        return validate_safe_image(value)
 
-        if scope == Market.Scope.GENERAL:
-            if service_cities:
-                raise serializers.ValidationError(
-                    {
-                        "service_city_ids": (
-                            "General markets cannot target a service city."
-                        )
-                    }
-                )
-            attrs["service_cities"] = []
-            return attrs
-
-        existing_count = (
-            self.instance.service_cities.count()
-            if self.instance is not None and service_cities is None
-            else 0
-        )
-        if service_cities is not None:
-            if not service_cities:
-                raise serializers.ValidationError(
-                    {"service_city_ids": "At least one service city is required."}
-                )
-            if len(service_cities) > 1:
-                raise serializers.ValidationError(
-                    {"service_city_ids": "Only one service city may be selected."}
-                )
-        elif existing_count > 1:
-            raise serializers.ValidationError(
-                {"service_city_ids": "Only one service city may be selected."}
-            )
-        elif self.instance is None or existing_count == 0:
-            raise serializers.ValidationError(
-                {"service_city_ids": "At least one service city is required."}
-            )
-        return attrs
-
-    @transaction.atomic
-    def create(self, validated_data):
-        send_notification = validated_data.pop("send_notification", False)
-        delivery_areas = validated_data.pop("delivery_areas", [])
-        service_cities = validated_data.pop("service_cities", [])
-        market = Market.objects.create(**validated_data)
-        market.service_cities.set(service_cities)
-        market.delivery_areas.set(delivery_areas)
-        if send_notification:
-            from notifications.market_services import (
-                create_market_notification_intent,
-            )
-
-            request = self.context.get("request")
-            requested_by_id = (
-                request.user.id
-                if request is not None and request.user.is_authenticated
-                else None
-            )
-            create_market_notification_intent(market, requested_by_id)
-        return market
-
-    def update(self, instance, validated_data):
-        validated_data.pop("send_notification", None)
-        delivery_areas = validated_data.pop("delivery_areas", None)
-        service_cities = validated_data.pop("service_cities", None)
-        instance = super().update(instance, validated_data)
-        if service_cities is not None:
-            instance.service_cities.set(service_cities)
-        if delivery_areas is not None:
-            instance.delivery_areas.set(delivery_areas)
-        return instance
-
+    def get_subcategories(self, market):
+        assignments = market.subcategory_assignments.select_related(
+            "subcategory",
+        ).order_by("sort_order", "id")
+        return AssignedStoreSubcategorySerializer(
+            assignments,
+            many=True,
+            context=self.context,
+        ).data
 
 class MarketClassificationCountSerializer(serializers.ModelSerializer):
     product_count = serializers.IntegerField(read_only=True)
@@ -471,6 +588,7 @@ class HomeProductSerializer(serializers.ModelSerializer):
     variants = HomeVariantSerializer(many=True, read_only=True)
     attributes = HomeProductAttributeSerializer(many=True, read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
+    subcategory = ProductSubcategorySerializer(read_only=True)
 
     class Meta:
         model = Product
@@ -485,6 +603,7 @@ class HomeProductSerializer(serializers.ModelSerializer):
             "is_popular",
             "is_available",
             "market",
+            "subcategory",
             "attributes",
             "variants",
         )
@@ -507,6 +626,7 @@ class ProductDetailSerializer(HomeProductSerializer):
 class MarketClassificationProductSerializer(serializers.ModelSerializer):
     images = ProductImageSerializer(many=True, read_only=True)
     variants = HomeVariantSerializer(many=True, read_only=True)
+    subcategory = ProductSubcategorySerializer(read_only=True)
 
     class Meta:
         model = Product
@@ -519,6 +639,7 @@ class MarketClassificationProductSerializer(serializers.ModelSerializer):
             "discount",
             "theme",
             "is_popular",
+            "subcategory",
             "variants",
         )
 
@@ -542,7 +663,6 @@ class MarketClassificationWithProductsSerializer(
 
 
 class MarketWithStoreProductsSerializer(HomeMarketSerializer):
-    product_count = serializers.IntegerField(read_only=True)
     products = serializers.SerializerMethodField()
 
     class Meta:
@@ -550,12 +670,20 @@ class MarketWithStoreProductsSerializer(HomeMarketSerializer):
         fields = (
             "id",
             "name",
+            "description",
             "image",
+            "cover_image",
+            "delivery_time_min_minutes",
+            "delivery_time_max_minutes",
             "branch",
             "status",
             "is_popular",
-            "classification_id",
             "product_count",
+            "minimum_product_price",
+            "is_liked",
+            "market_type_ids",
+            "classification_id",
+            "subcategories",
             "products",
             "created_at",
         )
@@ -572,9 +700,25 @@ class MarketWithStoreProductsSerializer(HomeMarketSerializer):
 
 class StoreMarketClassificationSerializer(MarketClassificationCountSerializer):
     markets = serializers.SerializerMethodField()
+    market_types = serializers.SerializerMethodField()
 
     class Meta(MarketClassificationCountSerializer.Meta):
-        fields = MarketClassificationCountSerializer.Meta.fields + ("markets",)
+        fields = MarketClassificationCountSerializer.Meta.fields + (
+            "market_types",
+            "markets",
+        )
+
+    def get_market_types(self, classification):
+        cached_types = getattr(classification, "active_market_types", None)
+        if cached_types is None:
+            cached_types = classification.market_types.filter(
+                is_active=True,
+            ).order_by("sort_order", "id")
+        return ClientMarketTypeSerializer(
+            cached_types,
+            many=True,
+            context=self.context,
+        ).data
 
     def get_markets(self, classification):
         markets_by_classification = self.context["markets_by_classification"]
@@ -674,7 +818,15 @@ class HomeOfferSerializer(serializers.ModelSerializer):
         return products
 
     def get_markets(self, instance):
-        return [{"id": market.id, "name": market.name, "branch": market.branch} for market in self._markets(instance)]
+        return [
+            {
+                "id": market.id,
+                "name": market.name,
+                "branch": market.branch,
+                "classification_id": market.classification_id,
+            }
+            for market in self._markets(instance)
+        ]
 
     def get_market_count(self, instance):
         return len(self._markets(instance))

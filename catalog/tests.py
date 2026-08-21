@@ -14,6 +14,7 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from markets.models import Market, MarketClassification
+from orders.models import Order, OrderItem
 
 from .models import (
     AdditionClassification,
@@ -26,8 +27,10 @@ from .models import (
     ProductCategory,
     ProductAttributeValue,
     ProductVariant,
+    StoreSubcategory,
     VariantAttributeValue,
 )
+from markets.models import MarketSubcategory
 
 User = get_user_model()
 CATALOG_BASE = "/api/v1/catalog"
@@ -67,6 +70,14 @@ class AdditionClassificationAPITests(APITestCase):
             classification=market_classification,
             name="مطعم الاختبار",
         )
+        self.subcategory = StoreSubcategory.objects.create(
+            name_ar="وجبات اختبار",
+            name_en="Test meals",
+        )
+        MarketSubcategory.objects.create(
+            market=self.market,
+            subcategory=self.subcategory,
+        )
         category_classification = CategoryClassification.objects.create(
             name="وجبات"
         )
@@ -89,6 +100,7 @@ class AdditionClassificationAPITests(APITestCase):
         self.product = Product.objects.create(
             market=self.market,
             category=self.category,
+            subcategory=self.subcategory,
             name="كسكس",
             description="طبق كسكس",
         )
@@ -106,6 +118,59 @@ class AdditionClassificationAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_admin_delete_archives_product_used_by_order(self):
+        self.authenticate(self.admin)
+        variant = ProductVariant.objects.create(
+            product=self.product,
+            price=Decimal("100.00"),
+        )
+        order = Order.objects.create(
+            user=self.client_user,
+            market=self.market,
+            payment_method="cash",
+            subtotal_price=Decimal("100.00"),
+            total_price=Decimal("100.00"),
+        )
+        OrderItem.objects.create(
+            order=order,
+            variant=variant,
+            quantity=1,
+            unit_price=Decimal("100.00"),
+        )
+
+        response = self.client.delete(
+            f"{CATALOG_BASE}/products/{self.product.id}/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "archived")
+        self.product.refresh_from_db()
+        self.assertFalse(self.product.is_available)
+        self.assertIsNotNone(self.product.archived_at)
+
+        current_response = self.client.get(f"{CATALOG_BASE}/products/")
+        archived_response = self.client.get(
+            f"{CATALOG_BASE}/products/?archived=true"
+        )
+        self.assertNotIn(
+            self.product.id,
+            [item["id"] for item in current_response.data],
+        )
+        archived_product = next(
+            item
+            for item in archived_response.data
+            if item["id"] == self.product.id
+        )
+        self.assertEqual(archived_product["deletion_mode"], "archive")
+
+        restore_response = self.client.patch(
+            f"{CATALOG_BASE}/products/{self.product.id}/",
+            {"restore": True},
+            format="json",
+        )
+        self.assertEqual(restore_response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(restore_response.data["archived_at"])
 
     def test_addition_classification_create_requires_admin_role(self):
         self.authenticate(self.client_user)
@@ -602,6 +667,7 @@ class AdditionClassificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": self.market.id,
+                "subcategory_id": self.subcategory.id,
                 "name": "Available without price",
                 "is_available": True,
                 "variants": [],
@@ -622,6 +688,7 @@ class AdditionClassificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": self.market.id,
+                "subcategory_id": self.subcategory.id,
                 "name": "Available base product",
                 "is_available": True,
                 "variants": [{"price": "125.50", "sku": "BASE"}],
@@ -683,6 +750,7 @@ class AdditionClassificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": str(self.market.id),
+                "subcategory_id": str(self.subcategory.id),
                 "name": "Multipart variants",
                 "theme": Product.Theme.OTHER,
                 "is_available": "true",
@@ -713,6 +781,7 @@ class AdditionClassificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": self.market.id,
+                "subcategory_id": self.subcategory.id,
                 "name": "Draft without price",
                 "is_available": False,
                 "variants": [],
@@ -742,7 +811,7 @@ class AdditionClassificationAPITests(APITestCase):
         self.assertEqual(response.data["variants"][0]["id"], variant.id)
         self.assertEqual(self.product.variants.count(), 1)
 
-    def test_admin_can_create_read_update_and_delete_product(self):
+    def test_admin_can_create_read_update_and_archive_product(self):
         addition_classification = AdditionClassification.objects.create(
             name="إضافات الوجبات"
         )
@@ -758,6 +827,7 @@ class AdditionClassificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": self.market.id,
+                "subcategory_id": self.subcategory.id,
                 "category_id": self.category.id,
                 "is_available": True,
                 "name": " طبق جديد ",
@@ -845,8 +915,8 @@ class AdditionClassificationAPITests(APITestCase):
             format="json",
         )
         delete_response = self.client.delete(f"{CATALOG_BASE}/products/{product_id}/")
-        deleted_detail_response = self.client.get(
-            f"{CATALOG_BASE}/products/{product_id}/"
+        archived_list_response = self.client.get(
+            f"{CATALOG_BASE}/products/?archived=true"
         )
 
         self.assertEqual(list_response.status_code, status.HTTP_200_OK)
@@ -865,10 +935,11 @@ class AdditionClassificationAPITests(APITestCase):
         )
         self.assertEqual(update_response.data["variants"][0]["sku"], "MEAL-L")
         self.assertEqual(update_response.data["additions"], [])
-        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertEqual(
-            deleted_detail_response.status_code,
-            status.HTTP_404_NOT_FOUND,
+        self.assertEqual(delete_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(delete_response.data["action"], "archived")
+        self.assertIn(
+            product_id,
+            [item["id"] for item in archived_list_response.data],
         )
 
     @override_settings(MEDIA_ROOT="/tmp/yalla_catalog_legacy_image_test")
@@ -880,6 +951,7 @@ class AdditionClassificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": self.market.id,
+                "subcategory_id": self.subcategory.id,
                 "category_id": self.category.id,
                 "name": "طبق بصورة",
                 "description": "طبق تجريبي",
@@ -911,6 +983,7 @@ class AdditionClassificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": self.market.id,
+                "subcategory_id": self.subcategory.id,
                 "category_id": self.category.id,
                 "name": "منتج غير صالح",
                 "description": "",
@@ -1052,17 +1125,30 @@ class ProductImageAPITests(APITestCase):
             classification=classification,
             name="Image market",
         )
+        self.subcategory = StoreSubcategory.objects.create(
+            name_ar="صور المنتجات",
+            name_en="Product images",
+        )
+        MarketSubcategory.objects.create(
+            market=self.market,
+            subcategory=self.subcategory,
+        )
         refresh = RefreshToken.for_user(self.admin)
         self.client.credentials(
             HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
         )
 
     def create_product(self, name="Image product"):
-        return Product.objects.create(market=self.market, name=name)
+        return Product.objects.create(
+            market=self.market,
+            subcategory=self.subcategory,
+            name=name,
+        )
 
     def create_product_response(self, images=None, image=None, **extra):
         payload = {
             "market_id": self.market.id,
+            "subcategory_id": self.subcategory.id,
             "name": extra.pop("name", "Image product"),
             "description": "",
             "discount": "0.00",
@@ -1269,6 +1355,7 @@ class ProductImageAPITests(APITestCase):
     def test_legacy_data_migration_reuses_the_stored_file_name(self):
         product = Product.objects.create(
             market=self.market,
+            subcategory=self.subcategory,
             name="Legacy migration",
             image=product_image_upload("migration.png"),
         )

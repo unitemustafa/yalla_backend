@@ -288,3 +288,87 @@ class ClientDevice(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=["user", "is_active"])]
+
+
+class PushOutbox(models.Model):
+    class Kind(models.TextChoices):
+        NOTIFICATION = "notification", "Notification"
+        COURIER_NOTIFICATION = "courier_notification", "Courier notification"
+        ACCOUNT_RESTORED = "account_restored", "Account restored"
+        ACCOUNT_DISABLED = "account_disabled", "Account disabled"
+        DELIVERY_AREA_STATUS = "delivery_area_status", "Delivery area status"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    kind = models.CharField(max_length=32, choices=Kind.choices)
+    notification = models.ForeignKey(
+        Notification,
+        on_delete=models.CASCADE,
+        related_name="push_outbox_entries",
+        null=True,
+        blank=True,
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="push_outbox_entries",
+        null=True,
+        blank=True,
+    )
+    delivery_area = models.ForeignKey(
+        "locations.DeliveryArea",
+        on_delete=models.CASCADE,
+        related_name="push_outbox_entries",
+        null=True,
+        blank=True,
+    )
+    options = models.JSONField(default=dict, blank=True)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    attempts = models.PositiveSmallIntegerField(default=0)
+    available_at = models.DateTimeField(auto_now_add=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["status", "available_at"])]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        kind="account_disabled",
+                        user__isnull=False,
+                        notification__isnull=True,
+                        delivery_area__isnull=True,
+                    )
+                    | models.Q(
+                        kind__in=(
+                            "notification",
+                            "courier_notification",
+                            "account_restored",
+                        ),
+                        notification__isnull=False,
+                        user__isnull=True,
+                        delivery_area__isnull=True,
+                    )
+                    | models.Q(
+                        kind="delivery_area_status",
+                        delivery_area__isnull=False,
+                        notification__isnull=True,
+                        user__isnull=True,
+                    )
+                ),
+                name="notifications_push_outbox_target_valid",
+            ),
+        ]

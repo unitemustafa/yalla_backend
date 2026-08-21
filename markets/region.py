@@ -106,7 +106,8 @@ def current_market_region_selection(user):
 
 
 def detect_service_city(latitude, longitude):
-    matching_cities = []
+    city_distances = []
+    has_coverage = False
     cities = ServiceCity.objects.filter(
         is_active=True,
         center_latitude__isnull=False,
@@ -122,12 +123,18 @@ def detect_service_city(latitude, longitude):
             city.center_latitude,
             city.center_longitude,
         )
+        city_distances.append((distance_km, city.id, city))
         if distance_km <= float(city.radius_km):
-            matching_cities.append((distance_km, city.id, city))
+            has_coverage = True
 
-    if not matching_cities:
+    if not has_coverage:
         return None
-    return min(matching_cities, key=lambda item: (item[0], item[1]))[2]
+    # Circular coverage areas can overlap, especially when a provider returns
+    # a broad administrative radius for one city. Treat their union as the
+    # supported service area, then assign the point to its nearest city center.
+    # This gives adjacent cities a stable Voronoi-style boundary instead of
+    # allowing one large circle to swallow its neighbours.
+    return min(city_distances, key=lambda item: (item[0], item[1]))[2]
 
 
 def haversine_distance_km(latitude_1, longitude_1, latitude_2, longitude_2):

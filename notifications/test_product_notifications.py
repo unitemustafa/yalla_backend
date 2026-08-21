@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from catalog.models import Product, ProductVariant
+from catalog.models import Product, ProductVariant, StoreSubcategory
 from locations.models import ServiceCity
 from markets.models import Market, MarketClassification
 
@@ -43,8 +43,15 @@ class ProductNotificationAPITests(APITestCase):
             scope=Market.Scope.GENERAL,
         )
         self.general_market.service_cities.add(self.city)
+        self.subcategory = StoreSubcategory.objects.create(
+            name_ar="إشعارات المنتجات",
+            name_en="Product Notifications",
+        )
+        self.market.subcategories.add(self.subcategory)
+        self.general_market.subcategories.add(self.subcategory)
         self.product = Product.objects.create(
             market=self.market,
+            subcategory=self.subcategory,
             name="كشري مخصوص",
             description="كشري جديد",
             is_available=True,
@@ -57,6 +64,7 @@ class ProductNotificationAPITests(APITestCase):
         )
         self.general_product = Product.objects.create(
             market=self.general_market,
+            subcategory=self.subcategory,
             name="منتج عام",
             is_available=True,
         )
@@ -221,6 +229,7 @@ class ProductNotificationAPITests(APITestCase):
             f"{CATALOG_BASE}/products/",
             {
                 "market_id": self.market.id,
+                "subcategory_id": self.subcategory.id,
                 "name": "منتج من غير إشعار",
                 "is_available": True,
                 "variants": [{"price": "20.00", "selections": []}],

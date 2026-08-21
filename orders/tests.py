@@ -17,6 +17,7 @@ from catalog.models import (
     ProductAttribute,
     ProductAttributeOption,
     ProductCategory,
+    StoreSubcategory,
     ProductVariant,
     VariantAttributeValue,
 )
@@ -121,6 +122,12 @@ class OrderAPITests(APITestCase):
             classification=category_classification,
             name="Main Meals",
         )
+        self.subcategory = StoreSubcategory.objects.create(
+            name_ar="وجبات الطلبات",
+            name_en="Order Meals",
+        )
+        self.market.subcategories.add(self.subcategory)
+        self.second_market.subcategories.add(self.subcategory)
         size_attribute = CategoryAttribute.objects.create(
             category=category,
             name="Size",
@@ -131,6 +138,7 @@ class OrderAPITests(APITestCase):
         )
         self.product = Product.objects.create(
             market=self.market,
+            subcategory=self.subcategory,
             category=category,
             name="Burger",
         )
@@ -146,6 +154,7 @@ class OrderAPITests(APITestCase):
         )
         self.second_product = Product.objects.create(
             market=self.second_market,
+            subcategory=self.subcategory,
             category=category,
             name="Pizza",
         )
@@ -662,6 +671,69 @@ class OrderAPITests(APITestCase):
         order = Order.objects.get(pk=create_response.data["id"])
         self.assertEqual(order.delivery_price, Decimal("75.50"))
         self.assertEqual(order.total_price, Decimal("1075.50"))
+
+    @patch("notifications.order_services.send_notification_push")
+    def test_admin_can_send_delivery_quote_for_customer_approval(self, send_push):
+        other_address = Address.objects.create(
+            user=self.customer,
+            name="Other Area Quote",
+            service_city=self.service_city,
+            delivery_type=Address.DeliveryType.DELIVERY,
+        )
+        payload = self.payload()
+        payload["delivery_address_id"] = other_address.id
+        payload.pop("service_city_id")
+        payload["offers"] = []
+        create_response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
+        order_id = create_response.data["id"]
+
+        with self.captureOnCommitCallbacks(execute=True):
+            quote_response = self.client.patch(
+                f"{ORDERS_BASE}/{order_id}/delivery-price/",
+                {
+                    "delivery_price": "75.50",
+                    "action": "request_approval",
+                },
+                format="json",
+            )
+
+        self.assertEqual(quote_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            quote_response.data["external_shipping_status"],
+            Order.ExternalShippingStatus.AWAITING_CUSTOMER_APPROVAL,
+        )
+        self.assertEqual(
+            quote_response.data["delivery_price_status"],
+            Order.ExternalShippingStatus.AWAITING_CUSTOMER_APPROVAL,
+        )
+        notification = Notification.objects.get(
+            order_id=order_id,
+            recipient=self.customer,
+            type=Notification.Type.ORDER_STATUS_CHANGED,
+        )
+        self.assertEqual(notification.title, "سعر التوصيل جاهز")
+        self.assertEqual(notification.data["event"], "delivery_quote_sent")
+        send_push.assert_called_once_with(
+            notification.id,
+            high_priority=True,
+            android_channel_id="order_updates",
+        )
+
+        self.authenticate_customer()
+        accept_response = self.client.post(
+            f"{ORDERS_BASE}/{order_id}/delivery-price/accept/",
+            format="json",
+        )
+
+        self.assertEqual(accept_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            accept_response.data["external_shipping_status"],
+            Order.ExternalShippingStatus.QUOTED,
+        )
+        self.assertEqual(
+            accept_response.data["history"][-1]["event_type"],
+            OrderEvent.EventType.DELIVERY_QUOTE_ACCEPTED,
+        )
 
     def test_admin_cannot_restore_delivery_fee_on_free_delivery_order(self):
         self.offer.type = Offer.OfferType.DELIVERY
@@ -1200,6 +1272,7 @@ class OrderAPITests(APITestCase):
         remote_market.service_cities.add(remote_city)
         remote_product = Product.objects.create(
             market=remote_market,
+            subcategory=self.subcategory,
             category=self.product.category,
             name="Remote Product",
         )

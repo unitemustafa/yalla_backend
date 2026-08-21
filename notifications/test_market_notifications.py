@@ -1,14 +1,17 @@
 import uuid
 from decimal import Decimal
+from io import BytesIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
+from PIL import Image
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from catalog.models import Product, ProductVariant
+from catalog.models import Product, ProductVariant, StoreSubcategory
 from locations.models import ServiceCity
 from markets.models import Market, MarketClassification
 
@@ -17,6 +20,12 @@ from .models import MarketNotificationDispatch, Notification
 
 
 User = get_user_model()
+
+
+def market_image_upload(name):
+    content = BytesIO()
+    Image.new("RGB", (2, 2), color="blue").save(content, format="PNG")
+    return SimpleUploadedFile(name, content.getvalue(), content_type="image/png")
 
 
 class MarketNotificationTests(APITestCase):
@@ -33,6 +42,10 @@ class MarketNotificationTests(APITestCase):
         )
         self.classification = MarketClassification.objects.create(
             name="محلات جديدة"
+        )
+        self.subcategory = StoreSubcategory.objects.create(
+            name_ar="إشعارات المحلات",
+            name_en="Market Notifications",
         )
         self.admin = self.create_user("admin", User.Role.ADMIN)
         self.city_client = self.create_user(
@@ -80,11 +93,13 @@ class MarketNotificationTests(APITestCase):
         )
         if scope == Market.Scope.SERVICE_CITY:
             market.service_cities.add(self.city)
+        market.subcategories.add(self.subcategory)
         return market
 
     def create_available_product(self, market, name="أول منتج"):
         product = Product.objects.create(
             market=market,
+            subcategory=self.subcategory,
             name=name,
             is_available=True,
         )
@@ -99,9 +114,16 @@ class MarketNotificationTests(APITestCase):
                 "classification_id": self.classification.id,
                 "name": "من غير إعلان",
                 "scope": "general",
+                "subcategory_ids": [self.subcategory.id],
                 "send_notification": False,
+                "image": market_image_upload("without-notification-logo.png"),
+                "cover_image": market_image_upload(
+                    "without-notification-cover.png"
+                ),
+                "delivery_time_min_minutes": 20,
+                "delivery_time_max_minutes": 40,
             },
-            format="json",
+            format="multipart",
         )
         with_notification = self.client.post(
             "/api/v1/home/markets/",
@@ -109,9 +131,14 @@ class MarketNotificationTests(APITestCase):
                 "classification_id": self.classification.id,
                 "name": "بإعلان مؤجل",
                 "scope": "general",
+                "subcategory_ids": [self.subcategory.id],
                 "send_notification": True,
+                "image": market_image_upload("with-notification-logo.png"),
+                "cover_image": market_image_upload("with-notification-cover.png"),
+                "delivery_time_min_minutes": 20,
+                "delivery_time_max_minutes": 40,
             },
-            format="json",
+            format="multipart",
         )
 
         self.assertEqual(without_notification.status_code, status.HTTP_201_CREATED)
@@ -136,6 +163,7 @@ class MarketNotificationTests(APITestCase):
         dispatch = create_market_notification_intent(market, self.admin.id)
         unavailable = Product.objects.create(
             market=market,
+            subcategory=self.subcategory,
             name="غير متاح",
             is_available=False,
         )
@@ -250,6 +278,7 @@ class MarketNotificationTests(APITestCase):
                 "/api/v1/catalog/products/",
                 {
                     "market_id": market.id,
+                    "subcategory_id": self.subcategory.id,
                     "name": "منتج يفعّل الإعلان",
                     "is_available": True,
                     "variants": [{"price": "35.00", "selections": []}],

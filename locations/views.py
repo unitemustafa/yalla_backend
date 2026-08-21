@@ -1,14 +1,17 @@
+from django.conf import settings
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Exists, OuterRef, Q
 from django.db.models.deletion import ProtectedError
+from django.utils import timezone
 from rest_framework import generics
-from rest_framework.permissions import IsAuthenticated, SAFE_METHODS
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.views import APIView
 
-from accounts.views import IsAdminRole
+from accounts.permissions import DeliveryAreaPermission, IsAdminRole
 from accounts.models import CourierProfile, User
+from config.pagination import paginated_list_response
 from orders.models import Order
 from notifications.delivery_area_services import (
     schedule_delivery_area_created_notifications,
@@ -37,7 +40,26 @@ class ProtectedDeleteMixin:
 
 
 def service_city_queryset():
+    protected_cities = ServiceCity.objects.filter(pk=OuterRef("pk")).filter(
+        Q(delivery_areas__isnull=False)
+        | Q(markets__isnull=False)
+        | Q(offers__isnull=False)
+        | Q(
+            courier_profiles__isnull=False,
+            courier_profiles__user__deleted_at__isnull=True,
+        )
+        | Q(
+            addresses__isnull=False,
+            addresses__user__deleted_at__isnull=True,
+        )
+        | Q(orders__isnull=False)
+        | Q(
+            market_region_users__isnull=False,
+            market_region_users__deleted_at__isnull=True,
+        )
+    )
     return ServiceCity.objects.annotate(
+        deletion_mode_is_archive=Exists(protected_cities),
         delivery_area_count=Count("delivery_areas", distinct=True),
         market_count=Count("markets", distinct=True),
         offer_count=Count("offers", distinct=True),
@@ -65,31 +87,15 @@ def service_city_relation_counts(city):
     return {key: value for key, value in checks.items() if value}
 
 
-def service_city_relation_message(city, relations):
-    labels = {
-        "delivery_areas": "مناطق التوصيل",
-        "markets": "المحلات",
-        "offers": "العروض",
-        "couriers": "المندوبون",
-        "addresses": "عناوين العملاء",
-        "orders": "الطلبات",
-        "users": "حسابات العملاء",
-    }
-    linked_data = "، ".join(
-        f"{labels.get(key, key)} ({count})" for key, count in relations.items()
-    )
-    return (
-        f"لا يمكن حذف مدينة {city.name} لأنها مرتبطة بـ: {linked_data}. "
-        "انقل أو احذف هذه البيانات أولًا."
-    )
-
-
 class ServiceCityListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
     serializer_class = ServiceCitySerializer
 
     def get_queryset(self):
-        return service_city_queryset()
+        queryset = service_city_queryset()
+        if self.request.query_params.get("archived") in {"true", "1"}:
+            return queryset.filter(archived_at__isnull=False)
+        return queryset.filter(archived_at__isnull=True)
 
 
 class ServiceCityDetailView(
@@ -101,6 +107,15 @@ class ServiceCityDetailView(
 
     def get_queryset(self):
         return service_city_queryset()
+
+    def partial_update(self, request, *args, **kwargs):
+        city = self.get_object()
+        if request.data.get("restore") is True:
+            city.archived_at = None
+            city.save(update_fields=("archived_at",))
+            city = self.get_queryset().get(pk=city.pk)
+            return Response(self.get_serializer(city).data)
+        return super().partial_update(request, *args, **kwargs)
 
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
@@ -129,26 +144,23 @@ class ServiceCityDetailView(
         )
         relations = service_city_relation_counts(city)
         if relations:
+            city.is_active = False
+            city.archived_at = timezone.now()
+            city.save(update_fields=("is_active", "archived_at"))
             return Response(
                 {
-                    "detail": service_city_relation_message(city, relations),
-                    "code": "service_city_in_use",
+                    "action": "archived",
+                    "detail": (
+                        f"تمت أرشفة مدينة {city.name} وتعطيلها لأنها "
+                        "مرتبطة ببيانات مستخدمة."
+                    ),
                     "relations": relations,
                 },
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_200_OK,
             )
 
         city.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-
-
-class DeliveryAreaPermission(IsAuthenticated):
-    def has_permission(self, request, view):
-        if not super().has_permission(request, view):
-            return False
-        if request.method in SAFE_METHODS:
-            return True
-        return request.user.role == request.user.Role.ADMIN
 
 
 class DeliveryAreaListCreateView(generics.ListCreateAPIView):
@@ -164,14 +176,29 @@ class DeliveryAreaListCreateView(generics.ListCreateAPIView):
         schedule_delivery_area_created_notifications(area.id)
 
     def get_queryset(self):
-        queryset = DeliveryArea.objects.select_related("service_city").order_by(
-            "name", "id"
+        protected_areas = DeliveryArea.objects.filter(pk=OuterRef("pk")).filter(
+            Q(courier_profiles__isnull=False)
+            | Q(orders__isnull=False)
+            | Q(addresses__orders__isnull=False)
+            | Q(addresses__is_active=True)
+        )
+        queryset = (
+            DeliveryArea.objects.annotate(
+                deletion_mode_is_archive=Exists(protected_areas),
+            )
+            .select_related("service_city")
+            .order_by("name", "id")
         )
         if self.request.user.role != self.request.user.Role.ADMIN:
             queryset = queryset.filter(
                 is_active=True,
                 service_city__is_active=True,
+                archived_at__isnull=True,
             )
+        elif self.request.query_params.get("archived") in {"true", "1"}:
+            queryset = queryset.filter(archived_at__isnull=False)
+        else:
+            queryset = queryset.filter(archived_at__isnull=True)
         city_id = self.request.query_params.get("service_city_id")
         if city_id:
             queryset = queryset.filter(service_city_id=city_id)
@@ -188,15 +215,6 @@ class DeliveryAreaDetailView(
     protected_error_message = (
         "Delivery area cannot be deleted while representatives are using it."
     )
-    courier_error_message = (
-        "لا يمكن حذف منطقة التوصيل لأنها مستخدمة بواسطة مندوبين."
-    )
-    order_error_message = (
-        "لا يمكن حذف منطقة التوصيل لوجود طلبات مرتبطة بها."
-    )
-    address_error_message = (
-        "لا يمكن حذف منطقة التوصيل لوجود عناوين محفوظة مرتبطة بها."
-    )
 
     def get_queryset(self):
         queryset = DeliveryArea.objects.select_related("service_city")
@@ -204,6 +222,7 @@ class DeliveryAreaDetailView(
             queryset = queryset.filter(
                 is_active=True,
                 service_city__is_active=True,
+                archived_at__isnull=True,
             )
         return queryset
 
@@ -211,12 +230,32 @@ class DeliveryAreaDetailView(
         was_active = serializer.instance.is_active
         area = serializer.save()
         if was_active != area.is_active:
-            transaction.on_commit(
-                lambda area_id=area.id, is_active=area.is_active: _send_delivery_area_status_change(
-                    area_id,
-                    is_active,
-                )
+            _schedule_delivery_area_status_change(
+                area.id,
+                area.is_active,
             )
+
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    def archive(self, area, detail):
+        was_active = area.is_active
+        if was_active:
+            area.is_active = False
+            area.archived_at = timezone.now()
+            area.save(update_fields=("is_active", "archived_at"))
+            _schedule_delivery_area_status_change(area.id, False)
+        elif area.archived_at is None:
+            area.archived_at = timezone.now()
+            area.save(update_fields=("archived_at",))
+        return Response(
+            {
+                "action": "archived",
+                "detail": detail,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
@@ -226,9 +265,9 @@ class DeliveryAreaDetailView(
         )
 
         if CourierProfile.objects.filter(delivery_area=area).exists():
-            return Response(
-                {"detail": self.courier_error_message},
-                status=status.HTTP_400_BAD_REQUEST,
+            return self.archive(
+                area,
+                "تمت أرشفة منطقة التوصيل لأنها مستخدمة بواسطة مندوبين.",
             )
 
         if Order.objects.filter(
@@ -236,9 +275,9 @@ class DeliveryAreaDetailView(
         ).exists() or Order.objects.filter(
             delivery_address__delivery_area=area,
         ).exists():
-            return Response(
-                {"detail": self.order_error_message},
-                status=status.HTTP_400_BAD_REQUEST,
+            return self.archive(
+                area,
+                "تمت أرشفة منطقة التوصيل لأنها مرتبطة بسجل طلبات سابق.",
             )
 
         stale_addresses = Address.objects.filter(
@@ -249,30 +288,52 @@ class DeliveryAreaDetailView(
         try:
             stale_addresses.delete()
         except ProtectedError:
-            return Response(
-                {"detail": self.order_error_message},
-                status=status.HTTP_400_BAD_REQUEST,
+            return self.archive(
+                area,
+                "تمت أرشفة منطقة التوصيل لأنها مرتبطة بسجل طلبات سابق.",
             )
 
         if Address.objects.filter(delivery_area=area, is_active=True).exists():
-            return Response(
-                {"detail": self.address_error_message},
-                status=status.HTTP_400_BAD_REQUEST,
+            return self.archive(
+                area,
+                "تمت أرشفة منطقة التوصيل لأنها مرتبطة بعناوين محفوظة.",
             )
 
         area.markets.clear()
         area.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    def patch(self, request, *args, **kwargs):
+        area = self.get_object()
+        if request.data.get("restore") is True:
+            area.archived_at = None
+            area.save(update_fields=("archived_at",))
+            return Response(
+                self.get_serializer(
+                    area,
+                    context={"request": request},
+                ).data
+            )
+        return super().patch(request, *args, **kwargs)
 
-def _send_delivery_area_status_change(area_id, is_active):
+
+def _send_delivery_area_status_change(area_id, is_active, *, reraise=False):
     from notifications.push import send_delivery_area_status_changed_event
 
     try:
         send_delivery_area_status_changed_event(area_id, is_active)
     except Exception:
         # A refresh when the user reopens the app remains the fallback.
-        pass
+        if reraise:
+            raise
+
+
+def _schedule_delivery_area_status_change(area_id, is_active):
+    callback = lambda: _send_delivery_area_status_change(area_id, is_active)
+    if settings.PUSH_DELIVERY_ASYNC:
+        _send_delivery_area_status_change(area_id, is_active, reraise=True)
+    else:
+        transaction.on_commit(callback)
 
 
 class DeliveryAreaListView(APIView):
@@ -282,7 +343,11 @@ class DeliveryAreaListView(APIView):
 
     def get(self, request):
         areas = DeliveryArea.objects.order_by("name", "id")
-        return Response(DeliveryAreaSerializer(areas, many=True).data)
+        return paginated_list_response(
+            request,
+            areas,
+            DeliveryAreaSerializer,
+        )
 
 
 def address_queryset_for_request(request):
@@ -322,7 +387,11 @@ class AddressListCreateView(APIView):
 
     def get(self, request):
         addresses = address_queryset_for_request(request)
-        return Response(AddressSerializer(addresses, many=True).data)
+        return paginated_list_response(
+            request,
+            addresses,
+            AddressSerializer,
+        )
 
     @transaction.atomic
     def post(self, request):
