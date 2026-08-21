@@ -205,7 +205,9 @@ request-size, Gunicorn, and rate-policy variables have safe defaults in
 | `PUBLIC_MEDIA_ROOT` / `PRIVATE_MEDIA_ROOT` | Persistent public and protected media directories |
 | `MEDIA_URL` | Public media base URL, normally the media subdomain |
 | `FIREBASE_SERVICE_ACCOUNT_BASE64` | Preferred Base64-encoded Firebase service-account JSON |
-| `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | SMTP credentials for OTP email |
+| `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS` | SMTP relay connection used for OTP email |
+| `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | SMTP login and secret used for OTP email |
+| `DEFAULT_FROM_EMAIL` | Verified sender address used for outbound OTP email |
 | `GEOAPIFY_API_KEY` | Reverse-geocoding integration key |
 
 Production must use exact HTTPS origins, must not enable debug mode, and must
