@@ -1,0 +1,242 @@
+name: yalla
+
+x-backend-environment: &backend-environment
+  APP_ENV: production
+  DEBUG: "False"
+  DOMAIN: ${DOMAIN:?Set DOMAIN in .env.production}
+  DATABASE_URL: postgresql://yalla@postgres:5432/yalla
+  DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+  DATABASE_SSL_REQUIRE: "False"
+  RATE_LIMIT_REDIS_URL: redis://redis-core:6379/1
+  RATE_LIMIT_MODE: enforce
+  RATE_LIMIT_CLIENT_IP_HEADER: HTTP_CF_CONNECTING_IP
+  RATE_LIMIT_TRUSTED_PROXY_CIDRS: ${RATE_LIMIT_TRUSTED_PROXY_CIDRS:-172.30.0.0/24}
+  CELERY_BROKER_URL: redis://redis-core:6379/0
+  CACHE_REDIS_URL: redis://redis-cache:6379/0
+  API_CACHE_ENABLED: "True"
+  PUBLIC_MEDIA_ROOT: /srv/yalla/media/public
+  PRIVATE_MEDIA_ROOT: /srv/yalla/media/private
+  MEDIA_URL: https://media.${DOMAIN}/media/
+  PRIVATE_MEDIA_X_ACCEL_REDIRECT: "True"
+  PRIVATE_MEDIA_INTERNAL_URL: /_protected-media/
+  PUSH_DELIVERY_ASYNC: "True"
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
+x-backend-service: &backend-service
+  image: ${BACKEND_IMAGE:-yalla-backend:latest}
+  build:
+    context: .
+  init: true
+  restart: unless-stopped
+  env_file:
+    - ${BACKEND_ENV_FILE:-.env.production}
+  environment: *backend-environment
+  volumes:
+    - ${YALLA_DATA_ROOT:-/srv/yalla}/media/public:/srv/yalla/media/public
+    - ${YALLA_DATA_ROOT:-/srv/yalla}/media/private:/srv/yalla/media/private
+    - ${YALLA_DATA_ROOT:-/srv/yalla}/static:/app/staticfiles
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis-core:
+      condition: service_healthy
+    redis-cache:
+      condition: service_healthy
+  networks:
+    - internal
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 30s
+  logging: *default-logging
+
+services:
+  storage-init:
+    image: alpine:3.22
+    user: "0:0"
+    restart: "no"
+    command:
+      - sh
+      - -ec
+      - >-
+        mkdir -p
+        /srv/yalla/media/public
+        /srv/yalla/media/private
+        /srv/yalla/static;
+        chown 10001:10001
+        /srv/yalla/media/public
+        /srv/yalla/media/private
+        /srv/yalla/static
+    volumes:
+      - ${YALLA_DATA_ROOT:-/srv/yalla}/media/public:/srv/yalla/media/public
+      - ${YALLA_DATA_ROOT:-/srv/yalla}/media/private:/srv/yalla/media/private
+      - ${YALLA_DATA_ROOT:-/srv/yalla}/static:/srv/yalla/static
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+  release:
+    <<: *backend-service
+    restart: "no"
+    command:
+      - sh
+      - -ec
+      - >-
+        python manage.py migrate --noinput &&
+        python manage.py collectstatic --noinput
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis-core:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.28-alpine
+    init: true
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env.production}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${YALLA_DATA_ROOT:-/srv/yalla}/tls:/etc/nginx/tls:ro
+      - ${YALLA_DATA_ROOT:-/srv/yalla}/media/public:/srv/yalla/media/public:ro
+      - ${YALLA_DATA_ROOT:-/srv/yalla}/media/private:/srv/yalla/media/private:ro
+      - ${YALLA_DATA_ROOT:-/srv/yalla}/static:/srv/yalla/static:ro
+    depends_on:
+      django:
+        condition: service_healthy
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: *default-logging
+
+  django:
+    <<: *backend-service
+    command: ["gunicorn", "--config", "config/gunicorn.conf.py", "config.wsgi:application"]
+    depends_on:
+      release:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/readyz/', headers={'Host': 'api.' + os.environ['DOMAIN'], 'X-Forwarded-Proto': 'https'}); urllib.request.urlopen(request, timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  celery-worker:
+    <<: *backend-service
+    command: ["celery", "-A", "config", "worker", "--loglevel=INFO"]
+    depends_on:
+      django:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config inspect ping --timeout=5 | grep -q pong"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  celery-beat:
+    <<: *backend-service
+    command: ["celery", "-A", "config", "beat", "--loglevel=INFO"]
+    depends_on:
+      django:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "sh", "-c", "kill -0 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: yalla
+      POSTGRES_USER: yalla
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+    volumes:
+      - ${YALLA_DATA_ROOT:-/srv/yalla}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yalla -d yalla"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    stop_grace_period: 60s
+    logging: *default-logging
+
+  redis-core:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "0"
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - ${YALLA_DATA_ROOT:-/srv/yalla}/redis/core:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - internal
+    stop_grace_period: 30s
+    logging: *default-logging
+
+  redis-cache:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - allkeys-lru
+    volumes:
+      - ${YALLA_DATA_ROOT:-/srv/yalla}/redis/cache:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - internal
+    stop_grace_period: 30s
+    logging: *default-logging
+
+networks:
+  internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

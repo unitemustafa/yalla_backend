@@ -1,0 +1,90 @@
+real_ip_header CF-Connecting-IP;
+real_ip_recursive on;
+server_tokens off;
+ssl_protocols TLSv1.2 TLSv1.3;
+set_real_ip_from 173.245.48.0/20;
+set_real_ip_from 103.21.244.0/22;
+set_real_ip_from 103.22.200.0/22;
+set_real_ip_from 103.31.4.0/22;
+set_real_ip_from 141.101.64.0/18;
+set_real_ip_from 108.162.192.0/18;
+set_real_ip_from 190.93.240.0/20;
+set_real_ip_from 188.114.96.0/20;
+set_real_ip_from 197.234.240.0/22;
+set_real_ip_from 198.41.128.0/17;
+set_real_ip_from 162.158.0.0/15;
+set_real_ip_from 104.16.0.0/13;
+set_real_ip_from 104.24.0.0/14;
+set_real_ip_from 172.64.0.0/13;
+set_real_ip_from 131.0.72.0/22;
+set_real_ip_from 2400:cb00::/32;
+set_real_ip_from 2606:4700::/32;
+set_real_ip_from 2803:f800::/32;
+set_real_ip_from 2405:b500::/32;
+set_real_ip_from 2405:8100::/32;
+set_real_ip_from 2a06:98c0::/29;
+set_real_ip_from 2c0f:f248::/32;
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name api.${DOMAIN} media.${DOMAIN};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name media.${DOMAIN};
+
+    ssl_certificate /etc/nginx/tls/origin.pem;
+    ssl_certificate_key /etc/nginx/tls/origin.key;
+
+    sendfile on;
+    tcp_nopush on;
+
+    location ^~ /media/ {
+        alias /srv/yalla/media/public/;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        limit_except GET HEAD { deny all; }
+    }
+
+    location / {
+        return 404;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name api.${DOMAIN};
+
+    ssl_certificate /etc/nginx/tls/origin.pem;
+    ssl_certificate_key /etc/nginx/tls/origin.key;
+
+    client_max_body_size 55m;
+
+    location ^~ /static/ {
+        alias /srv/yalla/static/;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        limit_except GET HEAD { deny all; }
+    }
+
+    location /_protected-media/ {
+        internal;
+        alias /srv/yalla/media/private/;
+        add_header Cache-Control "private, no-store" always;
+        add_header X-Content-Type-Options "nosniff" always;
+    }
+
+    location / {
+        proxy_pass http://django:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header CF-Connecting-IP $remote_addr;
+        proxy_read_timeout 120s;
+    }
+}

@@ -15,12 +15,15 @@ htmlcov/
 
 # Local configuration and databases
 .env
+.env.*
+!.env.production.example
 *.sqlite3
 db.sqlite3
 
 # Generated/runtime artifacts
 staticfiles/
 media/
+private-media/
 additions/
 
 # Local tool state

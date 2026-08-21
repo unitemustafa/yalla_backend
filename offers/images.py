@@ -5,7 +5,7 @@ from rest_framework import serializers
 
 from config.image_validation import validate_safe_image
 
-from catalog.product_images import (
+from config.media_cleanup import (
     delete_storage_file_if_unreferenced,
     schedule_storage_cleanup,
 )

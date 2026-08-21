@@ -134,6 +134,11 @@ class OfferItemSerializer(serializers.ModelSerializer):
 
 
 class AdminOfferSerializer(serializers.ModelSerializer):
+    image = serializers.ImageField(
+        required=False,
+        allow_null=True,
+        validators=[validate_offer_image_upload],
+    )
     effective_status = serializers.SerializerMethodField()
     is_currently_visible = serializers.SerializerMethodField()
     can_send_notification = serializers.SerializerMethodField()

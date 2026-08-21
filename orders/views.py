@@ -1,9 +1,15 @@
-from django.contrib.auth import get_user_model
+import mimetypes
 from decimal import Decimal
+from pathlib import PurePosixPath
+from urllib.parse import quote
 
+from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.http import FileResponse, HttpResponse
 from django.utils import timezone
 from rest_framework import generics, status
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -80,6 +86,67 @@ User = get_user_model()
 IsAdminRole = IsOrderAdminRole
 IsClientRole = IsOrderClientRole
 IsCourierRole = IsRepresentativeRole
+
+
+class OrderPrivateMediaView(APIView):
+    permission_classes = (IsAuthenticated,)
+    field_name = ""
+
+    def get(self, request, order_id):
+        order = generics.get_object_or_404(
+            Order.objects.select_related("user", "assigned_representative"),
+            pk=order_id,
+        )
+        if not self._can_access(request.user, order):
+            raise PermissionDenied("You cannot access this order image.")
+
+        field = getattr(order, self.field_name)
+        if not field or not field.name:
+            raise NotFound("This order image is not available.")
+        relative_path = PurePosixPath(field.name)
+        if (
+            relative_path.is_absolute()
+            or ".." in relative_path.parts
+            or "\\" in field.name
+        ):
+            raise NotFound("This order image is not available.")
+
+        content_type = (
+            mimetypes.guess_type(field.name)[0]
+            or "application/octet-stream"
+        )
+        if settings.PRIVATE_MEDIA_X_ACCEL_REDIRECT:
+            response = HttpResponse(content_type=content_type)
+            internal_prefix = settings.PRIVATE_MEDIA_INTERNAL_URL.rstrip("/")
+            response["X-Accel-Redirect"] = (
+                f"{internal_prefix}/{quote(relative_path.as_posix(), safe='/')}"
+            )
+        else:
+            response = FileResponse(
+                field.storage.open(field.name, "rb"),
+                content_type=content_type,
+                as_attachment=False,
+                filename=field.name.rsplit("/", 1)[-1],
+            )
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+
+    @staticmethod
+    def _can_access(user, order):
+        return bool(
+            user.role == User.Role.ADMIN
+            or order.user_id == user.id
+            or order.assigned_representative_id == user.id
+        )
+
+
+class OrderImageView(OrderPrivateMediaView):
+    field_name = "image"
+
+
+class OrderDeliveryProofView(OrderPrivateMediaView):
+    field_name = "delivery_proof"
 
 
 class OrderListCreateView(generics.ListCreateAPIView):

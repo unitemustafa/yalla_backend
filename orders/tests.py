@@ -1,9 +1,13 @@
 from datetime import timedelta
 from decimal import Decimal
+from io import BytesIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from django.utils import timezone
+from PIL import Image
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -30,6 +34,12 @@ from .models import Order, OrderEvent, OrderItem, OrderMarketSection, OrderOffer
 
 User = get_user_model()
 ORDERS_BASE = "/api/v1/orders"
+
+
+def order_image_upload(name="proof.png"):
+    content = BytesIO()
+    Image.new("RGB", (4, 4), "green").save(content, format="PNG")
+    return SimpleUploadedFile(name, content.getvalue(), content_type="image/png")
 
 
 class OrderAPITests(APITestCase):
@@ -190,6 +200,60 @@ class OrderAPITests(APITestCase):
     def authenticate_customer(self):
         token = RefreshToken.for_user(self.customer).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    def create_order_with_private_media(self):
+        return Order.objects.create(
+            user=self.customer,
+            assigned_representative=self.representative,
+            market=self.market,
+            payment_method="cash",
+            image=order_image_upload("order.png"),
+            delivery_proof=order_image_upload("proof.png"),
+        )
+
+    @override_settings(PRIVATE_MEDIA_X_ACCEL_REDIRECT=True)
+    def test_private_order_media_requires_an_authorized_order_actor(self):
+        order = self.create_order_with_private_media()
+        endpoints = (
+            ("image", order.image.name),
+            ("delivery-proof", order.delivery_proof.name),
+        )
+
+        for user in (self.customer, self.representative, self.admin):
+            self.client.force_authenticate(user)
+            for endpoint, stored_name in endpoints:
+                response = self.client.get(
+                    f"{ORDERS_BASE}/{order.id}/{endpoint}/"
+                )
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+                self.assertEqual(response["Cache-Control"], "private, no-store")
+                self.assertEqual(
+                    response["X-Accel-Redirect"],
+                    f"/_protected-media/{stored_name}",
+                )
+
+        self.client.force_authenticate(self.other_customer)
+        forbidden = self.client.get(
+            f"{ORDERS_BASE}/{order.id}/delivery-proof/"
+        )
+        self.assertEqual(forbidden.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_order_serializer_exposes_only_protected_media_endpoints(self):
+        order = self.create_order_with_private_media()
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(f"{ORDERS_BASE}/{order.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["image"],
+            f"http://testserver{ORDERS_BASE}/{order.id}/image/",
+        )
+        self.assertEqual(
+            response.data["delivery_proof"],
+            f"http://testserver{ORDERS_BASE}/{order.id}/delivery-proof/",
+        )
+        self.assertNotIn(order.delivery_proof.name, response.data["delivery_proof"])
 
     def test_inactive_client_cannot_preview_or_create_with_existing_access_token(self):
         token = RefreshToken.for_user(self.customer).access_token

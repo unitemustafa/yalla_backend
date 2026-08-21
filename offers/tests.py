@@ -639,11 +639,7 @@ class OfferAPITests(APITestCase):
         self.authenticate(self.admin)
 
         with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
-            image = SimpleUploadedFile(
-                "offer.gif",
-                b"GIF87a\x01\x00\x01\x00\x80\x01\x00\x00\x00\x00ccc,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;",
-                content_type="image/gif",
-            )
+            image = offer_image_upload("offer.png")
             create_response = self.client.post(
                 f"{OFFERS_BASE}/",
                 {
@@ -669,11 +665,7 @@ class OfferAPITests(APITestCase):
             self.assertEqual(create_response.data["items"][0]["quantity"], 2)
             offer_id = create_response.data["id"]
 
-            replacement = SimpleUploadedFile(
-                "replacement.gif",
-                b"GIF87a\x01\x00\x01\x00\x80\x01\x00\x00\x00\x00fff,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;",
-                content_type="image/gif",
-            )
+            replacement = offer_image_upload("replacement.png", color="red")
             update_response = self.client.patch(
                 f"{OFFERS_BASE}/{offer_id}/",
                 {

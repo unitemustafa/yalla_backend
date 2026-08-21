@@ -9,8 +9,6 @@ import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
-from .cloudinary_settings import build_cloudinary_storage_settings
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Local development keeps secrets in a git-ignored .env file. Values already
@@ -99,10 +97,6 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
-    # Cloudinary media storage
-    'cloudinary_storage',
-    'cloudinary',
-
     'accounts',
     'corsheaders',
     'rest_framework',
@@ -128,6 +122,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'config.api_cache.ApiResponseCacheMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -158,14 +153,21 @@ WSGI_APPLICATION = 'config.wsgi.application'
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 if IS_PRODUCTION and not DATABASE_URL:
     raise ImproperlyConfigured("DATABASE_URL is required in production.")
+DATABASE_SSL_REQUIRE = os.environ.get(
+    "DATABASE_SSL_REQUIRE",
+    "False" if not IS_PRODUCTION else "True",
+).lower() == "true"
 
 DATABASES = {
     "default": dj_database_url.config(
         default=DATABASE_URL or None,
         conn_max_age=0 if DEBUG else 600,
-        ssl_require=not DEBUG,
+        ssl_require=DATABASE_SSL_REQUIRE,
     )
 }
+DATABASE_PASSWORD = os.environ.get("DATABASE_PASSWORD", "")
+if DATABASE_PASSWORD:
+    DATABASES["default"]["PASSWORD"] = DATABASE_PASSWORD
 
 
 # Distributed rate limiting. The limiter is disabled by default so local
@@ -186,7 +188,7 @@ RATE_LIMIT_ENFORCE_SCOPES = tuple(
 )
 RATE_LIMIT_CLIENT_IP_HEADER = os.environ.get(
     "RATE_LIMIT_CLIENT_IP_HEADER",
-    "HTTP_DO_CONNECTING_IP",
+    "HTTP_CF_CONNECTING_IP",
 ).strip()
 RATE_LIMIT_TRUSTED_PROXY_CIDRS = tuple(
     item.strip()
@@ -274,11 +276,30 @@ GEOAPIFY_READ_TIMEOUT = float(
     os.environ.get("GEOAPIFY_READ_TIMEOUT", "5")
 )
 
+CACHE_REDIS_URL = os.environ.get("CACHE_REDIS_URL", "").strip()
 CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "yalla-default-cache",
-    },
+    "default": (
+        {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": CACHE_REDIS_URL,
+            "KEY_PREFIX": "yalla-api",
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "IGNORE_EXCEPTIONS": True,
+                "SOCKET_CONNECT_TIMEOUT": float(
+                    os.environ.get("CACHE_CONNECT_TIMEOUT", "0.5")
+                ),
+                "SOCKET_TIMEOUT": float(
+                    os.environ.get("CACHE_SOCKET_TIMEOUT", "0.5")
+                ),
+            },
+        }
+        if CACHE_REDIS_URL
+        else {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "yalla-default-cache",
+        }
+    ),
     "rate_limit": {
         "BACKEND": "django_redis.cache.RedisCache",
         "LOCATION": RATE_LIMIT_REDIS_URL or "redis://127.0.0.1:6379/1",
@@ -327,6 +348,21 @@ CACHES = {
     ),
 }
 
+API_CACHE_ENABLED = os.environ.get(
+    "API_CACHE_ENABLED",
+    "True" if CACHE_REDIS_URL else "False",
+).lower() == "true"
+API_CATALOG_CACHE_TIMEOUT = int(
+    os.environ.get("API_CATALOG_CACHE_TIMEOUT", "60")
+)
+API_LOGIN_SNAPSHOT_CACHE_TIMEOUT = int(
+    os.environ.get("API_LOGIN_SNAPSHOT_CACHE_TIMEOUT", "30")
+)
+API_CACHE_OBSERVABILITY = os.environ.get(
+    "API_CACHE_OBSERVABILITY",
+    "True" if APP_ENV == "staging" else "False",
+).lower() == "true"
+
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -356,20 +392,25 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / "staticfiles"
 # Media files
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
-
-
-# Cloudinary
-CLOUDINARY_STORAGE = build_cloudinary_storage_settings(os.environ)
+MEDIA_URL = os.environ.get("MEDIA_URL", "/media/").rstrip("/") + "/"
+MEDIA_ROOT = Path(
+    os.environ.get("PUBLIC_MEDIA_ROOT", str(BASE_DIR / "media"))
+)
+PRIVATE_MEDIA_ROOT = Path(
+    os.environ.get("PRIVATE_MEDIA_ROOT", str(BASE_DIR / "private-media"))
+)
+PRIVATE_MEDIA_INTERNAL_URL = os.environ.get(
+    "PRIVATE_MEDIA_INTERNAL_URL",
+    "/_protected-media/",
+)
+PRIVATE_MEDIA_X_ACCEL_REDIRECT = os.environ.get(
+    "PRIVATE_MEDIA_X_ACCEL_REDIRECT",
+    "True" if IS_PRODUCTION else "False",
+).lower() == "true"
 
 STORAGES = {
     "default": {
-        "BACKEND": (
-            "django.core.files.storage.FileSystemStorage"
-            if DEBUG
-            else "cloudinary_storage.storage.MediaCloudinaryStorage"
-        ),
+        "BACKEND": "config.media.OptimizedPublicMediaStorage",
     },
     "staticfiles": {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
@@ -441,7 +482,7 @@ LOGGING = {
 
 CELERY_BROKER_URL = os.environ.get(
     "CELERY_BROKER_URL",
-    RATE_LIMIT_REDIS_URL or "redis://127.0.0.1:6379/2",
+    "redis://127.0.0.1:6379/0",
 )
 CELERY_RESULT_BACKEND = None
 CELERY_TASK_IGNORE_RESULT = True

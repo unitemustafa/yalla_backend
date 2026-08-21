@@ -5,6 +5,17 @@ from .token_security import ensure_user_verified, token_user, validate_client_to
 
 
 class DatabaseStateJWTAuthentication(JWTAuthentication):
+    def authenticate(self, request):
+        django_request = getattr(request, "_request", request)
+        cached_result = getattr(
+            django_request,
+            "_yalla_auth_result",
+            None,
+        )
+        if cached_result is not None:
+            return cached_result
+        return super().authenticate(request)
+
     def get_user(self, validated_token):
         user = token_user(validated_token)
         if user.role in {user.Role.CLIENT, user.Role.REPRESENTATIVE}:

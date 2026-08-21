@@ -3,6 +3,10 @@
 .codex
 .serena
 .venv
+venv/
+.env
+.env.*
+!.env.production.example
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -13,6 +17,7 @@ htmlcov/
 *.sqlite3
 db.sqlite3
 media/
+private-media/
 staticfiles/
 additions/
 docs/API_REPORT.md

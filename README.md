@@ -1,75 +1,276 @@
 # Yalla Backend
 
-Django REST backend for the Yalla client app, representative app, and admin dashboard. PostgreSQL is the production database, Redis backs distributed throttling and Celery, Cloudinary stores media, and Firebase Cloud Messaging delivers push notifications.
+Production-ready REST API for the Yalla commerce and delivery platform. It
+serves the customer application, delivery representative application, and
+administration dashboard from a single versioned backend.
 
-## Quick start
+The platform covers authentication, regional storefronts, catalog management,
+offers, checkout and order lifecycles, delivery assignment, notifications, and
+administrative reporting.
 
-Requires Python 3.13. PostgreSQL and Redis are required for a production-like environment; the fast local test suite uses isolated SQLite and mocks the Redis boundary.
+## Highlights
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-Copy-Item .env.example .env
-.\.venv\Scripts\python.exe manage.py migrate
-.\.venv\Scripts\python.exe manage.py runserver
+- JWT authentication with refresh-token rotation and server-side revocation
+- Role-based access for customers, representatives, and administrators
+- Region-aware markets, catalogs, offers, addresses, and delivery pricing
+- Multi-market orders with authoritative pricing and audited status changes
+- Persistent notifications with Firebase Cloud Messaging delivery
+- Redis-backed distributed rate limiting for production traffic
+- Versioned REST APIs with an OpenAPI schema and protected Swagger UI
+- Health and readiness endpoints for production orchestration
+- Structured JSON logs with request IDs
+- Automated security, migration, schema, and test checks in CI
+
+## Technology stack
+
+| Area | Technology |
+| --- | --- |
+| Web framework | Django 6 and Django REST Framework |
+| Authentication | Simple JWT with custom database-state validation |
+| Database | PostgreSQL |
+| Cache and broker | Redis or Valkey |
+| Background jobs | Celery and Celery Beat |
+| Media storage | Persistent filesystem, Nginx, and Cloudflare CDN |
+| Push notifications | Firebase Cloud Messaging |
+| API documentation | drf-spectacular and OpenAPI |
+| Application server | Gunicorn |
+| CI and quality | GitHub Actions, Ruff, Bandit, pip-audit, and Coverage.py |
+
+## Getting started
+
+### Prerequisites
+
+- Python 3.13
+- PostgreSQL
+- Redis or Valkey only when testing background jobs or distributed rate
+  limiting locally
+
+### 1. Create a virtual environment
+
+On Linux or macOS:
+
+```bash
+python3.13 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-dev.txt
 ```
 
-Settings are environment-driven. Do not add a `config.local_settings` module or commit secrets. Copy `.env.example` to `.env` and replace every placeholder. Local development automatically loads the git-ignored `.env` file without overriding variables already supplied by the shell. Production must set `APP_ENV=production` and provide secrets through the hosting platform or container runtime.
-
-## Verification
-
-Fast local suite:
+On Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python.exe manage.py test --settings=config.test_settings
-.\.venv\Scripts\python.exe manage.py makemigrations --check --dry-run --settings=config.test_settings
-.\.venv\Scripts\python.exe manage.py spectacular --settings=config.test_settings --file openapi.yml --validate
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements-dev.txt
 ```
 
-CI additionally runs the full suite on PostgreSQL, Ruff, Bandit, pip-audit, coverage with a 90% floor, migration drift, OpenAPI validation, and Django's production deployment checks.
+### 2. Configure the environment
 
-## API and roles
+Create a `.env` file in the project root. The following configuration is
+enough for normal local development after creating a PostgreSQL database named
+`yalla`:
 
-- `client`: browses the catalog and manages only its own addresses, orders, devices, and notifications.
-- `representative`: internal role name for delivery workers. Existing public `/api/v1/courier/` routes remain compatible.
-- `admin`: application administrator. API authorization uses `role`; Django's `is_staff`/`is_superuser` flags never grant application API access.
+```dotenv
+APP_ENV=development
+DEBUG=True
+SECRET_KEY=replace-this-with-a-local-development-secret
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/yalla
+ALLOWED_HOSTS=localhost,127.0.0.1
+CORS_ALLOW_ALL_ORIGINS=True
+RATE_LIMIT_MODE=off
+PUSH_DELIVERY_ASYNC=False
+```
 
-Authentication is required by default. The reviewed public allowlist is enforced by `config/test_route_security.py`. OpenAPI is exposed at `/api/schema/` and Swagger UI at `/api/docs/`; both require an admin-role JWT. Version 1 contracts remain backward compatible.
+Development automatically loads `.env` without overriding variables already
+provided by the shell. The file is ignored by Git and must never contain
+production credentials committed to the repository.
 
-`config/test_consumer_routes.py` is the compatibility inventory for the paths and HTTP methods currently used by `yalla_market`, `yalla_home`, and `yalla_admin`. Update that test only together with the affected consumer; an uncoordinated v1 route removal must fail CI.
+### 3. Prepare and run the application
 
-Version 2 currently mirrors the same resources under `/api/v2/`, but list responses use `{count,next,previous,results}` pagination with a default page size of 50 and a maximum requested size of 100. Migrate consumers endpoint-by-endpoint; do not change version 1 list shapes.
+```bash
+python manage.py migrate
+python manage.py runserver
+```
 
-## Project layout
+The API is available at `http://127.0.0.1:8000/api/v1/`.
 
-- `accounts`: identity, JWT/OTP, roles, sessions and account lifecycle.
-- `catalog`, `markets`, `offers`: storefront domain.
-- `orders`: pricing, ownership and order lifecycle.
-- `locations`: addresses, delivery coverage and geocoding.
-- `notifications`: persisted inbox, FCM delivery and dispatch state.
-- `dashboard`, `partners`: admin summaries and partnership workflow.
-- `config`: settings, URL composition, throttling, request limits, health checks and observability.
+### 4. Add optional development data
 
-Shared permission classes live in `accounts.permissions`. Business mutations belong in each app's `services.py`; reusable read query construction belongs in `selectors.py`. Keep API response shapes in serializers and views, and add ownership/role tests for every object endpoint.
+Use the idempotent seed command to populate the database with test data:
 
-Large write paths are intentionally separated from their public serializer/view modules. `orders.write_validation`, `markets.write_serializers`, `accounts.admin_user_serializers`, and `catalog.admin_product_serializers` contain focused write behavior while the established serializer class names remain the compatibility boundary. Admin-review and courier order views live in role-specific modules and are re-exported from `orders.views`; market admin views follow the same pattern. Management commands only parse options and orchestrate work—the reusable seed stages live in `accounts.seeders_*` and `dashboard.seeders_*`.
+```bash
+python manage.py seed_data
+```
 
-When extending the backend, preserve that boundary: put database-changing workflows in services or focused write mixins, query composition in selectors, and transport concerns in views/serializers. Avoid adding another long method to a facade module; create a focused module and keep the old import available when consumers or URL configuration depend on it.
+For the richer demonstration dataset, use the reset command below. It deletes
+all existing application data before seeding and must only be used with a
+disposable local database:
 
-## Production release
+```bash
+python manage.py seed_demo_data --reset --yes-delete-all
+```
 
-Run migrations once as a release step, then start web and worker processes independently:
+## API access
 
-```text
+Authentication is required by default. Send the access token in each protected
+request:
+
+```http
+Authorization: Bearer <access-token>
+```
+
+The application has three roles:
+
+| Role | Purpose |
+| --- | --- |
+| `client` | Browses the storefront and manages personal addresses, orders, devices, and notifications |
+| `representative` | Handles assigned deliveries; existing public routes retain the `/courier/` name |
+| `admin` | Manages application data, operations, and reporting |
+
+Application authorization is based on `role`. Django's `is_staff` and
+`is_superuser` flags do not grant access to application API endpoints.
+
+### Useful endpoints
+
+| Endpoint | Description | Access |
+| --- | --- | --- |
+| `/health/` | Process liveness | Public |
+| `/readyz/` | Database and configured Redis readiness | Public |
+| `/api/schema/` | OpenAPI schema | Admin JWT |
+| `/api/docs/` | Swagger UI | Admin JWT |
+| `/api/v1/` | Stable consumer API | Authenticated by default |
+| `/api/v2/` | Paginated API migration path | Authenticated by default |
+
+Version 1 remains the compatibility boundary for the current Yalla consumers.
+Version 2 exposes the same resources while list endpoints return
+`{count, next, previous, results}` with a default page size of 50 and a maximum
+requested page size of 100.
+
+## Project structure
+
+| Path | Responsibility |
+| --- | --- |
+| `accounts/` | Users, JWT and OTP flows, roles, sessions, and account lifecycle |
+| `catalog/` | Products, variants, additions, categories, and product media |
+| `markets/` | Storefronts, classifications, and regional selection |
+| `offers/` | Packages, discounts, announcements, and delivery offers |
+| `orders/` | Pricing, checkout, ownership, assignment, and order lifecycle |
+| `locations/` | Addresses, service cities, delivery areas, coverage, and geocoding |
+| `notifications/` | Notification inbox, FCM delivery, and transactional push outbox |
+| `dashboard/` | Administrative summaries, reporting, and demo data |
+| `partners/` | Partnership application workflow |
+| `config/` | Settings, routing, rate limits, request limits, schema, health, and observability |
+| `docs/` | Maintained API and operational references |
+
+Business mutations belong in app-level services or focused write modules.
+Reusable read queries belong in selectors, while serializers and views own the
+HTTP contract. Preserve existing imports and version 1 response shapes when
+splitting large modules or introducing version 2 behavior.
+
+## Background services
+
+Local development defaults to synchronous push dispatch and does not require
+Redis. To exercise asynchronous notification delivery, configure
+`CELERY_BROKER_URL` or `RATE_LIMIT_REDIS_URL`, set
+`PUSH_DELIVERY_ASYNC=True`, and run:
+
+```bash
+celery -A config worker --loglevel=INFO
+celery -A config beat --loglevel=INFO
+```
+
+The worker delivers retryable Firebase messages. Celery Beat republishes
+pending outbox entries and recovers expired processing leases, so a temporary
+broker or worker outage delays notifications without losing the committed
+business operation.
+
+## Environment configuration
+
+The most important production variables are listed below. Optional timeout,
+request-size, Gunicorn, and rate-policy variables have safe defaults in
+`config/settings.py`.
+
+| Variable | Purpose |
+| --- | --- |
+| `APP_ENV` | Use `production` to enable production security requirements |
+| `SECRET_KEY` | Unique secret with at least 50 characters in production |
+| `DATABASE_URL` | PostgreSQL connection URL |
+| `ALLOWED_HOSTS` | Comma-separated production host names |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated HTTPS dashboard origins |
+| `RATE_LIMIT_REDIS_URL` | Dedicated, non-sharded Redis or Valkey connection |
+| `RATE_LIMIT_MODE` | `off`, `observe`, or `enforce`; production requires `enforce` |
+| `CELERY_BROKER_URL` | Core Redis broker used by Celery |
+| `CACHE_REDIS_URL` | Dedicated Redis instance for short-lived API response caching |
+| `PUBLIC_MEDIA_ROOT` / `PRIVATE_MEDIA_ROOT` | Persistent public and protected media directories |
+| `MEDIA_URL` | Public media base URL, normally the media subdomain |
+| `FIREBASE_SERVICE_ACCOUNT_BASE64` | Preferred Base64-encoded Firebase service-account JSON |
+| `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | SMTP credentials for OTP email |
+| `GEOAPIFY_API_KEY` | Reverse-geocoding integration key |
+
+Production must use exact HTTPS origins, must not enable debug mode, and must
+never enable `AUTH_OTP_INCLUDE_IN_RESPONSE`. See
+[`docs/RATE_LIMITING.md`](docs/RATE_LIMITING.md) for the rate-limiter rollout
+and rollback procedure.
+
+## Testing and verification
+
+The fast local suite uses isolated in-memory SQLite, local media directories,
+and a mocked Redis boundary:
+
+```bash
+python manage.py test --settings=config.test_settings
+python manage.py makemigrations --check --dry-run --settings=config.test_settings
+python manage.py spectacular --settings=config.test_settings --file openapi.yml --validate
+ruff check .
+```
+
+CI additionally runs the full suite against PostgreSQL, verifies the committed
+OpenAPI document, enforces at least 90% coverage, scans the code with Bandit,
+audits Python dependencies, and runs Django's production deployment checks.
+
+When changing public routes, update consumers together with the compatibility
+inventory in `config/test_consumer_routes.py`. When changing the API schema,
+regenerate `openapi.yml`; do not edit the generated document manually.
+
+## Production deployment
+
+Run migrations once as a release step, then start the web, worker, and scheduler
+processes independently:
+
+```bash
 python manage.py migrate --noinput
 gunicorn --config config/gunicorn.conf.py config.wsgi:application
 celery -A config worker --loglevel=INFO
+celery -A config beat --loglevel=INFO
 ```
 
-The container web command never runs migrations. Configure a reverse-proxy request limit matching the values in `.env.example`; application middleware cannot reject oversized chunked uploads before parsing. Logs are JSON and include `X-Request-ID`; request bodies and credentials must never be logged.
+The provided `Dockerfile` starts only the web process and intentionally does
+not run migrations. The `Procfile` defines separate `release`, `web`, `worker`,
+and `beat` process types.
 
-Production push delivery uses the transactional `PushOutbox`. Keep both Celery worker and beat running: the worker performs retryable FCM delivery, while beat republishes pending entries and recovers expired processing leases. A Redis/worker outage therefore delays a push but does not roll back or lose the committed business operation.
+For the production Docker stack, copy `.env.production.example` to
+`.env.production`, replace every placeholder, install the TLS files described
+in `docs/HOSTINGER_KVM_DEPLOYMENT.md`, and run:
 
-Before each release: back up PostgreSQL, test restore on a separate database, review SQL with `python manage.py sqlmigrate`, deploy migrations, deploy web/worker, run health checks, and retain the previous image. Roll back application code first; reverse a migration only after confirming it is reversible and no newer data depends on it.
+```bash
+./deploy/production-up.sh
+```
 
-The maintained API references are `docs/API_REPORT.md`, the Postman collection in `docs/`, and generated OpenAPI. Do not edit generated OpenAPI by hand.
+The Compose stack contains only backend infrastructure: Nginx, Django,
+PostgreSQL, Redis, Celery, persistent media, and static files. The admin
+dashboard and Flutter applications remain independent clients and connect over
+HTTPS through `api.<domain>` and `media.<domain>`.
+
+Before every release, back up PostgreSQL, verify that the backup can be restored
+to a separate database, review migration SQL, deploy migrations, deploy all
+processes, and check `/health/` and `/readyz/`. Configure the reverse proxy with
+request-size limits matching the application settings, and retain the previous
+application image for rollback.
+
+## Additional documentation
+
+- [`docs/API_REPORT.md`](docs/API_REPORT.md) — detailed endpoint and integration reference
+- [`docs/RATE_LIMITING.md`](docs/RATE_LIMITING.md) — Redis rate-limiting operations
+- [`docs/Yalla System APIs.postman_collection.json`](docs/Yalla%20System%20APIs.postman_collection.json) — Postman collection
+- [`openapi.yml`](openapi.yml) — generated OpenAPI contract

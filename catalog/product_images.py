@@ -1,11 +1,13 @@
-from django.apps import apps
-from django.core.files.storage import Storage
-from django.db import models, transaction
+from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 from rest_framework import serializers
 
 from config.image_validation import validate_safe_image
+from config.media_cleanup import (
+    delete_storage_file_if_unreferenced,
+    schedule_storage_cleanup,
+)
 
 from .models import Product, ProductImage
 
@@ -186,27 +188,3 @@ def clear_primary_product_image(product_id):
                 image=None,
                 updated_at=timezone.now(),
             )
-
-
-def storage_name_is_referenced(name):
-    if not name:
-        return False
-    for model in apps.get_models():
-        for field in model._meta.get_fields():
-            if not isinstance(field, models.FileField):
-                continue
-            if model._default_manager.filter(**{field.name: name}).exists():
-                return True
-    return False
-
-
-def delete_storage_file_if_unreferenced(storage: Storage, name):
-    if name and not storage_name_is_referenced(name):
-        storage.delete(name)
-
-
-def schedule_storage_cleanup(storage, name):
-    if name:
-        transaction.on_commit(
-            lambda: delete_storage_file_if_unreferenced(storage, name)
-        )

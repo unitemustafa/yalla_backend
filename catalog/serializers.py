@@ -3,6 +3,8 @@ import json
 from django.db import transaction
 from rest_framework import serializers
 
+from config.image_validation import validate_safe_image
+
 from .models import (
     AdditionClassification,
     CategoryAttribute,
@@ -90,6 +92,9 @@ class ProductCategorySerializer(serializers.ModelSerializer):
     def validate_type(self, value):
         return value.strip()
 
+    def validate_image(self, value):
+        return validate_safe_image(value)
+
 
 class StoreSubcategorySerializer(serializers.ModelSerializer):
     market_count = serializers.IntegerField(read_only=True)
@@ -144,6 +149,9 @@ class StoreSubcategorySerializer(serializers.ModelSerializer):
 
     def validate_description_en(self, value):
         return value.strip()
+
+    def validate_image(self, value):
+        return validate_safe_image(value)
 
 
 class ProductSubcategorySerializer(serializers.ModelSerializer):
@@ -581,3 +589,6 @@ class ProductAdditionSerializer(serializers.ModelSerializer):
 
     def validate_name_en(self, value):
         return value.strip()
+
+    def validate_image(self, value):
+        return validate_safe_image(value)

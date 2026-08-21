@@ -3,6 +3,8 @@ from pathlib import Path
 
 from rest_framework import serializers
 
+from config.image_validation import validate_safe_image
+
 from .models import DashboardSettings
 
 
@@ -88,7 +90,7 @@ class DashboardSettingsSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "Dashboard logo must be 5 MB or smaller."
             )
-        return value
+        return validate_safe_image(value)
 
     def update(self, instance, validated_data):
         logo = validated_data.pop("logo", None)

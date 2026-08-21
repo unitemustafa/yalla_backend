@@ -41,6 +41,15 @@ def readiness(request):
         except Exception:
             pass
 
+    if settings.CACHE_REDIS_URL:
+        checks["cache_redis"] = False
+        try:
+            cache = caches["default"]
+            cache.set("readiness", "ok", timeout=5)
+            checks["cache_redis"] = cache.get("readiness") == "ok"
+        except Exception:
+            pass
+
     ready = all(checks.values())
     return JsonResponse(
         {"status": "ok" if ready else "unavailable", "checks": checks},

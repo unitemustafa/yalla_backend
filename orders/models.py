@@ -1,5 +1,7 @@
 from django.db import models
 
+from config.media import private_media_storage
+
 
 class Order(models.Model):
     class Scope(models.TextChoices):
@@ -125,12 +127,18 @@ class Order(models.Model):
     )
     subtotal_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     total_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    image = models.ImageField(upload_to="orders/", blank=True, null=True)
+    image = models.ImageField(
+        upload_to="orders/",
+        storage=private_media_storage,
+        blank=True,
+        null=True,
+    )
     assigned_at = models.DateTimeField(blank=True, null=True)
     delivered_at = models.DateTimeField(blank=True, null=True)
     delivery_note = models.TextField(blank=True)
     delivery_proof = models.ImageField(
         upload_to="delivery-proofs/",
+        storage=private_media_storage,
         blank=True,
         null=True,
     )

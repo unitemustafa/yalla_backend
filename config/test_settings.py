@@ -47,8 +47,7 @@ PASSWORD_HASHERS = [
 ]
 
 
-# Temporary local directories prevent tests from touching Cloudinary
-# or leaving uploaded files inside the repository.
+# Temporary local directories keep uploaded files out of the repository.
 _TEST_MEDIA_DIRECTORY = tempfile.TemporaryDirectory(
     prefix="yalla-test-media-",
 )
@@ -57,11 +56,12 @@ _TEST_STATIC_DIRECTORY = tempfile.TemporaryDirectory(
 )
 
 MEDIA_ROOT = _TEST_MEDIA_DIRECTORY.name
+PRIVATE_MEDIA_ROOT = os.path.join(_TEST_MEDIA_DIRECTORY.name, "private")
 STATIC_ROOT = _TEST_STATIC_DIRECTORY.name
 
 STORAGES = {
     "default": {
-        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "BACKEND": "config.media.OptimizedPublicMediaStorage",
     },
     "staticfiles": {
         "BACKEND": (

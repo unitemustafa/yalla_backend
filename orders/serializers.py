@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 from catalog.models import ProductVariant
+from config.image_validation import validate_safe_image
 from locations.models import Address, DeliveryArea, ServiceCity
 from markets.models import Market
 from markets.region import (
@@ -14,6 +15,7 @@ from markets.region import (
 )
 from offers.models import Offer
 
+from .media import protected_order_media_url
 from .models import Order, OrderEvent, OrderItem, OrderMarketSection, OrderOffer
 from .services import allowed_statuses_for_order
 from .write_validation import OrderWriteValidationMixin
@@ -1179,7 +1181,29 @@ class OrderEventSerializer(serializers.ModelSerializer):
         return user_summary(instance.actor) if instance.actor_id else None
 
 
-class OrderSerializer(OrderWriteValidationMixin, serializers.ModelSerializer):
+class ProtectedOrderMediaMixin:
+    def get_image(self, instance) -> str | None:
+        return protected_order_media_url(
+            self.context.get("request"),
+            instance,
+            "image",
+        )
+
+    def get_delivery_proof(self, instance) -> str | None:
+        return protected_order_media_url(
+            self.context.get("request"),
+            instance,
+            "delivery_proof",
+        )
+
+
+class OrderSerializer(
+    ProtectedOrderMediaMixin,
+    OrderWriteValidationMixin,
+    serializers.ModelSerializer,
+):
+    image = serializers.SerializerMethodField()
+    delivery_proof = serializers.SerializerMethodField()
     user_id = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(role=User.Role.CLIENT),
         source="user",
@@ -2031,7 +2055,11 @@ class CourierOrderListSerializer(serializers.ModelSerializer):
         }
 
 
-class CourierOrderDetailSerializer(CourierOrderListSerializer):
+class CourierOrderDetailSerializer(
+    ProtectedOrderMediaMixin,
+    CourierOrderListSerializer,
+):
+    delivery_proof = serializers.SerializerMethodField()
     items = CourierOrderItemSerializer(many=True, read_only=True)
     offers = CourierOrderOfferSerializer(
         source="order_offers",
@@ -2062,4 +2090,8 @@ class CourierOrderStatusSerializer(serializers.Serializer):
         )
     )
     delivery_note = serializers.CharField(required=False, allow_blank=True)
-    delivery_proof = serializers.ImageField(required=False, allow_null=True)
+    delivery_proof = serializers.ImageField(
+        required=False,
+        allow_null=True,
+        validators=[validate_safe_image],
+    )

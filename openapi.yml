@@ -2408,6 +2408,38 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v1/orders/{order_id}/delivery-proof/:
+    get:
+      operationId: v1_orders_delivery_proof_retrieve_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/orders/{order_id}/image/:
+    get:
+      operationId: v1_orders_image_retrieve_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
   /api/v1/orders/{order_id}/status/:
     patch:
       operationId: v1_orders_status_partial_update_by_order_id
@@ -4920,6 +4952,38 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v2/orders/{order_id}/delivery-proof/:
+    get:
+      operationId: v2_orders_delivery_proof_retrieve_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/orders/{order_id}/image/:
+    get:
+      operationId: v2_orders_image_retrieve_by_order_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
   /api/v2/orders/{order_id}/status/:
     patch:
       operationId: v2_orders_status_partial_update_by_order_id
@@ -5175,7 +5239,6 @@ components:
           readOnly: true
         image:
           type: string
-          format: uri
           nullable: true
           readOnly: true
         assigned_at:
@@ -5192,7 +5255,6 @@ components:
           type: string
         delivery_proof:
           type: string
-          format: uri
           nullable: true
           readOnly: true
         approved_by:
@@ -5901,8 +5963,8 @@ components:
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
         image:
           type: string
-          format: uri
           nullable: true
+          readOnly: true
         assigned_at:
           type: string
           format: date-time
@@ -5917,8 +5979,8 @@ components:
           type: string
         delivery_proof:
           type: string
-          format: uri
           nullable: true
+          readOnly: true
         approved_by:
           type: integer
           readOnly: true
@@ -6012,6 +6074,7 @@ components:
       - delivery_address
       - delivery_area
       - delivery_price_status
+      - delivery_proof
       - eta_max_minutes
       - eta_min_minutes
       - external_shipping_status
@@ -6020,6 +6083,7 @@ components:
       - grouped_offers
       - history
       - id
+      - image
       - is_multi_market
       - market
       - market_count
@@ -6356,16 +6420,8 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
-        image:
-          type: string
-          format: binary
-          nullable: true
         delivery_note:
           type: string
-        delivery_proof:
-          type: string
-          format: binary
-          nullable: true
         items:
           type: array
           items:
@@ -6589,16 +6645,8 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
-        image:
-          type: string
-          format: binary
-          nullable: true
         delivery_note:
           type: string
-        delivery_proof:
-          type: string
-          format: binary
-          nullable: true
         items:
           type: array
           items:

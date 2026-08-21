@@ -6,7 +6,9 @@ from .views import (
     ClientOrderListView,
     OrderAssignmentView,
     OrderDetailView,
+    OrderDeliveryProofView,
     OrderDeliveryPriceView,
+    OrderImageView,
     OrderListCreateView,
     OrderPreviewView,
     OrderStatusView,
@@ -18,6 +20,16 @@ urlpatterns = [
     path("create/", ClientOrderCreateView.as_view(), name="client-order-create"),
     path("", OrderListCreateView.as_view(), name="order-list-create"),
     path("<int:order_id>/", OrderDetailView.as_view(), name="order-detail"),
+    path(
+        "<int:order_id>/image/",
+        OrderImageView.as_view(),
+        name="order-image",
+    ),
+    path(
+        "<int:order_id>/delivery-proof/",
+        OrderDeliveryProofView.as_view(),
+        name="order-delivery-proof",
+    ),
     path("<int:order_id>/status/", OrderStatusView.as_view(), name="order-status"),
     path(
         "<int:order_id>/delivery-price/",

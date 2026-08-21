@@ -11,9 +11,8 @@ def _positive_int(name, default):
 
 bind = f"0.0.0.0:{os.environ.get('PORT', '8000')}"
 
-# Media uploads spend most of their time waiting on Cloudinary. A small pool of
-# threaded workers keeps normal API traffic responsive while that I/O is in
-# flight, without requiring a large container footprint.
+# Image uploads perform bounded Pillow work before writing to the local media
+# volume. A small thread pool keeps other requests responsive during that work.
 worker_class = "gthread"
 workers = _positive_int("WEB_CONCURRENCY", 2)
 threads = _positive_int("GUNICORN_THREADS", 4)

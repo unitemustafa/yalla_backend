@@ -902,7 +902,10 @@ class HomeAPITests(APITestCase):
             if item["id"] == self.local_classification.id
         )
         self.assertTrue(classification["image"])
-        self.assertIn("home-classification", classification["image"])
+        self.assertRegex(
+            classification["image"],
+            r"/media/market-classifications/[0-9a-f]{32}\.webp$",
+        )
 
     def test_home_returns_general_region_content_only(self):
         general_classification = MarketClassification.objects.create(
@@ -2167,13 +2170,13 @@ class HomeAPITests(APITestCase):
         product = self.local_products[0]
         primary_image = ProductImage.objects.create(
             product=product,
-            image=SimpleUploadedFile("primary.png", b"primary"),
+            image=market_image_upload("primary.png"),
             is_primary=True,
             sort_order=0,
         )
         secondary_image = ProductImage.objects.create(
             product=product,
-            image=SimpleUploadedFile("secondary.png", b"secondary"),
+            image=market_image_upload("secondary.png", "red"),
             sort_order=1,
         )
         attribute = CategoryAttribute.objects.create(
