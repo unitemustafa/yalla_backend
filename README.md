@@ -14,7 +14,7 @@ Copy-Item .env.example .env
 .\.venv\Scripts\python.exe manage.py runserver
 ```
 
-Settings are environment-driven. Do not add a `config.local_settings` module or commit secrets. Copy `.env.example` into your secret manager/environment and replace every placeholder. Django does not automatically read `.env`; load it through your platform, shell, or container runtime.
+Settings are environment-driven. Do not add a `config.local_settings` module or commit secrets. Copy `.env.example` to `.env` and replace every placeholder. Local development automatically loads the git-ignored `.env` file without overriding variables already supplied by the shell. Production must set `APP_ENV=production` and provide secrets through the hosting platform or container runtime.
 
 ## Verification
 
