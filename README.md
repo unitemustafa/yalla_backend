@@ -240,10 +240,19 @@ in `docs/HOSTINGER_KVM_DEPLOYMENT.md`, and run:
 ```
 
 On a new Ubuntu 24.04 Hostinger VPS, `deploy/hostinger-bootstrap.sh` installs
-Docker and prepares persistent storage. Later releases can be pulled from the
-GitHub `main` branch with `deploy/production-update.sh`; it creates a database
-backup before updating. Use `deploy/backup.sh --with-media` when a release also
-needs a local media archive.
+Docker and prepares persistent storage. After pushing a tested release to the
+GitHub `main` branch, open the Hostinger VPS terminal and run:
+
+```bash
+cd /opt/yalla_backend
+./deploy/production-update.sh
+```
+
+The update script creates a database backup, fast-forwards the server checkout,
+rebuilds the changed images, runs the release step, and waits for the services
+to become healthy. It preserves the server-only `.env.production` file and the
+persistent data under `/srv/yalla`. Use `deploy/backup.sh --with-media` when a
+release also needs a local media archive.
 
 The Compose stack contains Nginx, Django, PostgreSQL, persistent media, and
 static files. The admin dashboard and Flutter applications remain independent

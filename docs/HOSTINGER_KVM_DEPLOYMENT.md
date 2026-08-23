@@ -60,6 +60,11 @@ key, or any other production credential to GitHub.
    from the secure production configuration; do not copy the development
    `.env` file to GitHub.
 
+   For Brevo, `DEFAULT_FROM_EMAIL` must be an address verified under **Senders
+   & IP**. Do not use the generated SMTP login address (for example, an address
+   ending in `@smtp-brevo.com`) as the sender unless Brevo separately shows it
+   as verified. The SMTP login belongs in `EMAIL_HOST_USER` only.
+
 3. Create a Cloudflare Origin CA certificate that covers
    `api.drmustafa.dev`. Paste the certificate and private key on the VPS, then
    restrict the key permissions:
@@ -175,8 +180,9 @@ Backups are stored under `/srv/yalla/backups` with checksums and the deployed
 Git revision. A backup on the same VPS is not disaster recovery, so retain
 Hostinger snapshots or copy backups to separate storage.
 
-After pushing a tested change to the GitHub `main` branch, update production
-with one command:
+After committing and pushing a tested change to the GitHub `main` branch, go to
+**hPanel → VPS → Manage → Terminal** (not a container shell) and update
+production with:
 
 ```bash
 cd /opt/yalla_backend
@@ -186,6 +192,8 @@ cd /opt/yalla_backend
 The update script refuses a dirty checkout or a branch other than `main`, takes
 a PostgreSQL backup when the database is already running, performs a
 fast-forward-only Git update, and waits for the new stack to become healthy.
+The server's ignored `.env.production` file and persistent `/srv/yalla` data are
+not replaced by `git fetch` or the image rebuild.
 Useful diagnostics are:
 
 ```bash

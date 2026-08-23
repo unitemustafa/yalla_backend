@@ -16,6 +16,7 @@ x-backend-environment: &backend-environment
   MEDIA_URL: https://api.${DOMAIN}/media/
   PRIVATE_MEDIA_X_ACCEL_REDIRECT: "True"
   PRIVATE_MEDIA_INTERNAL_URL: /_protected-media/
+  DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:?Set DEFAULT_FROM_EMAIL in .env.production}
   DEPLOYMENT_REVISION: ${DEPLOYMENT_REVISION:-unknown}
 
 x-logging: &default-logging
