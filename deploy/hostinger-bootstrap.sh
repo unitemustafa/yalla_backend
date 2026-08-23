@@ -80,8 +80,6 @@ install -d -m 0755 \
     /srv/yalla/media/private \
     /srv/yalla/static \
     /srv/yalla/postgres \
-    /srv/yalla/redis/core \
-    /srv/yalla/redis/cache \
     /srv/yalla/tls
 install -d -m 0700 /srv/yalla/backups
 

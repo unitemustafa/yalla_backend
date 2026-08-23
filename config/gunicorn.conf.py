@@ -27,6 +27,12 @@ max_requests_jitter = _positive_int("GUNICORN_MAX_REQUESTS_JITTER", 100)
 accesslog = "-"
 errorlog = "-"
 capture_output = True
+
+# Gunicorn 26 enables a local control socket by default. Containers are
+# immutable outside the mounted data directories and this deployment does not
+# use the control interface, so disable it instead of writing under /app.
+control_socket_disable = True
+
 access_log_format = (
     '%({x-forwarded-for}i)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s '
     'duration=%(L)s "%(f)s" "%(a)s"'

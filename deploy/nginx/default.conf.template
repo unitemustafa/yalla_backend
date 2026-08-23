@@ -2,6 +2,10 @@ real_ip_header CF-Connecting-IP;
 real_ip_recursive on;
 server_tokens off;
 ssl_protocols TLSv1.2 TLSv1.3;
+limit_req_zone $binary_remote_addr zone=api_per_ip:10m rate=30r/s;
+limit_conn_zone $binary_remote_addr zone=api_connections:10m;
+limit_req_status 429;
+limit_conn_status 429;
 set_real_ip_from 173.245.48.0/20;
 set_real_ip_from 103.21.244.0/22;
 set_real_ip_from 103.22.200.0/22;
@@ -26,33 +30,28 @@ set_real_ip_from 2a06:98c0::/29;
 set_real_ip_from 2c0f:f248::/32;
 
 server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+
+server {
     listen 80;
     listen [::]:80;
-    server_name api.${DOMAIN} media.${DOMAIN};
+    server_name api.${DOMAIN};
     return 301 https://$host$request_uri;
 }
 
 server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    server_name media.${DOMAIN};
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
 
     ssl_certificate /etc/nginx/tls/origin.pem;
     ssl_certificate_key /etc/nginx/tls/origin.key;
 
-    sendfile on;
-    tcp_nopush on;
-
-    location ^~ /media/ {
-        alias /srv/yalla/media/public/;
-        add_header Cache-Control "public, max-age=31536000, immutable" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        limit_except GET HEAD { deny all; }
-    }
-
-    location / {
-        return 404;
-    }
+    return 444;
 }
 
 server {
@@ -64,6 +63,16 @@ server {
     ssl_certificate_key /etc/nginx/tls/origin.key;
 
     client_max_body_size 55m;
+
+    sendfile on;
+    tcp_nopush on;
+
+    location ^~ /media/ {
+        alias /srv/yalla/media/public/;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        limit_except GET HEAD { deny all; }
+    }
 
     location ^~ /static/ {
         alias /srv/yalla/static/;
@@ -79,6 +88,8 @@ server {
     }
 
     location / {
+        limit_req zone=api_per_ip burst=60 nodelay;
+        limit_conn api_connections 30;
         proxy_pass http://django:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

@@ -7,19 +7,18 @@ x-backend-environment: &backend-environment
   DATABASE_URL: postgresql://yalla@postgres:5432/yalla
   DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
   DATABASE_SSL_REQUIRE: "False"
-  RATE_LIMIT_REDIS_URL: redis://redis-core:6379/1
-  RATE_LIMIT_MODE: enforce
+  RATE_LIMIT_REDIS_URL: ""
+  RATE_LIMIT_MODE: "off"
   RATE_LIMIT_CLIENT_IP_HEADER: HTTP_CF_CONNECTING_IP
   RATE_LIMIT_TRUSTED_PROXY_CIDRS: ${RATE_LIMIT_TRUSTED_PROXY_CIDRS:-172.30.0.0/24}
-  CELERY_BROKER_URL: redis://redis-core:6379/0
-  CACHE_REDIS_URL: redis://redis-cache:6379/0
-  API_CACHE_ENABLED: "True"
+  CACHE_REDIS_URL: ""
+  API_CACHE_ENABLED: "False"
   PUBLIC_MEDIA_ROOT: /srv/yalla/media/public
   PRIVATE_MEDIA_ROOT: /srv/yalla/media/private
-  MEDIA_URL: https://media.${DOMAIN}/media/
+  MEDIA_URL: https://api.${DOMAIN}/media/
   PRIVATE_MEDIA_X_ACCEL_REDIRECT: "True"
   PRIVATE_MEDIA_INTERNAL_URL: /_protected-media/
-  PUSH_DELIVERY_ASYNC: "True"
+  PUSH_DELIVERY_ASYNC: "False"
   DEPLOYMENT_REVISION: ${DEPLOYMENT_REVISION:-unknown}
 
 x-logging: &default-logging
@@ -43,10 +42,6 @@ x-backend-service: &backend-service
     - ${YALLA_DATA_ROOT:-/srv/yalla}/static:/app/staticfiles
   depends_on:
     postgres:
-      condition: service_healthy
-    redis-core:
-      condition: service_healthy
-    redis-cache:
       condition: service_healthy
   networks:
     - internal
@@ -96,10 +91,6 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
-      redis-core:
-        condition: service_healthy
-      redis-cache:
-        condition: service_healthy
 
   nginx:
     image: nginx:1.28-alpine
@@ -145,31 +136,6 @@ services:
       retries: 5
       start_period: 30s
 
-  celery-worker:
-    <<: *backend-service
-    command: ["celery", "-A", "config", "worker", "--loglevel=INFO"]
-    depends_on:
-      django:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "celery -A config inspect ping --timeout=5 | grep -q pong"]
-      interval: 60s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-  celery-beat:
-    <<: *backend-service
-    command: ["celery", "-A", "config", "beat", "--loglevel=INFO"]
-    depends_on:
-      django:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "sh", "-c", "kill -0 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -187,52 +153,6 @@ services:
     networks:
       - internal
     stop_grace_period: 60s
-    logging: *default-logging
-
-  redis-core:
-    image: redis:8-alpine
-    restart: unless-stopped
-    command:
-      - redis-server
-      - --appendonly
-      - "yes"
-      - --maxmemory
-      - "0"
-      - --maxmemory-policy
-      - noeviction
-    volumes:
-      - ${YALLA_DATA_ROOT:-/srv/yalla}/redis/core:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    networks:
-      - internal
-    stop_grace_period: 30s
-    logging: *default-logging
-
-  redis-cache:
-    image: redis:8-alpine
-    restart: unless-stopped
-    command:
-      - redis-server
-      - --appendonly
-      - "yes"
-      - --maxmemory
-      - 512mb
-      - --maxmemory-policy
-      - allkeys-lru
-    volumes:
-      - ${YALLA_DATA_ROOT:-/srv/yalla}/redis/cache:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    networks:
-      - internal
-    stop_grace_period: 30s
     logging: *default-logging
 
 networks:

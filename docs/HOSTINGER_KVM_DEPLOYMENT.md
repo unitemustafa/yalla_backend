@@ -2,9 +2,8 @@
 
 This deployment runs the backend API independently. The admin dashboard and
 mobile applications are API consumers and are not part of this Compose stack.
-PostgreSQL, both Redis instances, public media, private order media, and static
-files stay outside the checkout, so rebuilding the backend image does not
-remove persistent data.
+PostgreSQL, public media, private order media, and static files stay outside the
+checkout, so rebuilding the backend image does not remove persistent data.
 
 ## Quick start from GitHub
 
@@ -33,11 +32,10 @@ key, or any other production credential to GitHub.
 
 ## Production configuration
 
-1. Generate three independent values and paste them into `POSTGRES_PASSWORD`,
-   `SECRET_KEY`, and `RATE_LIMIT_KEY_SECRET` in `.env.production`:
+1. Generate independent values and paste them into `POSTGRES_PASSWORD` and
+   `SECRET_KEY` in `.env.production`:
 
    ```bash
-   openssl rand -hex 32
    openssl rand -hex 32
    openssl rand -hex 32
    ```
@@ -61,8 +59,8 @@ key, or any other production credential to GitHub.
    `.env` file to GitHub.
 
 3. Create a Cloudflare Origin CA certificate that covers
-   `api.drmustafa.dev` and `media.drmustafa.dev`. Paste the certificate and
-   private key on the VPS, then restrict the key permissions:
+   `api.drmustafa.dev`. Paste the certificate and private key on the VPS, then
+   restrict the key permissions:
 
    ```bash
    nano /srv/yalla/tls/origin.pem
@@ -71,15 +69,15 @@ key, or any other production credential to GitHub.
    chmod 600 /srv/yalla/tls/origin.key
    ```
 
-4. In Cloudflare, create proxied `A` records named `api` and `media` pointing
-   to the VPS IP, and set SSL/TLS encryption mode to **Full (Strict)**.
+4. In Cloudflare, create one proxied `A` record named `api` pointing to the VPS
+   IP, and set SSL/TLS encryption mode to **Full (Strict)**.
 
 5. In the Hostinger VPS firewall, allow inbound TCP 22, 80, and 443. Restrict
-   port 22 to the administrator's IP when practical. PostgreSQL and Redis are
-   private Compose services and must not be published.
+   port 22 to the administrator's IP when practical. PostgreSQL is a private
+   Compose service and must not be published.
 
-If `172.30.0.0/24` conflicts with an existing host network, change both the
-Compose subnet and `RATE_LIMIT_TRUSTED_PROXY_CIDRS` to the same private subnet.
+If `172.30.0.0/24` conflicts with an existing host network, change the Compose
+subnet.
 
 ## First cutover
 
@@ -105,8 +103,8 @@ Compose subnet and `RATE_LIMIT_TRUSTED_PROXY_CIDRS` to the same private subnet.
 
 5. Run
    `docker compose --env-file .env.production exec django python manage.py audit_media`.
-6. Verify `/healthz/`, `/readyz/`, Celery worker/beat status, public media, and
-   protected order media before moving traffic.
+6. Verify `/healthz/`, `/readyz/`, public media, and protected order media
+   before moving traffic.
 
 The initial Cloudinary retirement assumes old remote media is disposable. Only
 after the snapshot and database backup, clear missing references with:
@@ -121,18 +119,18 @@ operation.
 ## Cloudflare
 
 - Set SSL/TLS mode to **Full (Strict)**.
-- Proxy the API and media DNS records.
+- Proxy the API DNS record.
 - Keep the trusted proxy ranges at the top of the Nginx template synchronized
   with Cloudflare's official [IPv4](https://www.cloudflare.com/ips-v4/) and
   [IPv6](https://www.cloudflare.com/ips-v6/) lists. Nginx rewrites the client
   address only for those source networks, preventing direct callers from
   spoofing `CF-Connecting-IP`.
-- Add a Cache Rule only for `media.<domain>/media/*`: eligible for cache, Edge
+- Add a Cache Rule only for `api.<domain>/media/*`: eligible for cache, Edge
   TTL 30 days, Browser TTL respects the origin. The origin sends one-year
   immutable browser caching because every new upload has a new UUID filename.
-- Add a bypass rule for `api.<domain>/*`. In particular, never cache
-  `/_protected-media/*`; Nginx marks that location `internal` and Django sends
-  `private, no-store` on authorized responses.
+- Add a bypass rule for all other `api.<domain>/*` paths. In particular, never
+  cache `/_protected-media/*`; Nginx marks that location `internal` and Django
+  sends `private, no-store` on authorized responses.
 
 Confirm a repeated public-media request returns `CF-Cache-Status: HIT` and that
 direct access to `https://api.<domain>/_protected-media/...` returns 404.
@@ -140,13 +138,13 @@ direct access to `https://api.<domain>/_protected-media/...` returns 404.
 ## Consumer cutover
 
 The admin dashboard and both Flutter applications connect to this deployment
-through `https://api.<domain>`; they never connect to PostgreSQL, Redis, or the
-Docker network. Protected media requests must include the Bearer access token.
+through `https://api.<domain>`; they never connect to PostgreSQL or the Docker
+network. Protected media requests must include the Bearer access token.
 The API never returns a private filesystem path.
 
 Public catalog URLs are stable UUID paths. Remove Cloudinary URL rewriting in
-each consumer. Keep `media.<domain>` in the admin dashboard's Next Image remote
-patterns. The two Flutter apps should share a
+each consumer and allow `api.<domain>/media/*` in image configuration. The two
+Flutter apps should share a
 90-day, 1000-object disk cache; the Home app must not rely on `Image.network`'s
 memory-only cache.
 
@@ -154,8 +152,14 @@ memory-only cache.
 
 Run `deploy/check-storage.sh` from monitoring or cron. It reports disk and inode
 usage at 70%, 80%, and 90%; warning/critical states use non-zero exit codes.
-Also monitor `/readyz/`, container health, PostgreSQL, both Redis instances,
-Celery worker/beat, and the size of `/srv/yalla/media`.
+Also monitor `/readyz/`, container health, PostgreSQL, and the size of
+`/srv/yalla/media`.
+
+Install the included daily PostgreSQL and media backup timer once on the VPS:
+
+```bash
+./deploy/install-systemd-units.sh
+```
 
 Before an important release, create a database backup; add `--with-media` for a
 full local media archive:
@@ -184,7 +188,7 @@ Useful diagnostics are:
 
 ```bash
 docker compose --env-file .env.production ps
-docker compose --env-file .env.production logs --tail=200 django nginx celery-worker
+docker compose --env-file .env.production logs --tail=200 django nginx postgres
 ```
 
 For rollback, restore the previous backend image tag and run

@@ -1,0 +1,13 @@
+[Unit]
+Description=Yalla PostgreSQL and media backup
+Requires=docker.service
+After=docker.service
+ConditionPathExists=/opt/yalla_backend/.env.production
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/yalla_backend
+ExecStart=/opt/yalla_backend/deploy/backup.sh /opt/yalla_backend/.env.production --with-media
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

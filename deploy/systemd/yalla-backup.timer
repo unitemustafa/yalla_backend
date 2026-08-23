@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Yalla backup every day
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+Unit=yalla-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -170,17 +170,10 @@ if DATABASE_PASSWORD:
     DATABASES["default"]["PASSWORD"] = DATABASE_PASSWORD
 
 
-# Distributed rate limiting. The limiter is disabled by default so local
-# development never requires Redis. Production enables it explicitly through
-# RATE_LIMIT_MODE after provisioning a non-sharded Redis/Valkey primary.
+# The application limiter is optional. This deployment keeps it disabled and
+# enforces coarse per-IP limits at Nginx, so production does not require Redis.
 RATE_LIMIT_REDIS_URL = os.environ.get("RATE_LIMIT_REDIS_URL", "").strip()
 RATE_LIMIT_MODE = os.environ.get("RATE_LIMIT_MODE", "off").strip().lower()
-if IS_PRODUCTION and (
-    not RATE_LIMIT_REDIS_URL or RATE_LIMIT_MODE != "enforce"
-):
-    raise ImproperlyConfigured(
-        "Production requires RATE_LIMIT_REDIS_URL and RATE_LIMIT_MODE=enforce."
-    )
 RATE_LIMIT_ENFORCE_SCOPES = tuple(
     item.strip()
     for item in os.environ.get("RATE_LIMIT_ENFORCE_SCOPES", "").split(",")
@@ -300,30 +293,37 @@ CACHES = {
             "LOCATION": "yalla-default-cache",
         }
     ),
-    "rate_limit": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": RATE_LIMIT_REDIS_URL or "redis://127.0.0.1:6379/1",
-        "TIMEOUT": None,
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            "IGNORE_EXCEPTIONS": False,
-            "SOCKET_CONNECT_TIMEOUT": float(
-                os.environ.get("RATE_LIMIT_CONNECT_TIMEOUT", "0.5")
-            ),
-            "SOCKET_TIMEOUT": float(
-                os.environ.get("RATE_LIMIT_SOCKET_TIMEOUT", "0.2")
-            ),
-            "CONNECTION_POOL_KWARGS": {
-                "max_connections": int(
-                    os.environ.get("RATE_LIMIT_MAX_CONNECTIONS", "20")
+    "rate_limit": (
+        {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": RATE_LIMIT_REDIS_URL,
+            "TIMEOUT": None,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "IGNORE_EXCEPTIONS": False,
+                "SOCKET_CONNECT_TIMEOUT": float(
+                    os.environ.get("RATE_LIMIT_CONNECT_TIMEOUT", "0.5")
                 ),
-                "health_check_interval": int(
-                    os.environ.get("RATE_LIMIT_HEALTH_CHECK_INTERVAL", "30")
+                "SOCKET_TIMEOUT": float(
+                    os.environ.get("RATE_LIMIT_SOCKET_TIMEOUT", "0.2")
                 ),
-                "retry_on_timeout": False,
+                "CONNECTION_POOL_KWARGS": {
+                    "max_connections": int(
+                        os.environ.get("RATE_LIMIT_MAX_CONNECTIONS", "20")
+                    ),
+                    "health_check_interval": int(
+                        os.environ.get("RATE_LIMIT_HEALTH_CHECK_INTERVAL", "30")
+                    ),
+                    "retry_on_timeout": False,
+                },
             },
-        },
-    },
+        }
+        if RATE_LIMIT_REDIS_URL
+        else {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "yalla-disabled-rate-limit-cache",
+        }
+    ),
     "geocoding": (
         {
             "BACKEND": "django_redis.cache.RedisCache",
@@ -501,10 +501,6 @@ PUSH_DELIVERY_ASYNC = os.environ.get(
     "PUSH_DELIVERY_ASYNC",
     "True" if IS_PRODUCTION else "False",
 ).lower() == "true"
-if IS_PRODUCTION and not PUSH_DELIVERY_ASYNC:
-    raise ImproperlyConfigured(
-        "PUSH_DELIVERY_ASYNC must be True in production."
-    )
 PUSH_OUTBOX_MAX_ATTEMPTS = int(
     os.environ.get("PUSH_OUTBOX_MAX_ATTEMPTS", "6")
 )

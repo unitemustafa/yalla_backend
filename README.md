@@ -15,7 +15,7 @@ administrative reporting.
 - Region-aware markets, catalogs, offers, addresses, and delivery pricing
 - Multi-market orders with authoritative pricing and audited status changes
 - Persistent notifications with Firebase Cloud Messaging delivery
-- Redis-backed distributed rate limiting for production traffic
+- Nginx shared-memory request limiting for production traffic
 - Versioned REST APIs with an OpenAPI schema and protected Swagger UI
 - Health and readiness endpoints for production orchestration
 - Structured JSON logs with request IDs
@@ -28,8 +28,8 @@ administrative reporting.
 | Web framework | Django 6 and Django REST Framework |
 | Authentication | Simple JWT with custom database-state validation |
 | Database | PostgreSQL |
-| Cache and broker | Redis or Valkey |
-| Background jobs | Celery and Celery Beat |
+| Request limiting | Nginx shared memory |
+| Push delivery | Synchronous Firebase delivery |
 | Media storage | Persistent filesystem, Nginx, and Cloudflare CDN |
 | Push notifications | Firebase Cloud Messaging |
 | API documentation | drf-spectacular and OpenAPI |
@@ -42,8 +42,6 @@ administrative reporting.
 
 - Python 3.13
 - PostgreSQL
-- Redis or Valkey only when testing background jobs or distributed rate
-  limiting locally
 
 ### 1. Create a virtual environment
 
@@ -136,7 +134,7 @@ Application authorization is based on `role`. Django's `is_staff` and
 | Endpoint | Description | Access |
 | --- | --- | --- |
 | `/health/` | Process liveness | Public |
-| `/readyz/` | Database and configured Redis readiness | Public |
+| `/readyz/` | Database readiness | Public |
 | `/api/schema/` | OpenAPI schema | Admin JWT |
 | `/api/docs/` | Swagger UI | Admin JWT |
 | `/api/v1/` | Stable consumer API | Authenticated by default |
@@ -168,22 +166,11 @@ Reusable read queries belong in selectors, while serializers and views own the
 HTTP contract. Preserve existing imports and version 1 response shapes when
 splitting large modules or introducing version 2 behavior.
 
-## Background services
+## Push delivery
 
-Local development defaults to synchronous push dispatch and does not require
-Redis. To exercise asynchronous notification delivery, configure
-`CELERY_BROKER_URL` or `RATE_LIMIT_REDIS_URL`, set
-`PUSH_DELIVERY_ASYNC=True`, and run:
-
-```bash
-celery -A config worker --loglevel=INFO
-celery -A config beat --loglevel=INFO
-```
-
-The worker delivers retryable Firebase messages. Celery Beat republishes
-pending outbox entries and recovers expired processing leases, so a temporary
-broker or worker outage delays notifications without losing the committed
-business operation.
+The production stack sends Firebase notifications synchronously and does not
+run a broker or background worker. Push failures are logged without rolling
+back the business request.
 
 ## Environment configuration
 
@@ -198,12 +185,11 @@ request-size, Gunicorn, and rate-policy variables have safe defaults in
 | `DATABASE_URL` | PostgreSQL connection URL |
 | `ALLOWED_HOSTS` | Comma-separated production host names |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated HTTPS dashboard origins |
-| `RATE_LIMIT_REDIS_URL` | Dedicated, non-sharded Redis or Valkey connection |
-| `RATE_LIMIT_MODE` | `off`, `observe`, or `enforce`; production requires `enforce` |
-| `CELERY_BROKER_URL` | Core Redis broker used by Celery |
-| `CACHE_REDIS_URL` | Dedicated Redis instance for short-lived API response caching |
+| `RATE_LIMIT_MODE` | Keep `off` when Nginx request limiting is enabled |
+| `PUSH_DELIVERY_ASYNC` | Keep `False` for direct Firebase delivery |
+| `API_CACHE_ENABLED` | Keep `False` in the Redis-free production stack |
 | `PUBLIC_MEDIA_ROOT` / `PRIVATE_MEDIA_ROOT` | Persistent public and protected media directories |
-| `MEDIA_URL` | Public media base URL, normally the media subdomain |
+| `MEDIA_URL` | Public media base URL under the API domain |
 | `FIREBASE_SERVICE_ACCOUNT_BASE64` | Preferred Base64-encoded Firebase service-account JSON |
 | `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS` | SMTP relay connection used for OTP email |
 | `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | SMTP login and secret used for OTP email |
@@ -248,8 +234,7 @@ celery -A config beat --loglevel=INFO
 ```
 
 The provided `Dockerfile` starts only the web process and intentionally does
-not run migrations. The `Procfile` defines separate `release`, `web`, `worker`,
-and `beat` process types.
+not run migrations.
 
 For the production Docker stack, copy `.env.production.example` to
 `.env.production`, replace every placeholder, install the TLS files described
@@ -265,10 +250,10 @@ GitHub `main` branch with `deploy/production-update.sh`; it creates a database
 backup before updating. Use `deploy/backup.sh --with-media` when a release also
 needs a local media archive.
 
-The Compose stack contains only backend infrastructure: Nginx, Django,
-PostgreSQL, Redis, Celery, persistent media, and static files. The admin
-dashboard and Flutter applications remain independent clients and connect over
-HTTPS through `api.<domain>` and `media.<domain>`.
+The Compose stack contains Nginx, Django, PostgreSQL, persistent media, and
+static files. The admin dashboard and Flutter applications remain independent
+clients and connect over HTTPS through `api.<domain>`; public media lives at
+`api.<domain>/media/`.
 
 Before every release, back up PostgreSQL, verify that the backup can be restored
 to a separate database, review migration SQL, deploy migrations, deploy all
@@ -279,6 +264,6 @@ application image for rollback.
 ## Additional documentation
 
 - [`docs/API_REPORT.md`](docs/API_REPORT.md) — detailed endpoint and integration reference
-- [`docs/RATE_LIMITING.md`](docs/RATE_LIMITING.md) — Redis rate-limiting operations
+- [`docs/RATE_LIMITING.md`](docs/RATE_LIMITING.md) — optional application rate-limiter internals
 - [`docs/Yalla System APIs.postman_collection.json`](docs/Yalla%20System%20APIs.postman_collection.json) — Postman collection
 - [`openapi.yml`](openapi.yml) — generated OpenAPI contract
