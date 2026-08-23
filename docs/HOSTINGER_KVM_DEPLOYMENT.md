@@ -47,12 +47,14 @@ key, or any other production credential to GitHub.
    ```dotenv
    DOMAIN=drmustafa.dev
    ALLOWED_HOSTS=api.drmustafa.dev
-   CORS_ALLOWED_ORIGINS=https://drmustafa.dev
-   CSRF_TRUSTED_ORIGINS=https://api.drmustafa.dev,https://drmustafa.dev
+   CORS_ALLOWED_ORIGINS=https://drmustafa.dev,http://localhost:3000,https://yalla-admin-smoky.vercel.app
+   CSRF_TRUSTED_ORIGINS=https://api.drmustafa.dev,https://drmustafa.dev,http://localhost:3000,https://yalla-admin-smoky.vercel.app
    ```
 
-   If the React dashboard is hosted at another HTTPS origin, add that exact
-   origin to both comma-separated origin lists where appropriate. Keep
+   Origins must not include a trailing slash. Vercel redirects HTTP to HTTPS,
+   so use its HTTPS origin even if an HTTP URL was entered initially. If the
+   React dashboard is hosted at another HTTPS origin, add that exact origin to
+   both comma-separated origin lists where appropriate. Keep
    `DEBUG=False` and `AUTH_OTP_INCLUDE_IN_RESPONSE=False`. Copy the real
    `FIREBASE_SERVICE_ACCOUNT_BASE64`, SMTP, sender-address, and Geoapify values
    from the secure production configuration; do not copy the development

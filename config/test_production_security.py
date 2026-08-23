@@ -47,6 +47,24 @@ class ProductionSecuritySettingsTests(SimpleTestCase):
         result = self._import_settings()
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_production_accepts_http_loopback_cors_origin(self):
+        result = self._import_settings(
+            CORS_ALLOWED_ORIGINS=(
+                "https://dashboard.example.test,http://localhost:3000"
+            )
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_refuses_http_remote_cors_origin(self):
+        result = self._import_settings(
+            CORS_ALLOWED_ORIGINS="http://dashboard.example.test"
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "HTTP is allowed only for localhost",
+            result.stderr,
+        )
+
     def test_production_refuses_otp_in_api_responses(self):
         result = self._import_settings(AUTH_OTP_INCLUDE_IN_RESPONSE="True")
         self.assertNotEqual(result.returncode, 0)

@@ -184,7 +184,7 @@ request-size, Gunicorn, and rate-policy variables have safe defaults in
 | `SECRET_KEY` | Unique secret with at least 50 characters in production |
 | `DATABASE_URL` | PostgreSQL connection URL |
 | `ALLOWED_HOSTS` | Comma-separated production host names |
-| `CORS_ALLOWED_ORIGINS` | Comma-separated HTTPS dashboard origins |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated HTTPS dashboard origins; HTTP is allowed only for local loopback development |
 | `RATE_LIMIT_MODE` | Keep `off` when Nginx request limiting is enabled |
 | `PUSH_DELIVERY_ASYNC` | Keep `False` for direct Firebase delivery |
 | `API_CACHE_ENABLED` | Keep `False` in the Redis-free production stack |

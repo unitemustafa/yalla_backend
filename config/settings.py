@@ -5,6 +5,8 @@ Django settings for config project.
 from datetime import timedelta
 from pathlib import Path
 import os
+from urllib.parse import urlsplit
+
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
@@ -45,6 +47,33 @@ def _environment_list(name, default=""):
     ]
 
 
+def _is_allowed_production_cors_origin(origin):
+    try:
+        parsed = urlsplit(origin)
+        parsed.port
+    except ValueError:
+        return False
+
+    if (
+        not parsed.netloc
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+        or parsed.username
+        or parsed.password
+    ):
+        return False
+
+    if parsed.scheme == "https":
+        return True
+
+    return parsed.scheme == "http" and parsed.hostname in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }
+
+
 ALLOWED_HOSTS = _environment_list(
     "ALLOWED_HOSTS",
     "localhost,127.0.0.1" if not IS_PRODUCTION else "",
@@ -67,9 +96,13 @@ if IS_PRODUCTION:
         raise ImproperlyConfigured(
             "CORS_ALLOWED_ORIGINS must contain the dashboard HTTPS origin."
         )
-    if any(not origin.startswith("https://") for origin in CORS_ALLOWED_ORIGINS):
+    if any(
+        not _is_allowed_production_cors_origin(origin)
+        for origin in CORS_ALLOWED_ORIGINS
+    ):
         raise ImproperlyConfigured(
-            "Every production CORS_ALLOWED_ORIGINS value must use HTTPS."
+            "Production CORS origins must use HTTPS; HTTP is allowed only "
+            "for localhost and loopback development origins."
         )
 
 SECURE_SSL_REDIRECT = IS_PRODUCTION
