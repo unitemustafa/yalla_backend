@@ -200,17 +200,6 @@ def send_notifications_push(
     ordered_ids = list(dict.fromkeys(int(value) for value in notification_ids))
     if not ordered_ids:
         return PushDeliveryResult(frozenset(), frozenset(), frozenset())
-    if getattr(settings, "PUSH_DELIVERY_ASYNC", False):
-        from .outbox import enqueue_notification_push
-
-        return [
-            enqueue_notification_push(
-                notification_id,
-                high_priority=high_priority,
-                android_channel_id=android_channel_id,
-            )
-            for notification_id in ordered_ids
-        ]
     notifications_by_id = {
         notification.id: notification
         for notification in Notification.objects.filter(
@@ -329,14 +318,6 @@ def send_notification_push(
     high_priority=False,
     android_channel_id=None,
 ):
-    if getattr(settings, "PUSH_DELIVERY_ASYNC", False):
-        from .outbox import enqueue_notification_push
-
-        return enqueue_notification_push(
-            notification_id,
-            high_priority=high_priority,
-            android_channel_id=android_channel_id,
-        )
     try:
         return _send_notification_push_now(
             notification_id,
@@ -344,9 +325,7 @@ def send_notification_push(
             android_channel_id=android_channel_id,
         )
     except Exception:
-        # Preserve the legacy synchronous contract: FCM failure must never
-        # fail the business request. The outbox worker calls the private
-        # function directly so production failures still trigger retries.
+        # FCM failure must never fail the committed business request.
         return None
 
 
@@ -377,14 +356,6 @@ def _send_account_restored_push_now(notification_id):
 
 
 def send_account_restored_push(notification_id):
-    if getattr(settings, "PUSH_DELIVERY_ASYNC", False):
-        from .models import PushOutbox
-        from .outbox import enqueue_notification_push
-
-        return enqueue_notification_push(
-            notification_id,
-            kind=PushOutbox.Kind.ACCOUNT_RESTORED,
-        )
     return _send_account_restored_push_now(notification_id)
 
 
@@ -417,10 +388,6 @@ def _send_account_disabled_event_now(user_id):
 
 
 def send_account_disabled_event(user_id):
-    if getattr(settings, "PUSH_DELIVERY_ASYNC", False):
-        from .outbox import enqueue_account_disabled_push
-
-        return enqueue_account_disabled_push(user_id)
     return _send_account_disabled_event_now(user_id)
 
 
@@ -461,14 +428,6 @@ def _send_courier_notification_push_now(notification_id):
 
 
 def send_courier_notification_push(notification_id):
-    if getattr(settings, "PUSH_DELIVERY_ASYNC", False):
-        from .models import PushOutbox
-        from .outbox import enqueue_notification_push
-
-        return enqueue_notification_push(
-            notification_id,
-            kind=PushOutbox.Kind.COURIER_NOTIFICATION,
-        )
     return _send_courier_notification_push_now(notification_id)
 
 
@@ -492,8 +451,4 @@ def _send_delivery_area_status_changed_event_now(area_id, is_active):
 
 
 def send_delivery_area_status_changed_event(area_id, is_active):
-    if getattr(settings, "PUSH_DELIVERY_ASYNC", False):
-        from .outbox import enqueue_delivery_area_status_push
-
-        return enqueue_delivery_area_status_push(area_id, is_active)
     return _send_delivery_area_status_changed_event_now(area_id, is_active)

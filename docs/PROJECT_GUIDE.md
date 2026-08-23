@@ -20,8 +20,7 @@ The production stack is:
 | API layer | Django REST Framework | Authentication, permissions, serializers, views, and API responses |
 | Authentication | Simple JWT | Access/refresh tokens, rotation, blacklisting, and custom session claims |
 | Database | PostgreSQL | Authoritative application state and relational integrity |
-| Cache and coordination | Redis/Valkey | Distributed rate limiting, Celery broker, and geocoding cache |
-| Background work | Celery | Reliable asynchronous push delivery and retry processing |
+| Edge and request protection | Cloudflare and Nginx | TLS termination, trusted client IPs, static/media delivery, and shared request limits |
 | Media | Persistent filesystem, Nginx, and Cloudflare | Public catalog media and protected order media |
 | Push notifications | Firebase Cloud Messaging | Mobile events for clients and representatives |
 | API documentation | drf-spectacular | Generated OpenAPI schema and protected Swagger UI |
@@ -54,7 +53,7 @@ DRF authentication
   - validate account, verification, token version, and session deadline
     |
     v
-DRF permissions and distributed rate limiting
+DRF permissions and optional process-local rate limiting
     |
     v
 View
@@ -77,7 +76,7 @@ transaction.on_commit callbacks
   - create or publish side effects only after the business transaction commits
     |
     v
-Celery -> Firebase Cloud Messaging
+Firebase Cloud Messaging
 ```
 
 Three rules explain much of the codebase:
@@ -96,10 +95,10 @@ Three rules explain much of the codebase:
 | `catalog/` | Categories, subcategories, product attributes, variants, additions, images, and product likes |
 | `offers/` | Offer scope, schedule, products/items, discounts, announcement metadata, and offer images |
 | `orders/` | Checkout preview, server-side pricing, order creation, review, assignment, delivery state, and history |
-| `notifications/` | Persisted inbox, dispatch records, FCM devices, transactional push outbox, and Celery tasks |
+| `notifications/` | Persisted inbox, dispatch records, FCM devices, and post-commit push delivery |
 | `dashboard/` | Dashboard branding/settings, business metrics, and demo data seeders |
 | `partners/` | Customer partnership applications and the admin review workflow |
-| `config/` | Settings, URL composition, pagination, rate limits, request limits, health checks, logging, schema, Celery, WSGI, and ASGI |
+| `config/` | Settings, URL composition, pagination, rate limits, request limits, health checks, logging, schema, WSGI, and ASGI |
 | `docs/` | Human-maintained API/reporting documentation and the Postman collection |
 | `openapi.yml` | Generated API contract; do not edit it manually |
 | `.github/workflows/backend-ci.yml` | The production verification pipeline |
@@ -509,28 +508,18 @@ Offer, product, market, and delivery-area broadcast workflows use dispatch model
 
 Broadcast recipient selection is region-aware. A notification about a city-scoped offer or market should not be sent to unrelated customers.
 
-### 9.3 The transactional outbox pattern
+### 9.3 Post-commit push delivery
 
-Directly sending to Firebase inside a database transaction is unsafe: the push can succeed while the database later rolls back, or the database can commit while Firebase is temporarily unavailable.
-
-The project therefore writes `PushOutbox` in the same transaction as the notification intent:
+Directly sending to Firebase inside a database transaction is unsafe because the push can succeed while the database later rolls back. Push callbacks are therefore registered with `transaction.on_commit`:
 
 ```text
 Business mutation
     -> Notification / domain data
-    -> PushOutbox(status=pending)
 COMMIT
-    -> publish Celery task
-    -> worker claims outbox row
     -> send FCM
-    -> completed
-       or pending with exponential backoff
-       or failed after the configured attempt limit
 ```
 
-The worker uses a processing lease and row lock to reduce duplicate delivery. Retry delay grows exponentially and is capped at 15 minutes. Celery beat runs every minute to republish pending rows and recover processing leases older than 15 minutes.
-
-Production therefore needs both worker and beat processes. Redis or worker downtime delays push delivery but must not roll back the committed business operation.
+Firebase failures are logged and do not roll back the committed business operation. The mobile applications refresh their persisted notification inbox when they reopen, which remains the fallback when a push cannot be delivered.
 
 ## 10. Dashboard and Partner Applications
 
@@ -643,15 +632,15 @@ Images are verified by decoding their metadata with Pillow. Supported formats ar
 
 ## 13. Rate Limiting and Abuse Protection
 
-The project uses a Redis Lua script so multiple rules can be evaluated and consumed atomically. Policies can use fixed or sliding windows and identities such as IP, authenticated user, normalized email/phone identifier, refresh-token fingerprint, or a global provider key.
+Nginx provides the shared production request limit before traffic reaches Django. Django also includes an optional process-local limiter for focused development and tests. Policies can use fixed or sliding windows and identities such as IP, authenticated user, normalized email/phone identifier, refresh-token fingerprint, or a global provider key.
 
 Modes are:
 
-- `off`: no Redis requirement; appropriate for normal local tests.
+- `off`: skip the application limiter; required for the multi-worker production deployment.
 - `observe`: evaluate and report behavior without full enforcement.
 - `enforce`: reject requests that exceed policy.
 
-Authentication and OTP scopes can fail closed if Redis is unavailable, because silently bypassing protection on sensitive endpoints is dangerous. Other scopes can use the configured behavior. Identity values and tokens are converted into HMAC fingerprints before being used as Redis keys.
+The application limiter is intentionally not shared between Gunicorn workers. Nginx is therefore authoritative in production. Identity values and tokens are converted into HMAC fingerprints before being used as limiter keys.
 
 Proxy headers are trusted only when the socket peer belongs to configured proxy CIDRs. This prevents arbitrary callers from spoofing their source IP.
 
@@ -667,17 +656,16 @@ Important groups are:
 |---|---|
 | Core security | `APP_ENV`, `DEBUG`, `SECRET_KEY`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `CORS_ALLOWED_ORIGINS` |
 | Database | `DATABASE_URL` |
-| Rate limiting | `RATE_LIMIT_REDIS_URL`, `RATE_LIMIT_MODE`, `RATE_LIMIT_KEY_SECRET`, trusted proxy/header and policy variables |
-| Celery | `CELERY_BROKER_URL`, `PUSH_DELIVERY_ASYNC`, `PUSH_OUTBOX_MAX_ATTEMPTS` |
+| Rate limiting | `RATE_LIMIT_MODE`, `RATE_LIMIT_KEY_SECRET`, trusted proxy/header and policy variables |
 | Firebase | `FIREBASE_SERVICE_ACCOUNT_BASE64` or `FIREBASE_SERVICE_ACCOUNT_JSON` |
 | Media | `PUBLIC_MEDIA_ROOT`, `PRIVATE_MEDIA_ROOT`, `MEDIA_URL`, `PRIVATE_MEDIA_X_ACCEL_REDIRECT` |
-| API cache | `CACHE_REDIS_URL`, `API_CACHE_ENABLED`, and cache timeout/observability variables |
+| API cache | `API_CACHE_ENABLED` and cache timeout/observability variables |
 | Email | `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL` |
 | Geocoding | `GEOAPIFY_API_KEY` and timeout variables |
 | Request limits | `API_MAX_REQUEST_BODY_SIZE`, `API_SINGLE_UPLOAD_REQUEST_SIZE`, `API_PRODUCT_UPLOAD_REQUEST_SIZE` |
 | Web process | `PORT`, `WEB_CONCURRENCY`, `GUNICORN_THREADS`, timeout/keepalive/max-request variables |
 
-Production settings fail fast when important requirements are unsafe or absent. Production requires, among other things, a strong secret, exact allowed hosts, HTTPS CORS origins, PostgreSQL URL, enforced Redis rate limiting, and asynchronous push delivery.
+Production settings fail fast when important requirements are unsafe or absent. Production requires, among other things, a strong secret, exact allowed hosts, HTTPS CORS origins, and a PostgreSQL URL. Nginx supplies the shared production request limits.
 
 ### 14.1 Storage behavior
 
@@ -685,7 +673,7 @@ All environments use filesystem storage. Validated uploads are normalized to met
 
 ### 14.2 Health and observability
 
-Liveness reports process health and deployment revision without checking dependencies. Readiness checks the database and each configured rate-limit/cache Redis connection.
+Liveness reports process health and deployment revision without checking dependencies. Readiness checks the database.
 
 Every request receives a safe `X-Request-ID`, accepting a valid caller-provided ID or generating one. Logs are JSON and include this correlation ID. The formatter redacts token/password/OTP-like values and the middleware does not log request bodies.
 
@@ -709,14 +697,14 @@ python3.13 -m venv .venv
 
 Create `.env` from the project's environment template when available. If the template is not present in your checkout, derive the required local values from the configuration table above and never commit secrets.
 
-For a production-like local run, provide PostgreSQL and Redis. Then run:
+For a production-like local run, provide PostgreSQL. Then run:
 
 ```bash
 .venv/bin/python manage.py migrate
 .venv/bin/python manage.py runserver
 ```
 
-The fast isolated test suite does not require external PostgreSQL or Redis:
+The fast isolated test suite does not require external PostgreSQL:
 
 ```bash
 .venv/bin/python manage.py test --settings=config.test_settings
@@ -782,7 +770,7 @@ Run the full local suite before handing off a broad backend change:
 .venv/bin/python manage.py spectacular --settings=config.test_settings --file openapi.yml --validate
 ```
 
-CI runs with PostgreSQL 17 and Redis 7 and verifies:
+CI runs with PostgreSQL 17 and verifies:
 
 - Ruff syntax/high-confidence lint checks.
 - Migration drift.
@@ -819,8 +807,6 @@ Run processes separately:
 ```text
 release: python manage.py migrate --noinput
 web:     gunicorn --config config/gunicorn.conf.py config.wsgi:application
-worker:  celery -A config worker --loglevel=INFO
-beat:    celery -A config beat --loglevel=INFO
 ```
 
 Gunicorn uses threaded workers so bounded image processing does not block unrelated requests. Worker/thread counts and timeouts are environment-configurable.
@@ -831,7 +817,7 @@ Safe release sequence:
 2. Prove that the backup can be restored separately.
 3. Review migration SQL and data assumptions.
 4. Run migrations once as the release step.
-5. Deploy web, worker, and beat from the same application version.
+5. Deploy the web process from the reviewed application version.
 6. Check liveness and readiness.
 7. Exercise a minimal authenticated smoke test.
 8. Monitor structured logs, request IDs, queue depth, and outbox failures.
@@ -932,10 +918,6 @@ Inspect collection access and update the queryset with related loading or annota
 
 Change code/schema annotations, regenerate the file, validate it, and commit the generated diff.
 
-### Mistake: assuming a background worker alone is enough
-
-Push recovery also depends on Celery beat republishing pending/stale outbox rows.
-
 ## 20. Debugging Playbook
 
 ### An authenticated request unexpectedly returns 401
@@ -971,20 +953,16 @@ Check review status, operational status, representative role/activity/deletion, 
 Check, in order:
 
 1. Was a persisted `Notification` created?
-2. Was a valid `PushOutbox` row created?
-3. Did the surrounding database transaction commit?
-4. Is the outbox pending, processing, completed, or failed?
-5. Are Celery worker and beat running?
-6. Is Redis reachable?
-7. Is Firebase configured?
-8. Does the recipient have active device tokens?
-9. Does `last_error` explain a terminal/retryable failure?
+2. Did the surrounding database transaction commit?
+3. Is Firebase configured?
+4. Does the recipient have active device tokens?
+5. Do application logs show an FCM error?
 
 Use the request ID from the response to correlate JSON logs.
 
 ### Readiness returns 503
 
-Inspect the response's `checks` object. It distinguishes database failure from required rate-limit Redis failure.
+Inspect the response's `checks.database` value and PostgreSQL container health.
 
 ## 21. Key Source Files for Onboarding
 
@@ -997,7 +975,7 @@ Read these in order during the first few days:
 5. `locations/models.py`, `locations/coverage.py`, and the address serializer — delivery geography.
 6. `catalog/models.py`, `markets/models.py`, and `offers/models.py` — storefront data.
 7. `orders/models.py`, `orders/services.py`, `orders/selectors.py`, and focused order views — main business lifecycle.
-8. `notifications/models.py`, `notifications/outbox.py`, and `notifications/tasks.py` — reliable side effects.
+8. `notifications/models.py`, `notifications/services.py`, and `notifications/push.py` — persisted notifications and post-commit push delivery.
 9. `dashboard/services.py` — aggregation/query patterns.
 10. Relevant tests — executable documentation for permissions, state machines, and compatibility.
 

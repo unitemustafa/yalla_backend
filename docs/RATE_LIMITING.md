@@ -1,29 +1,41 @@
 # Rate limiting
 
-The API uses a dedicated, non-sharded Redis/Valkey primary. General traffic
-uses fixed windows while sensitive auth and side-effect operations use exact
-sliding windows. One Lua script evaluates every applicable policy atomically;
-rejected requests consume no quota from otherwise passing policies.
+Nginx is the authoritative production request limiter. It applies a shared
+per-client-IP limit before requests reach Gunicorn, so all Django workers see
+the same protection without another runtime service.
 
-## Deployment
+Cloudflare client IPs are accepted only when the socket peer belongs to an
+official Cloudflare network. Direct callers cannot spoof `CF-Connecting-IP`.
 
-1. Provision Redis in the same region as the API and set the TLS connection in
-   `RATE_LIMIT_REDIS_URL`.
-2. Set the ingress client-IP header and the exact trusted proxy CIDRs. The
-   header is ignored when the socket peer is not trusted.
-3. Run `python manage.py check --tag rate_limit`.
-4. Run `python manage.py check_rate_limit` to verify `PING`, `SCRIPT LOAD`, and
-   multi-key `EVALSHA` against the deployment Redis. This deliberately fails
-   on sharded/Cluster deployments, which are outside v1.
-5. Deploy with `RATE_LIMIT_MODE=observe` and review `rate_limit_blocked` logs
-   for 24-48 hours.
-6. Switch to `enforce` with `RATE_LIMIT_ENFORCE_SCOPES` listing the sensitive
-   scopes first. Remove the allowlist after a stable day to enforce every
-   configured scope. An empty allowlist means all scopes.
+## Production
 
-`observe` and `enforce` have separate Redis namespaces. Redis errors explicitly
-fail open and emit sampled `rate_limit_backend_error` logs. Set the mode to
-`off` for an immediate rollback without reverting code.
+1. Keep `RATE_LIMIT_MODE=off` in `.env.production`.
+2. Keep the Nginx shared-memory request and connection zones enabled.
+3. Run `nginx -t` after changing the proxy configuration.
+4. Run `python manage.py check --tag rate_limit` after changing policy values.
+5. Verify repeated public requests through Cloudflare and review Nginx logs.
+
+The Nginx template currently permits normal API bursts while rejecting abusive
+traffic with HTTP 429. Adjust its rate and burst together after reviewing real
+traffic; do not enable the Django limiter as a replacement in a multi-worker
+deployment.
+
+## Development and focused tests
+
+Django contains an optional process-local limiter with fixed and sliding
+windows. Its modes are:
+
+- `off`: bypass application-level limiting.
+- `observe`: evaluate policies and log blocks without rejecting requests.
+- `enforce`: return HTTP 429 after a process-local policy is exceeded.
+
+The application limiter is useful for policy tests and single-process local
+development. Its counters are intentionally not shared across Gunicorn
+workers, so production keeps it off and relies on Nginx.
+
+Identity values and tokens are converted into keyed HMAC fingerprints before
+being used as limiter keys. Proxy headers are ignored unless the direct peer is
+inside `RATE_LIMIT_TRUSTED_PROXY_CIDRS`.
 
 ## Client contract
 

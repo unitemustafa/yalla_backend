@@ -1,6 +1,5 @@
 import logging
 
-from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -47,12 +46,7 @@ def create_courier_notification(
     callback = lambda notification_id=notification.id: _dispatch_courier_notification(
         notification_id
     )
-    if settings.PUSH_DELIVERY_ASYNC:
-        from .push import send_courier_notification_push
-
-        send_courier_notification_push(notification.id)
-    else:
-        transaction.on_commit(callback)
+    transaction.on_commit(callback)
     return notification
 
 ACCOUNT_RESTORED_TITLE = "تم استعادة حسابك"
@@ -92,12 +86,7 @@ def create_account_restored_notification(user):
     callback = lambda notification_id=notification.id: _dispatch_account_restored(
         notification_id
     )
-    if settings.PUSH_DELIVERY_ASYNC:
-        from .push import send_account_restored_push
-
-        send_account_restored_push(notification.id)
-    else:
-        transaction.on_commit(callback)
+    transaction.on_commit(callback)
     return notification
 
 

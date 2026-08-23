@@ -6,22 +6,18 @@ import math
 import random
 import re
 import threading
+import time
 import unicodedata
-import uuid
 from dataclasses import dataclass
 from functools import lru_cache, wraps
 
 from django.conf import settings
 from django.http import JsonResponse
-from django_redis import get_redis_connection
-from redis.exceptions import NoScriptError, RedisError
-from rest_framework.exceptions import APIException
 from rest_framework.throttling import BaseThrottle
 
 
 logger = logging.getLogger(__name__)
 
-SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 RATE_RE = re.compile(r"^(?P<count>[1-9]\d*)/(?P<amount>[1-9]\d*)(?P<unit>[smhd])$")
 WINDOW_UNITS_MS = {
@@ -30,81 +26,6 @@ WINDOW_UNITS_MS = {
     "h": 3_600_000,
     "d": 86_400_000,
 }
-
-
-LUA_RATE_LIMIT = r"""
-local timestamp = redis.call('TIME')
-local now_ms = (tonumber(timestamp[1]) * 1000) + math.floor(tonumber(timestamp[2]) / 1000)
-local member = ARGV[1]
-local rule_count = tonumber(ARGV[2])
-local allowed = 1
-local max_wait_ms = 0
-local failed = {}
-local fixed_counts = {}
-local fixed_resets = {}
-
-for i = 1, rule_count do
-    local offset = 3 + ((i - 1) * 3)
-    local algorithm = ARGV[offset]
-    local limit = tonumber(ARGV[offset + 1])
-    local window_ms = tonumber(ARGV[offset + 2])
-    local key = KEYS[i]
-
-    if algorithm == 'fixed' then
-        local state = redis.call('HMGET', key, 'count', 'reset_ms')
-        local count = tonumber(state[1]) or 0
-        local reset_ms = tonumber(state[2]) or 0
-        if reset_ms <= now_ms then
-            count = 0
-            reset_ms = now_ms + window_ms
-        end
-        fixed_counts[i] = count
-        fixed_resets[i] = reset_ms
-        if count >= limit then
-            allowed = 0
-            local wait_ms = math.max(1, reset_ms - now_ms)
-            if wait_ms > max_wait_ms then max_wait_ms = wait_ms end
-            table.insert(failed, i)
-        end
-    else
-        local cutoff = now_ms - window_ms
-        redis.call('ZREMRANGEBYSCORE', key, 0, cutoff)
-        local count = redis.call('ZCARD', key)
-        if count >= limit then
-            allowed = 0
-            local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
-            local oldest_ms = tonumber(oldest[2]) or now_ms
-            local wait_ms = math.max(1, (oldest_ms + window_ms) - now_ms)
-            if wait_ms > max_wait_ms then max_wait_ms = wait_ms end
-            table.insert(failed, i)
-        end
-    end
-end
-
--- All-or-none: a rejected request changes no enforcement counter. Cleanup of
--- expired sorted-set entries above is safe and does not consume capacity.
-if allowed == 1 then
-    for i = 1, rule_count do
-        local offset = 3 + ((i - 1) * 3)
-        local algorithm = ARGV[offset]
-        local window_ms = tonumber(ARGV[offset + 2])
-        local key = KEYS[i]
-        if algorithm == 'fixed' then
-            local next_count = fixed_counts[i] + 1
-            local reset_ms = fixed_resets[i]
-            redis.call('HSET', key, 'count', next_count, 'reset_ms', reset_ms)
-            redis.call('PEXPIRE', key, math.max(1000, (reset_ms - now_ms) + 1000))
-        else
-            redis.call('ZADD', key, now_ms, member)
-            redis.call('PEXPIRE', key, window_ms + 1000)
-        end
-    end
-end
-
-local response = {allowed, max_wait_ms, #failed}
-for _, index in ipairs(failed) do table.insert(response, index) end
-return response
-"""
 
 
 @dataclass(frozen=True)
@@ -128,16 +49,18 @@ class RateLimitDecision:
     allowed: bool
     retry_after_seconds: int = 0
     blocked_scopes: tuple[str, ...] = ()
-    backend_error: bool = False
 
 
-class RateLimitBackendUnavailable(APIException):
-    status_code = 503
-    default_code = "rate_limit_backend_unavailable"
-    default_detail = {
-        "code": "rate_limit_backend_unavailable",
-        "detail": "Authentication service is temporarily unavailable.",
-    }
+@dataclass
+class _FixedWindowState:
+    count: int
+    reset_ms: int
+
+
+@dataclass
+class _SlidingWindowState:
+    timestamps: list[int]
+    window_ms: int
 
 
 POLICIES = {
@@ -178,8 +101,37 @@ POLICIES = {
 }
 
 
-_script_sha = None
-_script_lock = threading.Lock()
+_state_lock = threading.Lock()
+_fixed_windows = {}
+_sliding_windows = {}
+_last_cleanup_ms = 0
+
+
+def _clear_rate_limit_state():
+    global _last_cleanup_ms
+    with _state_lock:
+        _fixed_windows.clear()
+        _sliding_windows.clear()
+        _last_cleanup_ms = 0
+
+
+def _cleanup_rate_limit_state(now_ms):
+    global _last_cleanup_ms
+    if now_ms - _last_cleanup_ms < 60_000:
+        return
+    _last_cleanup_ms = now_ms
+    expired_fixed = [
+        key for key, state in _fixed_windows.items() if state.reset_ms <= now_ms
+    ]
+    for key in expired_fixed:
+        _fixed_windows.pop(key, None)
+    for key, state in tuple(_sliding_windows.items()):
+        cutoff = now_ms - state.window_ms
+        state.timestamps[:] = [
+            timestamp for timestamp in state.timestamps if timestamp > cutoff
+        ]
+        if not state.timestamps:
+            _sliding_windows.pop(key, None)
 
 
 def rate_limit_mode():
@@ -237,8 +189,6 @@ def client_ip(request):
         raw_header = request.META.get(header_name, "")
         chain = [_parsed_ip(item) for item in str(raw_header).split(",")]
         if chain and all(chain):
-            # The socket peer is the final proxy. Walk right-to-left past every
-            # configured trusted proxy and select the first untrusted address.
             for address in reversed([*chain, remote]):
                 if not _is_trusted_proxy(address, networks):
                     return address.compressed
@@ -278,7 +228,7 @@ def _normalize_identifier(value):
 def _request_value(request, fields):
     try:
         data = request.data
-    except Exception:  # Parsers may reject malformed requests later in DRF.
+    except Exception:
         return ""
     for field in fields:
         value = data.get(field) if hasattr(data, "get") else None
@@ -302,8 +252,6 @@ def _identity_for_policy(request, policy):
         return ""
     if policy.identity == "identifier":
         value = _normalize_identifier(value)
-    # Token fingerprints deliberately preserve case because JWT/base64 token
-    # material is case-sensitive.
     return _fingerprint(policy.identity, value)
 
 
@@ -352,7 +300,7 @@ def scopes_for_request(request, view=None, explicit_scopes=()):
 def build_rules(request, scopes, mode):
     rules = []
     rates_by_scope = getattr(settings, "RATE_LIMIT_POLICY_RATES", {})
-    namespace = f"yalla:rate-limit:{mode}:v1"
+    namespace = f"yalla:rate-limit:local:{mode}:v1"
     for scope in scopes:
         policy = POLICIES.get(scope)
         if policy is None:
@@ -375,58 +323,63 @@ def build_rules(request, scopes, mode):
     return tuple(rules)
 
 
-def _redis_client():
-    return get_redis_connection("rate_limit")
+def _evaluate_rules(rules):
+    now_ms = int(time.monotonic() * 1000)
+    with _state_lock:
+        _cleanup_rate_limit_state(now_ms)
+        fixed_snapshots = {}
+        sliding_snapshots = {}
+        failed = []
+        max_wait_ms = 0
 
+        for rule in rules:
+            if rule.algorithm == "fixed":
+                state = _fixed_windows.get(rule.key)
+                if state is None or state.reset_ms <= now_ms:
+                    state = _FixedWindowState(0, now_ms + rule.window_ms)
+                fixed_snapshots[rule.key] = state
+                if state.count >= rule.limit:
+                    failed.append(rule.scope)
+                    max_wait_ms = max(max_wait_ms, state.reset_ms - now_ms)
+                continue
 
-def _load_script(client):
-    global _script_sha
-    with _script_lock:
-        _script_sha = client.script_load(LUA_RATE_LIMIT)
-        return _script_sha
+            state = _sliding_windows.get(rule.key)
+            timestamps = [] if state is None else state.timestamps
+            cutoff = now_ms - rule.window_ms
+            active_timestamps = [value for value in timestamps if value > cutoff]
+            sliding_snapshots[rule.key] = active_timestamps
+            if len(active_timestamps) >= rule.limit:
+                failed.append(rule.scope)
+                max_wait_ms = max(
+                    max_wait_ms,
+                    active_timestamps[0] + rule.window_ms - now_ms,
+                )
 
+        if failed:
+            return RateLimitDecision(
+                allowed=False,
+                retry_after_seconds=max(1, math.ceil(max_wait_ms / 1000)),
+                blocked_scopes=tuple(dict.fromkeys(failed)),
+            )
 
-def _execute_script(client, rules):
-    global _script_sha
-    sha = _script_sha or _load_script(client)
-    keys = [rule.key for rule in rules]
-    args = [uuid.uuid4().hex, len(rules)]
-    for rule in rules:
-        args.extend((rule.algorithm, rule.limit, rule.window_ms))
-    try:
-        return client.evalsha(sha, len(keys), *keys, *args)
-    except NoScriptError:
-        sha = _load_script(client)
-        return client.evalsha(sha, len(keys), *keys, *args)
+        for rule in rules:
+            if rule.algorithm == "fixed":
+                state = fixed_snapshots[rule.key]
+                _fixed_windows[rule.key] = _FixedWindowState(
+                    count=state.count + 1,
+                    reset_ms=state.reset_ms,
+                )
+            else:
+                _sliding_windows[rule.key] = _SlidingWindowState(
+                    timestamps=[*sliding_snapshots[rule.key], now_ms],
+                    window_ms=rule.window_ms,
+                )
+        return RateLimitDecision(allowed=True)
 
 
 def _should_log():
     rate = float(getattr(settings, "RATE_LIMIT_LOG_SAMPLE_RATE", 0.1))
     return rate >= 1 or (rate > 0 and random.random() < rate)
-
-
-def _log_backend_error(request, error):
-    if _should_log():
-        logger.warning(
-            "rate_limit_backend_error method=%s path=%s error=%s",
-            request.method,
-            getattr(request, "path", ""),
-            error.__class__.__name__,
-        )
-
-
-def _record_blocked_telemetry(client, mode, scopes):
-    try:
-        pipeline = client.pipeline(transaction=False)
-        for scope in scopes:
-            key = f"yalla:rate-limit:telemetry:v1:{mode}:blocked:{scope}"
-            pipeline.incr(key)
-            pipeline.expire(key, 172_800)
-        pipeline.execute()
-    except RedisError:
-        # Enforcement already completed. Telemetry must never change the API
-        # decision or trigger a second Redis failure path.
-        return
 
 
 def evaluate_rate_limit(request, scopes):
@@ -443,49 +396,17 @@ def evaluate_rate_limit(request, scopes):
     if not rules:
         return RateLimitDecision(allowed=True)
 
-    try:
-        client = _redis_client()
-        result = _execute_script(client, rules)
-    except RedisError as error:
-        _log_backend_error(request, error)
-        return RateLimitDecision(allowed=True, backend_error=True)
-
-    allowed = bool(int(result[0]))
-    if allowed:
-        return RateLimitDecision(allowed=True)
-
-    retry_after = max(1, math.ceil(int(result[1]) / 1000))
-    failed_count = int(result[2])
-    failed_indexes = [int(value) - 1 for value in result[3 : 3 + failed_count]]
-    blocked_scopes = tuple(
-        dict.fromkeys(
-            rules[index].scope
-            for index in failed_indexes
-            if 0 <= index < len(rules)
-        )
-    )
-    _record_blocked_telemetry(client, mode, blocked_scopes)
-    if _should_log():
+    decision = _evaluate_rules(rules)
+    if not decision.allowed and _should_log():
         logger.info(
             "rate_limit_blocked mode=%s method=%s path=%s scopes=%s wait=%s",
             mode,
             request.method,
             getattr(request, "path", ""),
-            ",".join(blocked_scopes),
-            retry_after,
+            ",".join(decision.blocked_scopes),
+            decision.retry_after_seconds,
         )
-    return RateLimitDecision(
-        allowed=False,
-        retry_after_seconds=retry_after,
-        blocked_scopes=blocked_scopes,
-    )
-
-
-def fail_closed_for_scopes(scopes):
-    configured = frozenset(
-        getattr(settings, "RATE_LIMIT_FAIL_CLOSED_SCOPES", ())
-    )
-    return bool(configured.intersection(scopes))
+    return decision
 
 
 class YallaRateThrottle(BaseThrottle):
@@ -498,12 +419,6 @@ class YallaRateThrottle(BaseThrottle):
             return True
         scopes = scopes_for_request(request, view=view)
         decision = evaluate_rate_limit(request, scopes)
-        if (
-            mode == "enforce"
-            and decision.backend_error
-            and fail_closed_for_scopes(scopes)
-        ):
-            raise RateLimitBackendUnavailable()
         if decision.allowed or mode == "observe":
             return True
         self._wait = decision.retry_after_seconds
@@ -525,20 +440,6 @@ def rate_limit_view(*explicit_scopes):
                 explicit_scopes=explicit_scopes,
             )
             decision = evaluate_rate_limit(request, scopes)
-            if (
-                mode == "enforce"
-                and decision.backend_error
-                and fail_closed_for_scopes(scopes)
-            ):
-                return JsonResponse(
-                    {
-                        "code": "rate_limit_backend_unavailable",
-                        "detail": (
-                            "Authentication service is temporarily unavailable."
-                        ),
-                    },
-                    status=503,
-                )
             if decision.allowed or mode == "observe":
                 return view_func(request, *args, **kwargs)
             response = JsonResponse(

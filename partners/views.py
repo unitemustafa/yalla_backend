@@ -1,6 +1,5 @@
 import logging
 
-from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -231,12 +230,9 @@ class AdminPartnerApplicationDetailView(APIView):
             next_status == PartnerApplication.Status.APPROVED
             and previous_status != next_status
         ):
-            if settings.PUSH_DELIVERY_ASYNC:
-                _notify_partner_approval(application.id, reraise=True)
-            else:
-                transaction.on_commit(
-                    lambda: _notify_partner_approval(application.id)
-                )
+            transaction.on_commit(
+                lambda: _notify_partner_approval(application.id)
+            )
 
         application.refresh_from_db()
         return Response(

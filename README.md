@@ -77,7 +77,6 @@ DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/yalla
 ALLOWED_HOSTS=localhost,127.0.0.1
 CORS_ALLOW_ALL_ORIGINS=True
 RATE_LIMIT_MODE=off
-PUSH_DELIVERY_ASYNC=False
 ```
 
 Development automatically loads `.env` without overriding variables already
@@ -186,8 +185,7 @@ request-size, Gunicorn, and rate-policy variables have safe defaults in
 | `ALLOWED_HOSTS` | Comma-separated production host names |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated HTTPS dashboard origins; HTTP is allowed only for local loopback development |
 | `RATE_LIMIT_MODE` | Keep `off` when Nginx request limiting is enabled |
-| `PUSH_DELIVERY_ASYNC` | Keep `False` for direct Firebase delivery |
-| `API_CACHE_ENABLED` | Keep `False` in the Redis-free production stack |
+| `API_CACHE_ENABLED` | Keep `False` in the multi-worker production stack |
 | `PUBLIC_MEDIA_ROOT` / `PRIVATE_MEDIA_ROOT` | Persistent public and protected media directories |
 | `MEDIA_URL` | Public media base URL under the API domain |
 | `FIREBASE_SERVICE_ACCOUNT_BASE64` | Preferred Base64-encoded Firebase service-account JSON |
@@ -204,7 +202,7 @@ and rollback procedure.
 ## Testing and verification
 
 The fast local suite uses isolated in-memory SQLite, local media directories,
-and a mocked Redis boundary:
+and a process-local rate limiter:
 
 ```bash
 python manage.py test --settings=config.test_settings
@@ -223,14 +221,11 @@ regenerate `openapi.yml`; do not edit the generated document manually.
 
 ## Production deployment
 
-Run migrations once as a release step, then start the web, worker, and scheduler
-processes independently:
+Run migrations once as a release step, then start the web process:
 
 ```bash
 python manage.py migrate --noinput
 gunicorn --config config/gunicorn.conf.py config.wsgi:application
-celery -A config worker --loglevel=INFO
-celery -A config beat --loglevel=INFO
 ```
 
 The provided `Dockerfile` starts only the web process and intentionally does

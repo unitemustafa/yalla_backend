@@ -203,9 +203,8 @@ if DATABASE_PASSWORD:
     DATABASES["default"]["PASSWORD"] = DATABASE_PASSWORD
 
 
-# The application limiter is optional. This deployment keeps it disabled and
-# enforces coarse per-IP limits at Nginx, so production does not require Redis.
-RATE_LIMIT_REDIS_URL = os.environ.get("RATE_LIMIT_REDIS_URL", "").strip()
+# Nginx is the authoritative production limiter. The optional application
+# limiter is process-local and is intended for development and focused tests.
 RATE_LIMIT_MODE = os.environ.get("RATE_LIMIT_MODE", "off").strip().lower()
 RATE_LIMIT_ENFORCE_SCOPES = tuple(
     item.strip()
@@ -285,105 +284,24 @@ GEOAPIFY_API_KEY = os.environ.get("GEOAPIFY_API_KEY", "").strip()
 GEOAPIFY_CONNECT_TIMEOUT = float(
     os.environ.get("GEOAPIFY_CONNECT_TIMEOUT", "3")
 )
-RATE_LIMIT_FAIL_CLOSED_SCOPES = frozenset(
-    item.strip()
-    for item in os.environ.get(
-        "RATE_LIMIT_FAIL_CLOSED_SCOPES",
-        (
-            "login_ip,login_identifier,admin_login_ip,"
-            "admin_login_identifier,signup_ip,signup_email,"
-            "otp_send_ip,otp_send_identifier,otp_verify_ip,"
-            "otp_verify_identifier,refresh_ip,refresh_token"
-        ),
-    ).split(",")
-    if item.strip()
-)
 GEOAPIFY_READ_TIMEOUT = float(
     os.environ.get("GEOAPIFY_READ_TIMEOUT", "5")
 )
 
-CACHE_REDIS_URL = os.environ.get("CACHE_REDIS_URL", "").strip()
 CACHES = {
-    "default": (
-        {
-            "BACKEND": "django_redis.cache.RedisCache",
-            "LOCATION": CACHE_REDIS_URL,
-            "KEY_PREFIX": "yalla-api",
-            "OPTIONS": {
-                "CLIENT_CLASS": "django_redis.client.DefaultClient",
-                "IGNORE_EXCEPTIONS": True,
-                "SOCKET_CONNECT_TIMEOUT": float(
-                    os.environ.get("CACHE_CONNECT_TIMEOUT", "0.5")
-                ),
-                "SOCKET_TIMEOUT": float(
-                    os.environ.get("CACHE_SOCKET_TIMEOUT", "0.5")
-                ),
-            },
-        }
-        if CACHE_REDIS_URL
-        else {
-            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": "yalla-default-cache",
-        }
-    ),
-    "rate_limit": (
-        {
-            "BACKEND": "django_redis.cache.RedisCache",
-            "LOCATION": RATE_LIMIT_REDIS_URL,
-            "TIMEOUT": None,
-            "OPTIONS": {
-                "CLIENT_CLASS": "django_redis.client.DefaultClient",
-                "IGNORE_EXCEPTIONS": False,
-                "SOCKET_CONNECT_TIMEOUT": float(
-                    os.environ.get("RATE_LIMIT_CONNECT_TIMEOUT", "0.5")
-                ),
-                "SOCKET_TIMEOUT": float(
-                    os.environ.get("RATE_LIMIT_SOCKET_TIMEOUT", "0.2")
-                ),
-                "CONNECTION_POOL_KWARGS": {
-                    "max_connections": int(
-                        os.environ.get("RATE_LIMIT_MAX_CONNECTIONS", "20")
-                    ),
-                    "health_check_interval": int(
-                        os.environ.get("RATE_LIMIT_HEALTH_CHECK_INTERVAL", "30")
-                    ),
-                    "retry_on_timeout": False,
-                },
-            },
-        }
-        if RATE_LIMIT_REDIS_URL
-        else {
-            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": "yalla-disabled-rate-limit-cache",
-        }
-    ),
-    "geocoding": (
-        {
-            "BACKEND": "django_redis.cache.RedisCache",
-            "LOCATION": RATE_LIMIT_REDIS_URL,
-            "KEY_PREFIX": "yalla-geocoding",
-            "OPTIONS": {
-                "CLIENT_CLASS": "django_redis.client.DefaultClient",
-                "IGNORE_EXCEPTIONS": False,
-                "SOCKET_CONNECT_TIMEOUT": float(
-                    os.environ.get("RATE_LIMIT_CONNECT_TIMEOUT", "0.5")
-                ),
-                "SOCKET_TIMEOUT": float(
-                    os.environ.get("RATE_LIMIT_SOCKET_TIMEOUT", "0.2")
-                ),
-            },
-        }
-        if RATE_LIMIT_REDIS_URL
-        else {
-            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": "yalla-geocoding-cache",
-        }
-    ),
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "yalla-default-cache",
+    },
+    "geocoding": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "yalla-geocoding-cache",
+    },
 }
 
 API_CACHE_ENABLED = os.environ.get(
     "API_CACHE_ENABLED",
-    "True" if CACHE_REDIS_URL else "False",
+    "False",
 ).lower() == "true"
 API_CATALOG_CACHE_TIMEOUT = int(
     os.environ.get("API_CATALOG_CACHE_TIMEOUT", "60")
@@ -512,31 +430,6 @@ LOGGING = {
         },
     },
 }
-
-CELERY_BROKER_URL = os.environ.get(
-    "CELERY_BROKER_URL",
-    "redis://127.0.0.1:6379/0",
-)
-CELERY_RESULT_BACKEND = None
-CELERY_TASK_IGNORE_RESULT = True
-CELERY_TASK_ACKS_LATE = True
-CELERY_TASK_REJECT_ON_WORKER_LOST = True
-CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
-CELERY_TASK_SERIALIZER = "json"
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_BEAT_SCHEDULE = {
-    "publish-pending-push-outbox": {
-        "task": "notifications.tasks.publish_pending_push_outbox",
-        "schedule": 60.0,
-    },
-}
-PUSH_DELIVERY_ASYNC = os.environ.get(
-    "PUSH_DELIVERY_ASYNC",
-    "True" if IS_PRODUCTION else "False",
-).lower() == "true"
-PUSH_OUTBOX_MAX_ATTEMPTS = int(
-    os.environ.get("PUSH_OUTBOX_MAX_ATTEMPTS", "6")
-)
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),

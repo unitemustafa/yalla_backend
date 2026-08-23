@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.db import transaction
 from django.db.models import Count, Exists, OuterRef, Q
 from django.db.models.deletion import ProtectedError
@@ -330,10 +329,7 @@ def _send_delivery_area_status_change(area_id, is_active, *, reraise=False):
 
 def _schedule_delivery_area_status_change(area_id, is_active):
     callback = lambda: _send_delivery_area_status_change(area_id, is_active)
-    if settings.PUSH_DELIVERY_ASYNC:
-        _send_delivery_area_status_change(area_id, is_active, reraise=True)
-    else:
-        transaction.on_commit(callback)
+    transaction.on_commit(callback)
 
 
 class DeliveryAreaListView(APIView):

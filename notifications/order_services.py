@@ -1,6 +1,5 @@
 from functools import partial
 
-from django.conf import settings
 from django.db import transaction
 
 from orders.models import Order, OrderEvent
@@ -191,10 +190,7 @@ def create_order_lifecycle_notification(
             high_priority=True,
             android_channel_id="order_updates",
         )
-        if settings.PUSH_DELIVERY_ASYNC:
-            callback()
-        else:
-            transaction.on_commit(callback)
+        transaction.on_commit(callback)
     return notification
 
 

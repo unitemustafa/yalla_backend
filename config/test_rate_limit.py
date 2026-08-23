@@ -1,9 +1,8 @@
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 from types import SimpleNamespace
 
 from django.contrib.auth.models import AnonymousUser
 from django.test import RequestFactory, SimpleTestCase, override_settings
-from redis.exceptions import ConnectionError, NoScriptError
 from rest_framework.exceptions import Throttled
 from rest_framework.parsers import JSONParser
 from rest_framework.request import Request
@@ -13,9 +12,7 @@ from .api_exceptions import api_exception_handler
 from . import rate_limit
 from .rate_limit_checks import check_rate_limit_configuration
 from .rate_limit import (
-    RateLimitBackendUnavailable,
     RateLimitDecision,
-    RateRule,
     YallaRateThrottle,
     client_ip,
     evaluate_rate_limit,
@@ -26,7 +23,6 @@ from .rate_limit import (
 
 @override_settings(
     RATE_LIMIT_CLIENT_IP_HEADER="",
-    RATE_LIMIT_REDIS_URL="redis://rate-limit.test.invalid/1",
 )
 class RateLimitSystemCheckTests(SimpleTestCase):
     def _check_ids(self):
@@ -91,11 +87,6 @@ class RateLimitSystemCheckTests(SimpleTestCase):
     def test_enforce_accepts_an_independent_rate_limit_secret(self):
         self.assertNotIn("rate_limit.E007", self._check_ids())
 
-    @override_settings(RATE_LIMIT_FAIL_CLOSED_SCOPES=("not_a_scope",))
-    def test_unknown_fail_closed_scope_is_rejected(self):
-        self.assertIn("rate_limit.E008", self._check_ids())
-
-
 class ClientIpTests(SimpleTestCase):
     def setUp(self):
         self.factory = RequestFactory()
@@ -140,10 +131,10 @@ class ClientIpTests(SimpleTestCase):
 class RateLimitCoreTests(SimpleTestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
-        rate_limit._script_sha = None
+        rate_limit._clear_rate_limit_state()
 
     def tearDown(self):
-        rate_limit._script_sha = None
+        rate_limit._clear_rate_limit_state()
 
     def test_rate_parser_supports_multi_unit_windows(self):
         self.assertEqual(parse_rate("5/5m"), (5, 300_000))
@@ -168,18 +159,13 @@ class RateLimitCoreTests(SimpleTestCase):
     @override_settings(
         RATE_LIMIT_MODE="enforce",
         RATE_LIMIT_POLICY_RATES={
-            "api_anon": ("2/1m",),
-            "login_ip": ("1/1m",),
+            "api_anon": ("1/1m",),
+            "login_ip": ("2/1m",),
             "login_identifier": ("1/1m",),
         },
         RATE_LIMIT_TRUSTED_PROXY_CIDRS=(),
     )
-    @patch("config.rate_limit._record_blocked_telemetry")
-    @patch("config.rate_limit._execute_script")
-    @patch("config.rate_limit._redis_client")
-    def test_longest_wait_and_failed_scopes_are_returned(
-        self, redis_client, execute_script, record_telemetry
-    ):
+    def test_process_local_limiter_returns_all_blocked_scopes(self):
         raw_request = self.factory.post(
             "/api/v1/auth/login/client/",
             {"identifier": "User@Example.com", "password": "secret"},
@@ -188,82 +174,66 @@ class RateLimitCoreTests(SimpleTestCase):
         )
         request = Request(raw_request, parsers=[JSONParser()])
         request.user = AnonymousUser()
-        client = redis_client.return_value
-        # api_anon, login_ip, login_identifier; first and third failed.
-        execute_script.return_value = [0, 42_001, 2, 1, 3]
 
+        first_decision = evaluate_rate_limit(
+            request,
+            ("api_anon", "login_ip", "login_identifier"),
+        )
         decision = evaluate_rate_limit(
             request,
             ("api_anon", "login_ip", "login_identifier"),
         )
 
+        self.assertTrue(first_decision.allowed)
         self.assertFalse(decision.allowed)
-        self.assertEqual(decision.retry_after_seconds, 43)
+        self.assertEqual(decision.retry_after_seconds, 60)
         self.assertEqual(
             decision.blocked_scopes,
             ("api_anon", "login_identifier"),
         )
-        record_telemetry.assert_called_once_with(
-            client,
-            "enforce",
-            ("api_anon", "login_identifier"),
-        )
-
-    @override_settings(
-        RATE_LIMIT_MODE="enforce",
-        RATE_LIMIT_POLICY_RATES={"api_anon": ("2/1m",)},
-        RATE_LIMIT_TRUSTED_PROXY_CIDRS=(),
-    )
-    @patch("config.rate_limit._execute_script")
-    @patch("config.rate_limit._redis_client")
-    def test_redis_connection_errors_fail_open(
-        self, redis_client, execute_script
-    ):
-        request = self.factory.get("/api/v1/test/", REMOTE_ADDR="127.0.0.1")
-        request.user = AnonymousUser()
-        execute_script.side_effect = ConnectionError("offline")
-
-        decision = evaluate_rate_limit(request, ("api_anon",))
-
-        self.assertTrue(decision.allowed)
-        self.assertTrue(decision.backend_error)
-        redis_client.assert_called_once_with()
 
     @override_settings(
         RATE_LIMIT_MODE="enforce",
         RATE_LIMIT_ENFORCE_SCOPES=("login_ip",),
         RATE_LIMIT_POLICY_RATES={
-            "api_anon": ("2/1m",),
-            "login_ip": ("1/1m",),
+            "api_anon": ("1/1m",),
+            "login_ip": ("2/1m",),
         },
         RATE_LIMIT_TRUSTED_PROXY_CIDRS=(),
     )
-    @patch("config.rate_limit._execute_script", return_value=[1, 0, 0])
-    @patch("config.rate_limit._redis_client")
-    def test_enforce_scope_allowlist_supports_staged_rollout(
-        self, redis_client, execute_script
-    ):
+    def test_enforce_scope_allowlist_supports_staged_rollout(self):
         request = self.factory.get("/api/v1/test/", REMOTE_ADDR="127.0.0.1")
         request.user = AnonymousUser()
 
-        evaluate_rate_limit(request, ("api_anon", "login_ip"))
-
-        rules = execute_script.call_args.args[1]
-        self.assertEqual([rule.scope for rule in rules], ["login_ip"])
-
-    def test_evalsha_reloads_once_after_noscript(self):
-        client = Mock()
-        client.script_load.side_effect = ["first-sha", "second-sha"]
-        client.evalsha.side_effect = [NoScriptError(), [1, 0, 0]]
-        rules = (
-            RateRule("api_anon", "fixed", 2, 60_000, "test-key"),
+        decisions = tuple(
+            evaluate_rate_limit(request, ("api_anon", "login_ip"))
+            for _ in range(3)
         )
 
-        result = rate_limit._execute_script(client, rules)
+        self.assertTrue(decisions[0].allowed)
+        self.assertTrue(decisions[1].allowed)
+        self.assertFalse(decisions[2].allowed)
+        self.assertEqual(decisions[2].blocked_scopes, ("login_ip",))
 
-        self.assertEqual(result, [1, 0, 0])
-        self.assertEqual(client.script_load.call_count, 2)
-        self.assertEqual(client.evalsha.call_count, 2)
+    @override_settings(
+        RATE_LIMIT_MODE="enforce",
+        RATE_LIMIT_POLICY_RATES={"api_anon": ("1/1m",)},
+        RATE_LIMIT_TRUSTED_PROXY_CIDRS=(),
+    )
+    @patch("config.rate_limit.time.monotonic", side_effect=(100, 101, 161))
+    def test_fixed_window_resets_after_expiry(self, monotonic):
+        request = self.factory.get("/api/v1/test/", REMOTE_ADDR="127.0.0.1")
+        request.user = AnonymousUser()
+
+        decisions = tuple(
+            evaluate_rate_limit(request, ("api_anon",))
+            for _ in range(3)
+        )
+
+        self.assertTrue(decisions[0].allowed)
+        self.assertFalse(decisions[1].allowed)
+        self.assertTrue(decisions[2].allowed)
+        self.assertEqual(monotonic.call_count, 3)
 
     @override_settings(
         RATE_LIMIT_EXEMPT_PATHS=("/health/",),
@@ -287,40 +257,6 @@ class RateLimitCoreTests(SimpleTestCase):
 
         view = SimpleNamespace(rate_limit_scopes=())
         self.assertTrue(YallaRateThrottle().allow_request(request, view))
-
-    @override_settings(
-        RATE_LIMIT_MODE="enforce",
-        RATE_LIMIT_FAIL_CLOSED_SCOPES=("login_ip",),
-    )
-    @patch("config.rate_limit.evaluate_rate_limit")
-    def test_auth_scope_fails_closed_when_redis_is_unavailable(self, evaluate):
-        evaluate.return_value = RateLimitDecision(
-            allowed=True,
-            backend_error=True,
-        )
-        request = self.factory.post("/api/v1/auth/login/client/")
-        request.user = AnonymousUser()
-        view = SimpleNamespace(rate_limit_scopes=("login_ip",))
-
-        with self.assertRaises(RateLimitBackendUnavailable):
-            YallaRateThrottle().allow_request(request, view)
-
-    @override_settings(
-        RATE_LIMIT_MODE="enforce",
-        RATE_LIMIT_FAIL_CLOSED_SCOPES=("login_ip",),
-    )
-    @patch("config.rate_limit.evaluate_rate_limit")
-    def test_normal_api_scope_still_fails_open_on_redis_outage(self, evaluate):
-        evaluate.return_value = RateLimitDecision(
-            allowed=True,
-            backend_error=True,
-        )
-        request = self.factory.get("/api/v1/catalog/categories/")
-        request.user = AnonymousUser()
-        view = SimpleNamespace(rate_limit_scopes=())
-
-        self.assertTrue(YallaRateThrottle().allow_request(request, view))
-
 
 class RateLimitResponseTests(SimpleTestCase):
     def test_throttled_exception_uses_the_public_429_contract(self):

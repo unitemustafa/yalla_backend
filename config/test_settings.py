@@ -30,8 +30,8 @@ ALLOWED_HOSTS = [
 
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 
-# Rate limiter behavior has focused unit tests with a fake Redis client. Keep
-# unrelated endpoint suites independent from an external Redis process.
+# Rate limiter behavior has focused unit tests. Keep unrelated endpoint suites
+# independent from process-local limiter state.
 RATE_LIMIT_MODE = "off"
 
 # Expected 4xx branches are exercised heavily; keep test output readable while

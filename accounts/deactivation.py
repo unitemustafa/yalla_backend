@@ -1,6 +1,5 @@
 import logging
 
-from django.conf import settings
 from django.db import transaction
 from django.db.models import F
 from rest_framework_simplejwt.token_blacklist.models import (
@@ -41,12 +40,7 @@ def handle_client_deactivation(user, *, was_active, notify_disabled=True):
     if notify_disabled:
         create_account_disabled_notification(user)
     callback = lambda user_id=user.pk: _dispatch_account_disabled(user_id)
-    if settings.PUSH_DELIVERY_ASYNC:
-        from notifications.push import send_account_disabled_event
-
-        send_account_disabled_event(user.pk)
-    else:
-        transaction.on_commit(callback)
+    transaction.on_commit(callback)
     return True
 
 

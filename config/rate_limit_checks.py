@@ -17,13 +17,6 @@ def check_rate_limit_configuration(app_configs, **kwargs):
                 id="rate_limit.E001",
             )
         )
-    if mode == "enforce" and not getattr(settings, "RATE_LIMIT_REDIS_URL", ""):
-        messages.append(
-            Error(
-                "RATE_LIMIT_REDIS_URL is required in enforce mode.",
-                id="rate_limit.E002",
-            )
-        )
     rate_limit_secret = getattr(settings, "RATE_LIMIT_KEY_SECRET", "")
     if mode in {"observe", "enforce"} and (
         not str(rate_limit_secret).strip()
@@ -63,14 +56,6 @@ def check_rate_limit_configuration(app_configs, **kwargs):
                 Error(
                     f"Unknown enforce rate limit scope: {scope}",
                     id="rate_limit.E006",
-                )
-            )
-    for scope in getattr(settings, "RATE_LIMIT_FAIL_CLOSED_SCOPES", ()):
-        if scope not in POLICIES:
-            messages.append(
-                Error(
-                    f"Unknown fail-closed rate limit scope: {scope}",
-                    id="rate_limit.E008",
                 )
             )
     for scope, rates in rates_by_scope.items():

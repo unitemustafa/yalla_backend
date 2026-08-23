@@ -1,7 +1,6 @@
 import logging
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
@@ -130,16 +129,9 @@ def dispatch_offer_notifications(offer_id, request_id, requested_by_id=None):
             Offer.objects.filter(pk=offer.pk).update(push_sent_at=now)
             if created_notification_ids:
                 notification_ids = tuple(created_notification_ids)
-                if settings.PUSH_DELIVERY_ASYNC:
-                    send_notifications_push(
-                        notification_ids,
-                        high_priority=True,
-                        android_channel_id="offer_updates",
-                    )
-                else:
-                    transaction.on_commit(
-                        lambda ids=notification_ids: _deliver_offer_pushes(ids)
-                    )
+                transaction.on_commit(
+                    lambda ids=notification_ids: _deliver_offer_pushes(ids)
+                )
 
     if validation_error:
         raise ValidationError({"detail": validation_error})

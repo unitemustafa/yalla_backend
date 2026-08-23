@@ -1,6 +1,5 @@
 import logging
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
@@ -117,13 +116,7 @@ def dispatch_delivery_area_created_notifications(delivery_area_id):
             ]
         )
 
-        if settings.PUSH_DELIVERY_ASYNC:
-            for notification_id in created_notification_ids:
-                send_notification_push(notification_id)
-
-    for notification_id in (
-        [] if settings.PUSH_DELIVERY_ASYNC else created_notification_ids
-    ):
+    for notification_id in created_notification_ids:
         try:
             send_notification_push(notification_id)
         except Exception:

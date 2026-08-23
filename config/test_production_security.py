@@ -20,7 +20,6 @@ def production_environment(**overrides):
             "ALLOWED_HOSTS": "api.example.test",
             "CORS_ALLOWED_ORIGINS": "https://dashboard.example.test",
             "RATE_LIMIT_MODE": "off",
-            "RATE_LIMIT_REDIS_URL": "",
             "RATE_LIMIT_KEY_SECRET": "independent-rate-limit-secret-for-production-test",
             "RATE_LIMIT_TRUSTED_PROXY_CIDRS": "10.0.0.0/8",
             "AUTH_OTP_INCLUDE_IN_RESPONSE": "False",
@@ -72,7 +71,3 @@ class ProductionSecuritySettingsTests(SimpleTestCase):
             "AUTH_OTP_INCLUDE_IN_RESPONSE must be False",
             result.stderr,
         )
-
-    def test_production_accepts_synchronous_push_delivery(self):
-        result = self._import_settings(PUSH_DELIVERY_ASYNC="False")
-        self.assertEqual(result.returncode, 0, result.stderr)
