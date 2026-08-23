@@ -259,6 +259,12 @@ in `docs/HOSTINGER_KVM_DEPLOYMENT.md`, and run:
 ./deploy/production-up.sh
 ```
 
+On a new Ubuntu 24.04 Hostinger VPS, `deploy/hostinger-bootstrap.sh` installs
+Docker and prepares persistent storage. Later releases can be pulled from the
+GitHub `main` branch with `deploy/production-update.sh`; it creates a database
+backup before updating. Use `deploy/backup.sh --with-media` when a release also
+needs a local media archive.
+
 The Compose stack contains only backend infrastructure: Nginx, Django,
 PostgreSQL, Redis, Celery, persistent media, and static files. The admin
 dashboard and Flutter applications remain independent clients and connect over

@@ -3,6 +3,7 @@ set -eu
 
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 env_file="${1:-$project_dir/.env.production}"
+wait_timeout="${DEPLOY_WAIT_TIMEOUT:-300}"
 
 if [ ! -f "$env_file" ]; then
     echo "Missing production environment file: $env_file" >&2
@@ -22,6 +23,21 @@ fi
 
 cd "$project_dir"
 
-BACKEND_ENV_FILE="$env_file" docker compose --env-file "$env_file" config --quiet
-BACKEND_ENV_FILE="$env_file" docker compose --env-file "$env_file" up -d --build --remove-orphans
-BACKEND_ENV_FILE="$env_file" docker compose --env-file "$env_file" ps
+if command -v git >/dev/null 2>&1; then
+    deployment_revision="$(git rev-parse --short=12 HEAD 2>/dev/null || true)"
+fi
+deployment_revision="${deployment_revision:-unknown}"
+
+export BACKEND_ENV_FILE="$env_file"
+export DEPLOYMENT_REVISION="${DEPLOYMENT_REVISION:-$deployment_revision}"
+
+docker compose --env-file "$env_file" config --quiet
+docker compose --env-file "$env_file" build
+docker compose --env-file "$env_file" up \
+    -d \
+    --remove-orphans \
+    --wait \
+    --wait-timeout "$wait_timeout"
+docker compose --env-file "$env_file" ps
+
+echo "Deployment revision: $DEPLOYMENT_REVISION"

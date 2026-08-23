@@ -20,6 +20,7 @@ x-backend-environment: &backend-environment
   PRIVATE_MEDIA_X_ACCEL_REDIRECT: "True"
   PRIVATE_MEDIA_INTERNAL_URL: /_protected-media/
   PUSH_DELIVERY_ASYNC: "True"
+  DEPLOYMENT_REVISION: ${DEPLOYMENT_REVISION:-unknown}
 
 x-logging: &default-logging
   driver: json-file
