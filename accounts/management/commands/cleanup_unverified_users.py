@@ -5,11 +5,11 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from accounts.models import OneTimePassword, User
+from accounts.models import OTPCooldown, OneTimePassword, PendingRegistration
 
 
 class Command(BaseCommand):
-    help = "Remove stale unverified accounts and expired registration OTPs."
+    help = "Remove stale pending registrations without touching user accounts."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -23,29 +23,26 @@ class Command(BaseCommand):
         cutoff = now - timedelta(
             hours=settings.AUTH_UNVERIFIED_USER_RETENTION_HOURS
         )
-        users = User.objects.filter(
-            is_verified=False,
-            is_staff=False,
-            is_superuser=False,
-            created_at__lt=cutoff,
-        )
-        expired_otps = OneTimePassword.objects.filter(
+        registrations = PendingRegistration.objects.filter(updated_at__lt=cutoff)
+        stale_emails = list(registrations.values_list("email", flat=True))
+        expired_legacy_otps = OneTimePassword.objects.filter(
             purpose=OneTimePassword.Purpose.REGISTRATION,
             expires_at__lte=now,
         )
-        user_count = users.count()
-
-        # OTPs belonging to deleted users are included in the user cascade, not
-        # counted again as standalone expired OTP cleanup.
-        expired_otp_count = expired_otps.exclude(user__in=users).count()
+        registration_count = registrations.count()
+        expired_otp_count = expired_legacy_otps.count()
 
         if not options["dry_run"]:
             with transaction.atomic():
-                users.delete()
-                expired_otps.delete()
+                registrations.delete()
+                OTPCooldown.objects.filter(
+                    purpose=OneTimePassword.Purpose.REGISTRATION,
+                    identifier__in=stale_emails,
+                ).delete()
+                expired_legacy_otps.delete()
 
         mode = "Dry run" if options["dry_run"] else "Cleanup complete"
         self.stdout.write(
-            f"{mode}: affected users={user_count}, "
-            f"expired registration OTPs={expired_otp_count}."
+            f"{mode}: pending registrations={registration_count}, "
+            f"expired legacy registration OTPs={expired_otp_count}."
         )

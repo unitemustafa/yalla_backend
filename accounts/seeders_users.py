@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
 
-from accounts.models import CourierProfile, OneTimePassword
+from accounts.models import CourierProfile, OneTimePassword, PendingRegistration
 from locations.models import Address, DeliveryArea, ServiceCity
 
 User = get_user_model()
@@ -125,6 +125,8 @@ class UserLocationSeederMixin:
         users = {}
         for definition in definitions:
             email = definition["email"]
+            if email == "seed.pending@yalla.test":
+                continue
             defaults = {
                 **definition,
                 "terms_accepted": True,
@@ -142,15 +144,19 @@ class UserLocationSeederMixin:
         return users
 
     def _seed_otps(self, users, now):
-        pending = users["seed.pending@yalla.test"]
-        OneTimePassword.objects.update_or_create(
-            user=pending,
-            purpose=OneTimePassword.Purpose.REGISTRATION,
-            used_at__isnull=True,
+        PendingRegistration.objects.update_or_create(
+            email="seed.pending@yalla.test",
             defaults={
-                "code_hash": make_password("123456"),
-                "expires_at": now + timedelta(hours=1),
-                "attempts": 0,
+                "username": "seed_pending",
+                "first_name": "Pending",
+                "last_name": "Customer",
+                "phone": "+201001000005",
+                "password_hash": make_password("SeedPass1!"),
+                "terms_accepted_at": now,
+                "privacy_policy_version": "seed-v1",
+                "otp_code_hash": make_password("123456"),
+                "otp_expires_at": now + timedelta(hours=1),
+                "otp_attempts": 0,
             },
         )
 

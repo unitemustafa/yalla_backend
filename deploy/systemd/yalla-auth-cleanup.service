@@ -1,0 +1,12 @@
+[Unit]
+Description=Remove stale Yalla pending registrations
+Requires=docker.service
+After=docker.service
+ConditionPathExists=/opt/yalla_backend/.env.production
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/yalla_backend
+ExecStart=/usr/bin/docker compose --env-file .env.production exec -T django python manage.py cleanup_unverified_users
+Nice=10
+

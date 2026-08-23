@@ -14,7 +14,15 @@ install -m 0644 \
 install -m 0644 \
     "$project_dir/deploy/systemd/yalla-backup.timer" \
     /etc/systemd/system/yalla-backup.timer
+install -m 0644 \
+    "$project_dir/deploy/systemd/yalla-auth-cleanup.service" \
+    /etc/systemd/system/yalla-auth-cleanup.service
+install -m 0644 \
+    "$project_dir/deploy/systemd/yalla-auth-cleanup.timer" \
+    /etc/systemd/system/yalla-auth-cleanup.timer
 
 systemctl daemon-reload
 systemctl enable --now yalla-backup.timer
+systemctl enable --now yalla-auth-cleanup.timer
 systemctl status yalla-backup.timer --no-pager
+systemctl status yalla-auth-cleanup.timer --no-pager

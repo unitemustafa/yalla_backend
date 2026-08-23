@@ -751,6 +751,10 @@ Other operational commands include:
 .venv/bin/python manage.py check_rate_limit
 ```
 
+`cleanup_unverified_users` removes only expired pending mobile registrations;
+it never deletes rows from the user table. Production installs run it hourly
+through `yalla-auth-cleanup.timer`.
+
 ## 16. Testing and Continuous Integration
 
 Tests use Django's built-in test runner and DRF test utilities. The local test settings use in-memory SQLite, a local-memory email backend, fast password hashing, temporary storage, and disabled distributed rate limiting.

@@ -29,7 +29,12 @@ from markets.models import Market, MarketClassification
 from notifications.models import ClientDevice, Notification
 from orders.models import Order
 
-from .models import CourierProfile, OTPCooldown, OneTimePassword
+from .models import (
+    CourierProfile,
+    OTPCooldown,
+    OneTimePassword,
+    PendingRegistration,
+)
 from .services import issue_otp
 
 User = get_user_model()
@@ -148,11 +153,10 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(len(response.data["dev_otp"]), 6)
         self.assertEqual(len(mail.outbox), 1)
 
-        user = User.objects.get(email=self.email)
-        self.assertTrue(user.is_active)
-        self.assertFalse(user.is_verified)
-        self.assertTrue(user.check_password(self.password))
-        self.assertEqual(user.username, "yalla_customer")
+        self.assertFalse(User.objects.filter(email=self.email).exists())
+        pending = PendingRegistration.objects.get(email=self.email)
+        self.assertTrue(pending.password_hash)
+        self.assertEqual(pending.username, "yalla_customer")
 
         login_response = self.client.post(
             f"{AUTH_BASE}/login",
@@ -162,6 +166,8 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(
             login_response.data["code"], "email_verification_required"
         )
+        self.assertEqual(login_response.data["email"], self.email)
+        self.assertIn("registration_expires_at", login_response.data)
 
         verify_response = self.client.post(
             f"{AUTH_BASE}/verify-email",
@@ -172,7 +178,11 @@ class AuthenticationAPITests(APITestCase):
         self.assertIn("refreshToken", verify_response.data)
         self.assertIn("expiresIn", verify_response.data)
         self.assertEqual(verify_response.data["session"]["mode"], "temporary")
-        self.assertTrue(User.objects.get(pk=user.pk).is_active)
+        user = User.objects.get(email=self.email)
+        self.assertTrue(user.is_active)
+        self.assertTrue(user.is_verified)
+        self.assertTrue(user.check_password(self.password))
+        self.assertFalse(PendingRegistration.objects.filter(pk=pending.pk).exists())
 
     def test_registration_rejects_duplicate_active_email(self):
         self.create_active_user()
@@ -3015,9 +3025,6 @@ class AuthenticationAPITests(APITestCase):
             )
             self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-        otp = OneTimePassword.objects.get(
-            user__email=self.email,
-            purpose=OneTimePassword.Purpose.REGISTRATION,
-        )
-        self.assertEqual(otp.attempts, 5)
-        self.assertIsNotNone(otp.used_at)
+        pending = PendingRegistration.objects.get(email=self.email)
+        self.assertEqual(pending.otp_attempts, 5)
+        self.assertEqual(pending.otp_code_hash, "")

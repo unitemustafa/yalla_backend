@@ -8,7 +8,7 @@ from django.db import IntegrityError, transaction
 from django.template.loader import render_to_string
 from django.utils import timezone
 
-from .models import OTPCooldown, OneTimePassword
+from .models import OTPCooldown, OneTimePassword, PendingRegistration
 
 
 OTP_LENGTH = 6
@@ -64,6 +64,57 @@ def issue_otp(user, purpose):
         return otp, code, cooldown_data
 
 
+def issue_registration_otp(registration):
+    """Issue the single active OTP owned by a pending mobile registration."""
+
+    with transaction.atomic():
+        registration = PendingRegistration.objects.select_for_update().get(
+            pk=registration.pk
+        )
+        cooldown = _locked_cooldown(
+            registration.email,
+            OneTimePassword.Purpose.REGISTRATION,
+        )
+        _enforce_cooldown(cooldown)
+
+        code = "".join(secrets.choice("0123456789") for _ in range(OTP_LENGTH))
+        registration.otp_code_hash = make_password(code)
+        registration.otp_expires_at = timezone.now() + timedelta(
+            seconds=settings.AUTH_OTP_EXPIRY_SECONDS
+        )
+        registration.otp_attempts = 0
+        registration.save(
+            update_fields=[
+                "otp_code_hash",
+                "otp_expires_at",
+                "otp_attempts",
+                "updated_at",
+            ]
+        )
+
+        email_context = _otp_email_context(
+            registration,
+            OneTimePassword.Purpose.REGISTRATION,
+            code,
+        )
+        send_mail(
+            subject=email_context["subject"],
+            message=render_to_string(
+                "accounts/emails/otp.txt",
+                email_context,
+            ).strip(),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[registration.email],
+            fail_silently=False,
+            html_message=render_to_string(
+                "accounts/emails/otp.html",
+                email_context,
+            ),
+        )
+        cooldown_data = _mark_cooldown_sent(cooldown)
+        return registration, code, cooldown_data
+
+
 def clear_otp_cooldown(email, purpose):
     OTPCooldown.objects.filter(
         identifier=normalize_email(email),
@@ -109,6 +160,32 @@ def verify_otp(user, purpose, code, *, consume=True):
             otp.used_at = timezone.now()
             otp.save(update_fields=["used_at"])
         return otp, None
+
+
+def verify_registration_otp(registration, code):
+    registration = PendingRegistration.objects.select_for_update().get(
+        pk=registration.pk
+    )
+    now = timezone.now()
+    if not registration.otp_code_hash or registration.otp_expires_at is None:
+        return False, "No active verification code was found."
+    if registration.otp_expires_at <= now:
+        registration.otp_code_hash = ""
+        registration.save(update_fields=["otp_code_hash", "updated_at"])
+        return False, "The verification code has expired."
+    if registration.otp_attempts >= OTP_MAX_ATTEMPTS:
+        registration.otp_code_hash = ""
+        registration.save(update_fields=["otp_code_hash", "updated_at"])
+        return False, "Too many invalid attempts. Request a new code."
+    if not check_password(code, registration.otp_code_hash):
+        registration.otp_attempts += 1
+        update_fields = ["otp_attempts", "updated_at"]
+        if registration.otp_attempts >= OTP_MAX_ATTEMPTS:
+            registration.otp_code_hash = ""
+            update_fields.append("otp_code_hash")
+        registration.save(update_fields=update_fields)
+        return False, "Invalid verification code."
+    return True, None
 
 
 def otp_response_data(code):
@@ -233,3 +310,32 @@ def _otp_email_context(user, purpose, code):
             else "رمز تغيير كلمة مرور حسابك في يلا ماركت"
         ),
     }
+
+
+def otp_cooldown_status(email, purpose):
+    cooldown = OTPCooldown.objects.filter(
+        identifier=normalize_email(email),
+        purpose=purpose,
+    ).first()
+    if cooldown is None or cooldown.next_allowed_at is None:
+        return {
+            "retry_after_seconds": 0,
+            "resend_available_at": None,
+        }
+    now = timezone.now()
+    retry_after = max(
+        0,
+        int((cooldown.next_allowed_at - now).total_seconds()),
+    )
+    if cooldown.next_allowed_at > now and retry_after < 1:
+        retry_after = 1
+    return {
+        "retry_after_seconds": retry_after,
+        "resend_available_at": cooldown.next_allowed_at,
+    }
+
+
+def registration_expires_at(registration):
+    return registration.updated_at + timedelta(
+        hours=settings.AUTH_UNVERIFIED_USER_RETENTION_HOURS
+    )

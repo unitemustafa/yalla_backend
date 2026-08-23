@@ -1,0 +1,12 @@
+[Unit]
+Description=Clean stale Yalla pending registrations hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=10m
+Unit=yalla-auth-cleanup.service
+
+[Install]
+WantedBy=timers.target
+

@@ -7,6 +7,7 @@ import jwt
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.validators import UnicodeUsernameValidator
+from django.contrib.auth.hashers import check_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
@@ -41,9 +42,14 @@ from .client_sessions import (
     sync_outstanding_token,
 )
 from .exceptions import AccountInactive, EmailVerificationRequired, SessionExpired
-from .models import CourierProfile, OneTimePassword
+from .models import CourierProfile, OneTimePassword, PendingRegistration
 from .token_security import validate_client_token_state
-from .services import normalize_email, verify_otp
+from .services import (
+    normalize_email,
+    otp_cooldown_status,
+    registration_expires_at,
+    verify_otp,
+)
 from .validation import (
     RequiredFieldMessagesMixin,
     contains_whitespace,
@@ -336,11 +342,31 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
                 {"email": "Email, username, or phone number is required."}
             )
 
+        expected_role = self.context.get("expected_role")
         user = self._find_user(identifier)
 
-        if user is None or not user.check_password(attrs["password"]):
+        if user is None:
+            pending = self._find_pending_registration(identifier)
+            pending_login_allowed = expected_role in {None, User.Role.CLIENT}
+            if (
+                pending_login_allowed
+                and pending is not None
+                and check_password(attrs["password"], pending.password_hash)
+            ):
+                cooldown = otp_cooldown_status(
+                    pending.email,
+                    OneTimePassword.Purpose.REGISTRATION,
+                )
+                raise EmailVerificationRequired(
+                    email=pending.email,
+                    retry_after_seconds=cooldown["retry_after_seconds"],
+                    resend_available_at=cooldown["resend_available_at"],
+                    registration_expires_at=registration_expires_at(pending),
+                )
             raise AuthenticationFailed("Invalid email or password.")
-        expected_role = self.context.get("expected_role")
+
+        if not user.check_password(attrs["password"]):
+            raise AuthenticationFailed("Invalid email or password.")
         if user.deleted_at is not None or not user.is_active:
             if user.role in {
                 User.Role.CLIENT,
@@ -352,7 +378,19 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
                 raise AccountInactive()
             raise serializers.ValidationError("Account is inactive.")
         if not user.is_verified:
-            raise EmailVerificationRequired()
+            cooldown = otp_cooldown_status(
+                user.email,
+                OneTimePassword.Purpose.REGISTRATION,
+            )
+            raise EmailVerificationRequired(
+                email=user.email,
+                retry_after_seconds=cooldown["retry_after_seconds"],
+                resend_available_at=cooldown["resend_available_at"],
+                registration_expires_at=(
+                    user.updated_at
+                    + timedelta(hours=settings.AUTH_UNVERIFIED_USER_RETENTION_HOURS)
+                ),
+            )
         if expected_role and user.role != expected_role:
             if expected_role == User.Role.REPRESENTATIVE:
                 raise PermissionDenied(self._representative_wrong_role_error(user))
@@ -384,6 +422,21 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             if user is not None:
                 return user
 
+        return None
+
+    def _find_pending_registration(self, identifier):
+        email = normalize_email(identifier)
+        pending = PendingRegistration.objects.filter(email__iexact=email).first()
+        if pending is not None:
+            return pending
+        pending = PendingRegistration.objects.filter(
+            username__iexact=identifier
+        ).first()
+        if pending is not None:
+            return pending
+        candidates = phone_candidates(identifier)
+        if candidates:
+            return PendingRegistration.objects.filter(phone__in=candidates).first()
         return None
 
     def _representative_wrong_role_error(self, user):

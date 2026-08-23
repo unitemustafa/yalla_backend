@@ -1,14 +1,15 @@
 from pathlib import Path
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers
 
 from config.image_validation import validate_safe_image
 
 from .courier_rules import active_assigned_orders_for_user
-from .models import CourierProfile, User
-from .services import normalize_email
+from .models import CourierProfile, OneTimePassword, PendingRegistration, User
+from .services import clear_otp_cooldown, normalize_email
 from .validation import (
     normalize_egyptian_phone,
     phone_candidates,
@@ -194,6 +195,16 @@ class AdminUserWriteMixin:
         user.terms_accepted_at = timezone.now()
         user.is_verified = True
         user.save()
+        pending_emails = list(
+            PendingRegistration.objects.filter(
+                Q(email__iexact=user.email)
+                | Q(username__iexact=user.username)
+                | Q(phone__in=phone_candidates(user.phone))
+            ).values_list("email", flat=True)
+        )
+        PendingRegistration.objects.filter(email__in=pending_emails).delete()
+        for email in pending_emails:
+            clear_otp_cooldown(email, OneTimePassword.Purpose.REGISTRATION)
         if profile_data is not None:
             profile_data["delivery_area"] = None
             CourierProfile.objects.create(user=user, **profile_data)

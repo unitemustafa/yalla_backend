@@ -112,6 +112,32 @@ class User(AbstractUser):
         ]
 
 
+class PendingRegistration(models.Model):
+    """A mobile signup that has not completed email verification yet."""
+
+    first_name = models.CharField(max_length=150)
+    last_name = models.CharField(max_length=150)
+    username = models.CharField(max_length=150)
+    email = models.EmailField(unique=True)
+    phone = models.CharField(max_length=30, unique=True)
+    password_hash = models.CharField(max_length=128)
+    terms_accepted_at = models.DateTimeField()
+    privacy_policy_version = models.CharField(max_length=20, blank=True)
+    otp_code_hash = models.CharField(max_length=128, blank=True)
+    otp_expires_at = models.DateTimeField(null=True, blank=True)
+    otp_attempts = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                Lower("username"),
+                name="accounts_pending_username_ci_unique",
+            ),
+        ]
+
+
 class CourierProfile(models.Model):
     user = models.OneToOneField(
         User,

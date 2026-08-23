@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import make_password
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Q
@@ -19,7 +20,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from config.pagination import paginated_list_response
 
-from .models import CourierProfile, OneTimePassword
+from .models import CourierProfile, OneTimePassword, PendingRegistration
 from .permissions import IsAdminRole, IsClientRole
 from .client_sessions import (
     access_expires_in,
@@ -51,8 +52,12 @@ from .services import (
     OTPCooldownError,
     clear_otp_cooldown,
     issue_otp,
+    issue_registration_otp,
     otp_cooldown_response_data,
+    otp_cooldown_status,
     otp_response_data,
+    registration_expires_at,
+    verify_registration_otp,
     verify_otp,
 )
 from .exceptions import EmailVerificationRequired
@@ -146,13 +151,33 @@ def _notify_courier_availability(courier_id, *, source):
     )
 
 
-def otp_cooldown_error_response(exc):
+def otp_cooldown_error_response(exc, *, registration=None):
+    data = {
+        "code": "otp_cooldown",
+        "detail": "Please wait before requesting another code.",
+        "retry_after_seconds": exc.retry_after_seconds,
+    }
+    if registration is not None:
+        cooldown = otp_cooldown_status(
+            registration.email,
+            OneTimePassword.Purpose.REGISTRATION,
+        )
+        data.update(
+            {
+                "verification_required": True,
+                "email": registration.email,
+                "resend_available_at": (
+                    cooldown["resend_available_at"].isoformat()
+                    if cooldown["resend_available_at"] is not None
+                    else None
+                ),
+                "registration_expires_at": registration_expires_at(
+                    registration
+                ).isoformat(),
+            }
+        )
     response = Response(
-        {
-            "code": "otp_cooldown",
-            "detail": "Please wait before requesting another code.",
-            "retry_after_seconds": exc.retry_after_seconds,
-        },
+        data,
         status=status.HTTP_429_TOO_MANY_REQUESTS,
     )
     response.headers["Retry-After"] = str(exc.retry_after_seconds)
@@ -170,44 +195,76 @@ class RegisterView(APIView):
         data = serializer.validated_data
 
         users = self._matching_users(data)
-        is_retry = False
-        if not users:
-            user = User(email=data["email"], username=data["username"])
-        elif len(users) == 1 and not users[0].is_verified:
-            user = users[0]
-            is_retry = True
-        else:
+        if users:
             raise ValidationError(self._duplicate_errors(data, users))
 
-        user.username = data["username"]
-        user.email = data["email"]
-        user.first_name = data["first_name"]
-        user.last_name = data["last_name"]
-        user.phone = data["phone"]
-        user.terms_accepted = True
-        user.terms_accepted_at = timezone.now()
-        user.is_verified = False
-        if not user.pk:
-            # Public registrations are usable lifecycle-wise but cannot obtain
-            # credentials until their email OTP has been consumed.
-            user.is_active = True
-        user.set_password(data["password"])
+        pending_matches = self._matching_pending_registrations(data)
+        registration = next(
+            (
+                pending
+                for pending in pending_matches
+                if pending.email.lower() == data["email"]
+            ),
+            None,
+        )
+        is_retry = registration is not None
+        stale_matches = [
+            pending.pk
+            for pending in pending_matches
+            if registration is None or pending.pk != registration.pk
+        ]
+        if stale_matches:
+            stale_emails = list(
+                PendingRegistration.objects.filter(pk__in=stale_matches)
+                .values_list("email", flat=True)
+            )
+            PendingRegistration.objects.filter(pk__in=stale_matches).delete()
+            for email in stale_emails:
+                clear_otp_cooldown(
+                    email,
+                    OneTimePassword.Purpose.REGISTRATION,
+                )
+
+        if registration is None:
+            registration = PendingRegistration(email=data["email"])
+        registration.username = data["username"]
+        registration.email = data["email"]
+        registration.first_name = data["first_name"]
+        registration.last_name = data["last_name"]
+        registration.phone = data["phone"]
+        registration.terms_accepted_at = timezone.now()
+        registration.password_hash = make_password(data["password"])
         try:
-            # A savepoint keeps the surrounding transaction usable when a
-            # concurrent signup wins one of the database unique constraints.
             with transaction.atomic():
-                user.save()
+                registration.save()
         except IntegrityError:
             users = self._matching_users(data)
-            raise ValidationError(self._duplicate_errors(data, users))
+            if users:
+                raise ValidationError(self._duplicate_errors(data, users))
+            registration = next(
+                (
+                    pending
+                    for pending in self._matching_pending_registrations(data)
+                    if pending.email.lower() == data["email"]
+                ),
+                None,
+            )
+            if registration is None:
+                raise ValidationError(
+                    {"detail": "Another registration is using these details."}
+                )
+            is_retry = True
 
         try:
-            _, code, cooldown_data = issue_otp(
-                user,
-                OneTimePassword.Purpose.REGISTRATION,
+            registration, code, cooldown_data = issue_registration_otp(
+                registration
             )
         except OTPCooldownError as exc:
-            return otp_cooldown_error_response(exc)
+            registration.refresh_from_db()
+            return otp_cooldown_error_response(
+                exc,
+                registration=registration,
+            )
         return Response(
             {
                 "detail": (
@@ -215,7 +272,11 @@ class RegisterView(APIView):
                     if is_retry
                     else "Registration OTP sent."
                 ),
-                "email": user.email,
+                "email": registration.email,
+                "verification_required": True,
+                "registration_expires_at": registration_expires_at(
+                    registration
+                ).isoformat(),
                 **otp_cooldown_response_data(cooldown_data),
                 **otp_response_data(code),
             },
@@ -227,6 +288,18 @@ class RegisterView(APIView):
         return list(
             User.objects.select_for_update()
             .filter(deleted_at__isnull=True)
+            .filter(
+                Q(email__iexact=data["email"])
+                | Q(username__iexact=data["username"])
+                | Q(phone__in=phone_candidates(data["phone"]))
+            )
+            .order_by("pk")
+        )
+
+    @staticmethod
+    def _matching_pending_registrations(data):
+        return list(
+            PendingRegistration.objects.select_for_update()
             .filter(
                 Q(email__iexact=data["email"])
                 | Q(username__iexact=data["username"])
@@ -257,31 +330,54 @@ class VerifyRegistrationOTPView(APIView):
         serializer = EmailOTPSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        user = User.objects.select_for_update().filter(
+        registration = PendingRegistration.objects.select_for_update().filter(
             email__iexact=serializer.validated_data["email"],
-            is_active=True,
-            is_verified=False,
-            deleted_at__isnull=True,
         ).first()
-        if user is None:
+        if registration is None:
             return Response(
                 {"otp": ["Invalid verification code."]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        _, error = verify_otp(
-            user,
-            OneTimePassword.Purpose.REGISTRATION,
+        verified, error = verify_registration_otp(
+            registration,
             serializer.validated_data["otp"],
         )
-        if error:
+        if not verified:
             return Response(
                 {"otp": [error]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user.is_verified = True
-        user.save(update_fields=["is_verified"])
+        user = User(
+            username=registration.username,
+            email=registration.email,
+            phone=registration.phone,
+            first_name=registration.first_name,
+            last_name=registration.last_name,
+            password=registration.password_hash,
+            role=User.Role.CLIENT,
+            is_active=True,
+            is_verified=True,
+            terms_accepted=True,
+            terms_accepted_at=registration.terms_accepted_at,
+            privacy_policy_version=registration.privacy_policy_version,
+        )
+        try:
+            with transaction.atomic():
+                user.save()
+        except IntegrityError:
+            return Response(
+                {
+                    "code": "registration_conflict",
+                    "detail": (
+                        "Account details became unavailable. Return to signup "
+                        "and choose different details."
+                    ),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        registration.delete()
         update_successful_login(user)
         clear_otp_cooldown(user.email, OneTimePassword.Purpose.REGISTRATION)
         return Response(token_payload(user, request=request), status=status.HTTP_200_OK)
@@ -294,27 +390,32 @@ class ResendRegistrationOTPView(APIView):
     def post(self, request):
         serializer = ForgotPasswordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = User.objects.filter(
+        registration = PendingRegistration.objects.filter(
             email__iexact=serializer.validated_data["email"],
-            is_active=True,
-            is_verified=False,
-            deleted_at__isnull=True,
         ).first()
-        if user is None:
+        if registration is None:
             return Response(
                 {"detail": "If registration is pending, a new OTP has been sent."}
             )
 
         try:
-            _, code, cooldown_data = issue_otp(
-                user,
-                OneTimePassword.Purpose.REGISTRATION,
+            registration, code, cooldown_data = issue_registration_otp(
+                registration
             )
         except OTPCooldownError as exc:
-            return otp_cooldown_error_response(exc)
+            registration.refresh_from_db()
+            return otp_cooldown_error_response(
+                exc,
+                registration=registration,
+            )
         return Response(
             {
                 "detail": "A new registration OTP has been sent.",
+                "email": registration.email,
+                "verification_required": True,
+                "registration_expires_at": registration_expires_at(
+                    registration
+                ).isoformat(),
                 **otp_cooldown_response_data(cooldown_data),
                 **otp_response_data(code),
             }
@@ -555,7 +656,16 @@ class CheckUsernameView(APIView):
             if exclude_user_id:
                 queryset = queryset.exclude(pk=exclude_user_id)
         registered = bool(username) and queryset.exists()
-        return Response({"available": not registered, "registered": registered})
+        pending = bool(username) and PendingRegistration.objects.filter(
+            username__iexact=username
+        ).exists()
+        return Response(
+            {
+                "available": not registered,
+                "registered": registered,
+                "verification_required": pending and not registered,
+            }
+        )
 
 
 class CheckEmailView(APIView):
@@ -573,7 +683,16 @@ class CheckEmailView(APIView):
             if exclude_user_id:
                 queryset = queryset.exclude(pk=exclude_user_id)
         registered = bool(email) and queryset.exists()
-        return Response({"available": not registered, "registered": registered})
+        pending = bool(email) and PendingRegistration.objects.filter(
+            email__iexact=email
+        ).exists()
+        return Response(
+            {
+                "available": not registered,
+                "registered": registered,
+                "verification_required": pending and not registered,
+            }
+        )
 
 
 class CheckPhoneView(APIView):
@@ -591,7 +710,16 @@ class CheckPhoneView(APIView):
             if exclude_user_id:
                 queryset = queryset.exclude(pk=exclude_user_id)
         registered = bool(phone) and queryset.exists()
-        return Response({"available": not registered, "registered": registered})
+        pending = bool(phone) and PendingRegistration.objects.filter(
+            phone__in=phone_candidates(phone)
+        ).exists()
+        return Response(
+            {
+                "available": not registered,
+                "registered": registered,
+                "verification_required": pending and not registered,
+            }
+        )
 
 
 class ForgotPasswordView(APIView):

@@ -21,11 +21,27 @@ class EmailVerificationRequired(APIException):
     status_code = 403
     default_code = "email_verification_required"
 
-    def __init__(self):
-        self.detail = {
+    def __init__(
+        self,
+        *,
+        email=None,
+        retry_after_seconds=None,
+        resend_available_at=None,
+        registration_expires_at=None,
+    ):
+        detail = {
             "code": self.default_code,
             "detail": "Email verification is required.",
         }
+        if email:
+            detail["email"] = email
+        if retry_after_seconds is not None:
+            detail["retry_after_seconds"] = retry_after_seconds
+        if resend_available_at is not None:
+            detail["resend_available_at"] = resend_available_at.isoformat()
+        if registration_expires_at is not None:
+            detail["registration_expires_at"] = registration_expires_at.isoformat()
+        self.detail = detail
 
 
 class SessionExpired(APIException):
