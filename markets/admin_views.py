@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.db.models import ProtectedError
 from django.db.models import Count, Exists, OuterRef, Q
 from django.utils import timezone
@@ -135,6 +136,57 @@ class AdminMarketTypeListCreateView(APIView):
             ).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class AdminMarketTypeReorderView(APIView):
+    permission_classes = [IsAuthenticated, IsMarketAdminRole]
+
+    def post(self, request):
+        ordered_ids = request.data.get("ids")
+        if (
+            not isinstance(ordered_ids, list)
+            or not ordered_ids
+            or any(not isinstance(item_id, int) for item_id in ordered_ids)
+            or len(set(ordered_ids)) != len(ordered_ids)
+        ):
+            return Response(
+                {"ids": "أرسل قائمة صحيحة وغير مكررة من معرفات الفئات."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        market_types = list(MarketType.objects.filter(id__in=ordered_ids))
+        if len(market_types) != len(ordered_ids):
+            return Response(
+                {"ids": "تتضمن القائمة فئة غير موجودة."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        classification_ids = {item.classification_id for item in market_types}
+        if len(classification_ids) != 1:
+            return Response(
+                {"ids": "يجب أن تنتمي كل الفئات إلى نفس الفئة الأساسية."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        classification_id = classification_ids.pop()
+        all_ids = set(
+            MarketType.objects.filter(
+                classification_id=classification_id
+            ).values_list("id", flat=True)
+        )
+        if set(ordered_ids) != all_ids:
+            return Response(
+                {"ids": "يجب إرسال كل الفئات التابعة للفئة الأساسية."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        by_id = {item.id: item for item in market_types}
+        with transaction.atomic():
+            for sort_order, item_id in enumerate(ordered_ids, start=1):
+                by_id[item_id].sort_order = sort_order
+            MarketType.objects.bulk_update(market_types, ["sort_order"])
+
+        return Response({"ids": ordered_ids})
 
 
 class AdminMarketTypeDetailView(APIView):

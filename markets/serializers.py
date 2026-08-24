@@ -1,3 +1,4 @@
+from django.db.models import Max
 from rest_framework import serializers
 
 from config.image_validation import validate_safe_image
@@ -137,6 +138,32 @@ class MarketTypeSerializer(serializers.ModelSerializer):
                     {field_name: "A market type with this name already exists."}
                 )
         return attrs
+
+    def create(self, validated_data):
+        if "sort_order" not in validated_data:
+            classification = validated_data["classification"]
+            validated_data["sort_order"] = self._next_sort_order(classification)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        classification = validated_data.get("classification")
+        if (
+            classification is not None
+            and classification.id != instance.classification_id
+            and "sort_order" not in validated_data
+        ):
+            validated_data["sort_order"] = self._next_sort_order(classification)
+        return super().update(instance, validated_data)
+
+    @staticmethod
+    def _next_sort_order(classification):
+        last_order = (
+            MarketType.objects.filter(classification=classification).aggregate(
+                value=Max("sort_order")
+            )["value"]
+            or 0
+        )
+        return last_order + 1
 
 
 class ClientMarketTypeSerializer(serializers.ModelSerializer):

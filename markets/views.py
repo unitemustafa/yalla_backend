@@ -34,6 +34,7 @@ from .admin_views import (
     AdminMarketListCreateView,
     AdminMarketTypeDetailView,
     AdminMarketTypeListCreateView,
+    AdminMarketTypeReorderView,
 )
 from .serializers import (
     AdminMarketClassificationSerializer,

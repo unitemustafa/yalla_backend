@@ -8,6 +8,7 @@ from .views import (
     AdminMarketListCreateView,
     AdminMarketTypeDetailView,
     AdminMarketTypeListCreateView,
+    AdminMarketTypeReorderView,
     HomeView,
     LoginDashboardSnapshotView,
     FeaturedMarketClassificationSummaryView,
@@ -49,6 +50,11 @@ urlpatterns = [
         "market-types/",
         AdminMarketTypeListCreateView.as_view(),
         name="admin-market-type-list-create",
+    ),
+    path(
+        "market-types/reorder/",
+        AdminMarketTypeReorderView.as_view(),
+        name="admin-market-type-reorder",
     ),
     path(
         "market-types/<int:market_type_id>/",

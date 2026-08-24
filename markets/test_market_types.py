@@ -52,12 +52,20 @@ class MarketTypeAPITests(APITestCase):
         self.market.subcategories.add(self.subcategory)
         self.client.force_authenticate(self.admin)
 
-    def create_type(self, *, classification=None, name_ar="برجر", name_en="Burger"):
+    def create_type(
+        self,
+        *,
+        classification=None,
+        name_ar="برجر",
+        name_en="Burger",
+        sort_order=0,
+    ):
         return MarketType.objects.create(
             classification=classification or self.classification,
             name_ar=name_ar,
             name_en=name_en,
             image=image_upload(f"{name_en}.png"),
+            sort_order=sort_order,
         )
 
     def test_admin_can_create_list_update_and_delete_market_type(self):
@@ -123,6 +131,61 @@ class MarketTypeAPITests(APITestCase):
             format="multipart",
         )
         self.assertEqual(other_classification.status_code, status.HTTP_201_CREATED)
+
+    def test_create_without_sort_order_appends_to_classification(self):
+        self.create_type(sort_order=1)
+        self.create_type(name_ar="مشويات", name_en="Grills", sort_order=2)
+
+        response = self.client.post(
+            self.list_url,
+            {
+                "classification_id": self.classification.id,
+                "name_ar": "سوشي",
+                "name_en": "Sushi",
+                "image": image_upload("sushi.png"),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["sort_order"], 3)
+
+    def test_admin_can_reorder_all_types_in_one_classification(self):
+        burger = self.create_type(sort_order=1)
+        grills = self.create_type(
+            name_ar="مشويات", name_en="Grills", sort_order=2
+        )
+        sushi = self.create_type(name_ar="سوشي", name_en="Sushi", sort_order=3)
+
+        response = self.client.post(
+            f"{self.list_url}reorder/",
+            {"ids": [sushi.id, burger.id, grills.id]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["ids"], [sushi.id, burger.id, grills.id])
+        self.assertEqual(
+            list(
+                MarketType.objects.filter(
+                    classification=self.classification
+                ).values_list("id", "sort_order")
+            ),
+            [(sushi.id, 1), (burger.id, 2), (grills.id, 3)],
+        )
+
+    def test_reorder_requires_every_type_in_the_classification(self):
+        burger = self.create_type(sort_order=1)
+        self.create_type(name_ar="مشويات", name_en="Grills", sort_order=2)
+
+        response = self.client.post(
+            f"{self.list_url}reorder/",
+            {"ids": [burger.id]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("ids", response.data)
 
     def test_market_accepts_multiple_active_types_from_its_classification(self):
         burger = self.create_type()
