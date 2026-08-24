@@ -276,6 +276,19 @@ and changes only the documented Gunicorn keys. If the application fails to
 become healthy, it restores the environment and previous image without
 automatically reversing migrations.
 
+The same restricted deployment entry point supports production verification
+and safe root-password locking without granting the deploy account general
+passwordless sudo access:
+
+```bash
+sudo ./deploy/production-update.sh --verify
+sudo ./deploy/production-update.sh --lock-root-password
+```
+
+The lock operation refuses to run unless the effective SSH configuration
+disables root, password, and keyboard-interactive login, allows `deploy`, and
+the deploy account has a non-empty `authorized_keys` file.
+
 The update script creates a database backup, fast-forwards the server checkout,
 rebuilds the changed images, runs the release step, and waits for the services
 to become healthy. It preserves the server-only `.env.production` file and the

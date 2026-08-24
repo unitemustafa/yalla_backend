@@ -5,6 +5,8 @@ project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 deploy_branch="${DEPLOY_BRANCH:-main}"
 env_file=""
 apply_gunicorn_profile=0
+verify_only=0
+lock_root_password=0
 profile_tmp_file=""
 
 cleanup_profile_tmp_file() {
@@ -20,8 +22,14 @@ for argument in "$@"; do
         --apply-gunicorn-profile)
             apply_gunicorn_profile=1
             ;;
+        --verify)
+            verify_only=1
+            ;;
+        --lock-root-password)
+            lock_root_password=1
+            ;;
         --help|-h)
-            echo "Usage: $0 [ENV_FILE] [--apply-gunicorn-profile]"
+            echo "Usage: $0 [ENV_FILE] [--apply-gunicorn-profile|--verify|--lock-root-password]"
             exit 0
             ;;
         -*)
@@ -40,6 +48,12 @@ done
 
 env_file="${env_file:-$project_dir/.env.production}"
 
+selected_actions="$((apply_gunicorn_profile + verify_only + lock_root_password))"
+if [ "$selected_actions" -gt 1 ]; then
+    echo "Select only one deployment action." >&2
+    exit 1
+fi
+
 if [ ! -f "$env_file" ]; then
     echo "Missing production environment file: $env_file" >&2
     exit 1
@@ -51,6 +65,83 @@ if ! command -v git >/dev/null 2>&1; then
 fi
 
 cd "$project_dir"
+
+verify_deployment() {
+    echo "Container status:"
+    docker compose --env-file "$env_file" ps
+
+    echo "Effective Gunicorn profile:"
+    docker compose --env-file "$env_file" exec -T django \
+        gunicorn \
+            --config config/gunicorn.conf.py \
+            --print-config \
+            config.wsgi:application \
+        | awk '
+            /^(bind|worker_class|workers|threads|timeout|graceful_timeout|keepalive|max_requests|max_requests_jitter)[[:space:]]*=/ {
+                print
+            }
+        '
+
+    echo "Gunicorn processes:"
+    docker compose --env-file "$env_file" top django \
+        | awk 'NR == 1 || /gunicorn/'
+
+    echo "Django production checks:"
+    docker compose --env-file "$env_file" exec -T django \
+        python manage.py check --deploy
+
+    echo "Container resource snapshot:"
+    docker stats --no-stream \
+        --format '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}' \
+        yalla-django-1 yalla-nginx-1 yalla-postgres-1
+
+    echo "Recent error scan:"
+    if docker compose --env-file "$env_file" logs \
+        --since 10m \
+        --tail 200 \
+        --no-color \
+        django nginx postgres \
+        | grep -E 'CRITICAL|Traceback|Unhandled exception'; then
+        echo "Recent critical log entries were found." >&2
+        return 1
+    fi
+    echo "No recent critical log entries found."
+}
+
+lock_root_password_safely() {
+    effective_ssh_config="$(sshd -T)"
+
+    for required_setting in \
+        "permitrootlogin no" \
+        "passwordauthentication no" \
+        "kbdinteractiveauthentication no" \
+        "allowusers deploy"; do
+        if ! printf '%s\n' "$effective_ssh_config" \
+            | grep -qx "$required_setting"; then
+            echo "Refusing to lock root: missing SSH setting: $required_setting" >&2
+            exit 1
+        fi
+    done
+
+    if ! id deploy >/dev/null 2>&1 \
+        || [ ! -s /home/deploy/.ssh/authorized_keys ]; then
+        echo "Refusing to lock root: deploy key access is not configured." >&2
+        exit 1
+    fi
+
+    passwd --lock root >/dev/null
+    passwd --status root | awk '{ print "Root password status: " $2 }'
+}
+
+if [ "$verify_only" -eq 1 ]; then
+    verify_deployment
+    exit 0
+fi
+
+if [ "$lock_root_password" -eq 1 ]; then
+    lock_root_password_safely
+    exit 0
+fi
 
 current_branch="$(git branch --show-current)"
 if [ "$current_branch" != "$deploy_branch" ]; then
