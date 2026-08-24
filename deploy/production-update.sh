@@ -140,8 +140,8 @@ if [ "$apply_gunicorn_profile" -eq 1 ]; then
             }
         }
         END {
-            for (index = 1; index <= count; index++) {
-                key = keys[index]
+            for (position = 1; position <= count; position++) {
+                key = keys[position]
                 if (!seen[key]) {
                     print key "=" values[key]
                 }
