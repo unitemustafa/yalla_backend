@@ -1167,6 +1167,34 @@ class HomeAPITests(APITestCase):
         market = Market.objects.get(pk=response.data["id"])
         self.assertTrue(market.image.name.startswith("markets/"))
 
+    @override_settings(MEDIA_ROOT="/tmp/yalla_market_without_subcategories_test")
+    def test_admin_can_create_market_without_internal_subcategories(self):
+        classification = MarketClassification.objects.create(
+            name="Market without internal categories"
+        )
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{HOME_BASE}/markets/",
+            {
+                "classification_id": classification.id,
+                "name": "محل جديد بلا منتجات",
+                "scope": Market.Scope.GENERAL,
+                "image": market_image_upload("no-categories-logo.png"),
+                "cover_image": market_image_upload(
+                    "no-categories-cover.png", "red"
+                ),
+                "delivery_time_min_minutes": "20",
+                "delivery_time_max_minutes": "35",
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["subcategories"], [])
+        market = Market.objects.get(pk=response.data["id"])
+        self.assertFalse(market.subcategory_assignments.exists())
+
     def test_admin_market_create_requires_logo_cover_and_delivery_time(self):
         classification = MarketClassification.objects.create(
             name="Required storefront fields"

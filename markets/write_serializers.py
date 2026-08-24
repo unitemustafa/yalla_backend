@@ -105,16 +105,6 @@ class AdminMarketWriteMixin:
         return [str(value) for value in raw_ids]
 
     def _validate_subcategories(self, selected_subcategories):
-        if (
-            self.instance is None or selected_subcategories is not None
-        ) and not selected_subcategories:
-            raise serializers.ValidationError(
-                {
-                    "subcategory_ids": (
-                        "At least one active store subcategory is required."
-                    )
-                }
-            )
         if selected_subcategories is None:
             return
 
@@ -270,7 +260,7 @@ class AdminMarketWriteMixin:
         send_notification = validated_data.pop("send_notification", False)
         delivery_areas = validated_data.pop("delivery_areas", [])
         service_cities = validated_data.pop("service_cities", [])
-        subcategories = validated_data.pop("subcategory_ids")
+        subcategories = validated_data.pop("subcategory_ids", [])
         market_types = validated_data.pop("market_types", [])
         market = Market.objects.create(**validated_data)
         market.service_cities.set(service_cities)

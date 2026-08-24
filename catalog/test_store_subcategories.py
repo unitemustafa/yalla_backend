@@ -126,7 +126,7 @@ class StoreSubcategoryAPITests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_market_requires_ordered_active_subcategories(self):
+    def test_market_accepts_optional_ordered_active_subcategories(self):
         serializer = AdminMarketSerializer(
             data={
                 "classification_id": self.classification.id,
@@ -160,16 +160,20 @@ class StoreSubcategoryAPITests(APITestCase):
                 "delivery_time_max_minutes": 40,
             }
         )
-        self.assertFalse(missing.is_valid())
-        self.assertIn("subcategory_ids", missing.errors)
+        self.assertTrue(missing.is_valid(), missing.errors)
+        market_without_categories = missing.save()
+        self.assertFalse(
+            market_without_categories.subcategory_assignments.exists()
+        )
 
         remove_all = AdminMarketSerializer(
             market,
             data={"subcategory_ids": []},
             partial=True,
         )
-        self.assertFalse(remove_all.is_valid())
-        self.assertIn("subcategory_ids", remove_all.errors)
+        self.assertTrue(remove_all.is_valid(), remove_all.errors)
+        remove_all.save()
+        self.assertFalse(market.subcategory_assignments.exists())
 
     def test_product_requires_active_subcategory_assigned_to_market(self):
         market = self.create_market()
