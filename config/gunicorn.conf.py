@@ -1,4 +1,16 @@
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Match Django's local-development behavior: a project .env file is convenient
+# locally, while production must receive its environment from the platform.
+# Explicit shell/container values always remain authoritative.
+if os.environ.get("APP_ENV", "development").strip().lower() == "development":
+    load_dotenv(BASE_DIR / ".env", override=False)
 
 
 def _positive_int(name, default):
@@ -14,8 +26,8 @@ bind = f"0.0.0.0:{os.environ.get('PORT', '8000')}"
 # Image uploads perform bounded Pillow work before writing to the local media
 # volume. A small thread pool keeps other requests responsive during that work.
 worker_class = "gthread"
-workers = _positive_int("WEB_CONCURRENCY", 2)
-threads = _positive_int("GUNICORN_THREADS", 4)
+workers = _positive_int("WEB_CONCURRENCY", 4)
+threads = _positive_int("GUNICORN_THREADS", 2)
 
 timeout = _positive_int("GUNICORN_TIMEOUT", 120)
 graceful_timeout = _positive_int("GUNICORN_GRACEFUL_TIMEOUT", 30)

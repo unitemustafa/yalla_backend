@@ -40,27 +40,27 @@ administrative reporting.
 
 ### Prerequisites
 
-- Python 3.13
+- [uv](https://docs.astral.sh/uv/)
 - PostgreSQL
 
 ### 1. Create a virtual environment
 
-On Linux or macOS:
+Install Python 3.13 and create the environment with uv:
 
 ```bash
-python3.13 -m venv .venv
+uv python install 3.13
+uv venv --python 3.13 .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
+uv pip install -r requirements-dev.txt
 ```
 
 On Windows PowerShell:
 
 ```powershell
-py -3.13 -m venv .venv
+uv python install 3.13
+uv venv --python 3.13 .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
+uv pip install -r requirements-dev.txt
 ```
 
 ### 2. Configure the environment
@@ -91,6 +91,16 @@ python manage.py runserver
 ```
 
 The API is available at `http://127.0.0.1:8000/api/v1/`.
+
+To exercise the production application server locally, stop `runserver` first
+and start Gunicorn on the loopback interface. Gunicorn loads the same local
+development `.env` file without overriding values already set in the shell:
+
+```bash
+gunicorn --config config/gunicorn.conf.py --bind 127.0.0.1:8000 config.wsgi:application
+```
+
+Do not run both servers on port 8000 at the same time.
 
 ### 4. Add optional development data
 
@@ -193,6 +203,11 @@ request-size, Gunicorn, and rate-policy variables have safe defaults in
 | `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | SMTP login and secret used for OTP email |
 | `DEFAULT_FROM_EMAIL` | Verified sender address used for outbound OTP email |
 | `GEOAPIFY_API_KEY` | Reverse-geocoding integration key |
+| `PORT` | Internal Gunicorn port; keep 8000 private behind Nginx in production |
+| `WEB_CONCURRENCY` / `GUNICORN_THREADS` | Gunicorn process and thread concurrency |
+| `GUNICORN_TIMEOUT` / `GUNICORN_GRACEFUL_TIMEOUT` | Hard and graceful request timeouts |
+| `GUNICORN_KEEPALIVE` | Keep-alive duration in seconds |
+| `GUNICORN_MAX_REQUESTS` / `GUNICORN_MAX_REQUESTS_JITTER` | Worker recycling limits |
 
 Production must use exact HTTPS origins, must not enable debug mode, and must
 never enable `AUTH_OTP_INCLUDE_IN_RESPONSE`. See
