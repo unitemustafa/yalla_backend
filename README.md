@@ -263,6 +263,19 @@ cd /opt/yalla_backend
 ./deploy/production-update.sh
 ```
 
+To apply the documented 4-worker, 2-thread VPS profile, run the update once
+with the dedicated option:
+
+```bash
+sudo ./deploy/production-update.sh --apply-gunicorn-profile
+```
+
+That option first creates a PostgreSQL and media backup, stores a mode-0600
+copy of `.env.production`, tags the current application image for rollback,
+and changes only the documented Gunicorn keys. If the application fails to
+become healthy, it restores the environment and previous image without
+automatically reversing migrations.
+
 The update script creates a database backup, fast-forwards the server checkout,
 rebuilds the changed images, runs the release step, and waits for the services
 to become healthy. It preserves the server-only `.env.production` file and the
