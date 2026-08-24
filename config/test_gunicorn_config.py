@@ -12,6 +12,7 @@ CONFIG_PATH = Path(__file__).with_name("gunicorn.conf.py")
 
 class GunicornConfigTests(SimpleTestCase):
     def load_config(self, config_path=CONFIG_PATH, **environment):
+        environment.setdefault("APP_ENV", "production")
         with patch.dict(os.environ, environment, clear=True):
             return runpy.run_path(str(config_path))
 
