@@ -5,7 +5,8 @@ from rest_framework import serializers
 
 from catalog.models import ProductVariant
 from config.image_validation import validate_safe_image
-from locations.models import Address, DeliveryArea, ServiceCity
+from locations.models import Address, DeliveryArea, ServiceCity, ShippingCompany
+from locations.serializers import ShippingCompanySummarySerializer
 from markets.models import Market
 from markets.region import (
     address_matches_market_region,
@@ -709,6 +710,12 @@ class OrderPreviewSerializer(serializers.Serializer):
 
 class ClientOrderCreateSerializer(OrderPreviewSerializer):
     payment_method = serializers.CharField(max_length=50)
+    shipping_company_id = serializers.PrimaryKeyRelatedField(
+        queryset=ShippingCompany.objects.prefetch_related("service_cities"),
+        source="shipping_company",
+        required=False,
+        allow_null=True,
+    )
     description = serializers.CharField(required=False, allow_blank=True)
     delivery_note = serializers.CharField(required=False, allow_blank=True)
 
@@ -717,6 +724,33 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
         if attrs["delivery_address"] is None:
             raise serializers.ValidationError(
                 {"address": "Add an address before creating an order."}
+            )
+
+        address = attrs["delivery_address"]
+        shipping_company = attrs.get("shipping_company")
+        available_companies = ShippingCompany.objects.none()
+        if address.service_city_id:
+            available_companies = ShippingCompany.objects.filter(
+                is_active=True,
+                archived_at__isnull=True,
+                service_cities=address.service_city,
+                service_cities__is_active=True,
+                service_cities__archived_at__isnull=True,
+            ).distinct()
+        has_available_companies = available_companies.exists()
+        if has_available_companies and shipping_company is None:
+            raise serializers.ValidationError(
+                {"shipping_company_id": "Choose a shipping company for this city."}
+            )
+        if shipping_company is not None and not available_companies.filter(
+            pk=shipping_company.pk
+        ).exists():
+            raise serializers.ValidationError(
+                {
+                    "shipping_company_id": (
+                        "Shipping company is not available for the delivery city."
+                    )
+                }
             )
 
         order_groups = self._order_groups(
@@ -762,6 +796,7 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
         payment_method = self.validated_data["payment_method"].strip()
         description = self.validated_data.get("description", "").strip()
         delivery_note = self.validated_data.get("delivery_note", "").strip()
+        shipping_company = self.validated_data.get("shipping_company")
         order_groups = self.validated_data["order_groups"]
         sorted_market_ids = sorted(order_groups)
         subtotal = sum(
@@ -788,6 +823,7 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
         order = Order.objects.create(
             user=user,
             delivery_address=address,
+            shipping_company=shipping_company,
             order_scope=order_scope,
             service_city=service_city,
             delivery_area=delivery_area,
@@ -1245,6 +1281,8 @@ class OrderSerializer(
     service_city = ServiceCitySummarySerializer(read_only=True)
     delivery_area = DeliveryAreaSummarySerializer(read_only=True)
     delivery_address = serializers.SerializerMethodField()
+    shipping_company_id = serializers.IntegerField(read_only=True)
+    shipping_company = ShippingCompanySummarySerializer(read_only=True)
     delivery_price_status = serializers.SerializerMethodField()
     is_multi_market = serializers.SerializerMethodField()
     market_count = serializers.SerializerMethodField()
@@ -1274,6 +1312,8 @@ class OrderSerializer(
             "customer",
             "delivery_address_id",
             "delivery_address",
+            "shipping_company_id",
+            "shipping_company",
             "assigned_representative_id",
             "assigned_representative",
             "market_id",

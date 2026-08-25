@@ -16,12 +16,13 @@ from notifications.delivery_area_services import (
     schedule_delivery_area_created_notifications,
 )
 
-from .models import Address, DeliveryArea, ServiceCity
+from .models import Address, DeliveryArea, ServiceCity, ShippingCompany
 from .serializers import (
     AddressSerializer,
     AddressWriteSerializer,
     DeliveryAreaSerializer,
     ServiceCitySerializer,
+    ShippingCompanySerializer,
 )
 
 
@@ -53,6 +54,7 @@ def service_city_queryset():
             addresses__user__deleted_at__isnull=True,
         )
         | Q(orders__isnull=False)
+        | Q(shipping_companies__isnull=False)
         | Q(
             market_region_users__isnull=False,
             market_region_users__deleted_at__isnull=True,
@@ -81,6 +83,7 @@ def service_city_relation_counts(city):
             user__deleted_at__isnull=True,
         ).count(),
         "orders": Order.objects.filter(service_city=city).count(),
+        "shipping_companies": city.shipping_companies.distinct().count(),
         "users": city.market_region_users.filter(
             deleted_at__isnull=True,
         ).count(),
@@ -316,6 +319,84 @@ class DeliveryAreaDetailView(
                 ).data
             )
         return super().patch(request, *args, **kwargs)
+
+
+class ShippingCompanyListCreateView(generics.ListCreateAPIView):
+    permission_classes = [DeliveryAreaPermission]
+    serializer_class = ShippingCompanySerializer
+
+    def get_queryset(self):
+        queryset = ShippingCompany.objects.prefetch_related(
+            "service_cities",
+        ).order_by("name", "id")
+        if self.request.user.role != self.request.user.Role.ADMIN:
+            queryset = queryset.filter(
+                is_active=True,
+                archived_at__isnull=True,
+                service_cities__is_active=True,
+                service_cities__archived_at__isnull=True,
+            ).distinct()
+        elif self.request.query_params.get("archived") in {"true", "1"}:
+            queryset = queryset.filter(archived_at__isnull=False)
+        else:
+            queryset = queryset.filter(archived_at__isnull=True)
+        city_id = self.request.query_params.get("service_city_id")
+        if city_id:
+            queryset = queryset.filter(service_cities__id=city_id).distinct()
+        return queryset
+
+
+class ShippingCompanyDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [DeliveryAreaPermission]
+    serializer_class = ShippingCompanySerializer
+    lookup_url_kwarg = "company_id"
+
+    def get_queryset(self):
+        queryset = ShippingCompany.objects.prefetch_related("service_cities")
+        if self.request.user.role != self.request.user.Role.ADMIN:
+            queryset = queryset.filter(
+                is_active=True,
+                archived_at__isnull=True,
+                service_cities__is_active=True,
+                service_cities__archived_at__isnull=True,
+            ).distinct()
+        return queryset
+
+    def patch(self, request, *args, **kwargs):
+        company = self.get_object()
+        if request.data.get("archive") is True:
+            company.is_active = False
+            company.archived_at = company.archived_at or timezone.now()
+            company.save(update_fields=("is_active", "archived_at", "updated_at"))
+            return Response(self.get_serializer(company).data)
+        if request.data.get("restore") is True:
+            company.archived_at = None
+            company.save(update_fields=("archived_at", "updated_at"))
+            return Response(self.get_serializer(company).data)
+        return super().patch(request, *args, **kwargs)
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        company = generics.get_object_or_404(
+            self.get_queryset().select_for_update(),
+            pk=kwargs[self.lookup_url_kwarg],
+        )
+        if company.orders.exists():
+            company.is_active = False
+            company.archived_at = timezone.now()
+            company.save(update_fields=("is_active", "archived_at", "updated_at"))
+            return Response(
+                {
+                    "action": "archived",
+                    "detail": "Shipping company was archived because it is used by orders.",
+                },
+                status=status.HTTP_200_OK,
+            )
+        logo = company.logo
+        company.delete()
+        if logo and logo.name:
+            logo.delete(save=False)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 def _send_delivery_area_status_change(area_id, is_active, *, reraise=False):

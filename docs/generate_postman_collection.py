@@ -144,6 +144,7 @@ ORDER_PREVIEW = {
 
 ORDER_CREATE = {
     **ORDER_PREVIEW,
+    "shipping_company_id": "{{shipping_company_id}}",
     "payment_method": "cash",
     "description": "Order created from Postman.",
     "delivery_note": "Please call before delivery.",
@@ -448,6 +449,21 @@ BODY_EXAMPLES: dict[tuple[str, str], dict[str, Any]] = {
     ("PATCH", "/locations/delivery-areas/{area_id}/"): raw(
         {"delivery_price": "40.00", "eta_max_minutes": 50}
     ),
+    ("POST", "/locations/shipping-companies/"): form(
+        ("name", "Postman Shipping {{run_suffix}}", "text", False),
+        ("service_city_ids", "{{service_city_id}}", "text", False),
+        ("is_active", "true", "text", False),
+        ("logo", "{{sample_image_path}}", "file", True),
+    ),
+    ("PUT", "/locations/shipping-companies/{company_id}/"): form(
+        ("name", "Replaced Postman Shipping", "text", False),
+        ("service_city_ids", "{{service_city_id}}", "text", False),
+        ("is_active", "true", "text", False),
+        ("logo", "{{sample_image_path}}", "file", True),
+    ),
+    ("PATCH", "/locations/shipping-companies/{company_id}/"): raw(
+        {"is_active": False}
+    ),
     ("POST", "/locations/service-cities/"): raw(
         {
             "name": "Postman City {{run_suffix}}",
@@ -610,6 +626,10 @@ QUERY_EXAMPLES: dict[tuple[str, str], list[dict[str, Any]]] = {
     ],
     ("GET", "/locations/service-cities/"): [
         {"key": "archived", "value": "false"}
+    ],
+    ("GET", "/locations/shipping-companies/"): [
+        {"key": "service_city_id", "value": "{{service_city_id}}"},
+        {"key": "archived", "value": "false", "disabled": True},
     ],
     ("GET", "/locations/service-cities/coverage-lookup/"): [
         {"key": "q", "value": "Cairo"},
@@ -811,6 +831,7 @@ PAGINATED_PATHS = {
     "/locations/addresses/",
     "/locations/delivery-areas/",
     "/locations/service-cities/",
+    "/locations/shipping-companies/",
     "/notifications/",
     "/offers/",
     "/orders/",
@@ -838,6 +859,7 @@ CAPTURE_IDS = {
     "/addresses/": "address_id",
     "/locations/delivery-areas/": "delivery_area_id",
     "/locations/service-cities/": "service_city_id",
+    "/locations/shipping-companies/": "shipping_company_id",
     "/notifications/": "notification_id",
     "/offers/": "offer_id",
     "/orders/": "order_id",
@@ -868,6 +890,9 @@ PATH_PARAMETER_VARIABLES = {
     ),
     ("/locations/delivery-areas/{area_id}/", "area_id"): "delivery_area_id",
     ("/locations/service-cities/{city_id}/", "city_id"): "service_city_id",
+    ("/locations/shipping-companies/{company_id}/", "company_id"): (
+        "shipping_company_id"
+    ),
     ("/partners/admin/applications/{application_id}/", "application_id"): (
         "partner_application_id"
     ),
@@ -983,6 +1008,8 @@ def role_for(method: str, path: str) -> str:
     if path.startswith("/locations/service-cities/"):
         return "Admin"
     if path.startswith("/locations/delivery-areas/"):
+        return "Client" if method == "GET" else "Admin"
+    if path.startswith("/locations/shipping-companies/"):
         return "Client" if method == "GET" else "Admin"
     if path.startswith("/offers/"):
         return "Client" if method == "GET" else "Admin"

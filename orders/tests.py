@@ -25,7 +25,7 @@ from catalog.models import (
     ProductVariant,
     VariantAttributeValue,
 )
-from locations.models import Address, DeliveryArea, ServiceCity
+from locations.models import Address, DeliveryArea, ServiceCity, ShippingCompany
 from markets.models import Market, MarketClassification
 from offers.models import Offer, OfferItem
 from notifications.models import Notification
@@ -281,6 +281,61 @@ class OrderAPITests(APITestCase):
             self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
             self.assertEqual(response.data["code"], "account_inactive")
         self.assertFalse(Order.objects.exists())
+
+    def test_client_must_choose_available_shipping_company_and_order_exposes_it(self):
+        company = ShippingCompany.objects.create(name="Order Shipping")
+        company.service_cities.add(self.service_city)
+        self.authenticate_customer()
+        payload = {
+            "address_id": self.address.id,
+            "payment_method": "cash_on_delivery",
+            "items": [{"variant_id": self.variant.id, "quantity": 1}],
+        }
+
+        missing = self.client.post(f"{ORDERS_BASE}/create/", payload, format="json")
+        payload["shipping_company_id"] = company.id
+        created = self.client.post(f"{ORDERS_BASE}/create/", payload, format="json")
+
+        self.assertEqual(missing.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("shipping_company_id", missing.data)
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.data)
+        self.assertEqual(created.data[0]["shipping_company_id"], company.id)
+        self.assertEqual(created.data[0]["shipping_company"]["name"], "Order Shipping")
+        self.assertEqual(Order.objects.get().shipping_company_id, company.id)
+
+    def test_client_cannot_choose_inactive_or_other_city_shipping_company(self):
+        other_city = ServiceCity.objects.create(name="Other Shipping City")
+        valid = ShippingCompany.objects.create(name="Valid Shipping")
+        valid.service_cities.add(self.service_city)
+        inactive = ShippingCompany.objects.create(
+            name="Inactive Shipping",
+            is_active=False,
+        )
+        inactive.service_cities.add(self.service_city)
+        other = ShippingCompany.objects.create(name="Other Shipping")
+        other.service_cities.add(other_city)
+        self.authenticate_customer()
+        payload = {
+            "address_id": self.address.id,
+            "payment_method": "cash_on_delivery",
+            "items": [{"variant_id": self.variant.id, "quantity": 1}],
+        }
+
+        for company in (inactive, other):
+            response = self.client.post(
+                f"{ORDERS_BASE}/create/",
+                {**payload, "shipping_company_id": company.id},
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertIn("shipping_company_id", response.data)
+
+        valid_response = self.client.post(
+            f"{ORDERS_BASE}/create/",
+            {**payload, "shipping_company_id": valid.id},
+            format="json",
+        )
+        self.assertEqual(valid_response.status_code, status.HTTP_201_CREATED)
 
     @patch("notifications.order_services.send_notification_push")
     def test_multi_market_creation_creates_one_parent_lifecycle_notification(self, send_push):

@@ -51,6 +51,13 @@ class Order(models.Model):
         blank=True,
         null=True,
     )
+    shipping_company = models.ForeignKey(
+        "locations.ShippingCompany",
+        on_delete=models.PROTECT,
+        related_name="orders",
+        blank=True,
+        null=True,
+    )
     assigned_representative = models.ForeignKey(
         "accounts.User",
         on_delete=models.PROTECT,

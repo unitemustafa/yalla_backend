@@ -59,7 +59,12 @@ def normalized_order_request_data(data, *, include_create_fields=False):
         normalized["service_city_id"] = service_city_id
 
     if include_create_fields:
-        for field in ("payment_method", "description", "delivery_note"):
+        for field in (
+            "payment_method",
+            "description",
+            "delivery_note",
+            "shipping_company_id",
+        ):
             value = data.get(field)
             if value not in (None, ""):
                 normalized[field] = value

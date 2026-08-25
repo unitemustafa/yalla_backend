@@ -14,6 +14,8 @@ from .views import (
     DeliveryAreaListCreateView,
     ServiceCityDetailView,
     ServiceCityListCreateView,
+    ShippingCompanyDetailView,
+    ShippingCompanyListCreateView,
 )
 
 urlpatterns = [
@@ -51,6 +53,16 @@ urlpatterns = [
         "delivery-areas/<int:area_id>/",
         DeliveryAreaDetailView.as_view(),
         name="delivery-area-detail",
+    ),
+    path(
+        "shipping-companies/",
+        ShippingCompanyListCreateView.as_view(),
+        name="shipping-company-list-create",
+    ),
+    path(
+        "shipping-companies/<int:company_id>/",
+        ShippingCompanyDetailView.as_view(),
+        name="shipping-company-detail",
     ),
     path("addresses/", AddressListCreateView.as_view(), name="addresses"),
     path("addresses/default/", AddressDefaultView.as_view(), name="default-address"),

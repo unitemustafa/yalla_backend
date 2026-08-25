@@ -1,22 +1,199 @@
 from decimal import Decimal
 from datetime import timedelta
+from io import BytesIO
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
+from PIL import Image
 
 from accounts.models import CourierProfile
 from markets.models import Market, MarketClassification
 from offers.models import Offer
 from orders.models import Order
 
-from .models import Address, DeliveryArea, ServiceCity
+from .models import Address, DeliveryArea, ServiceCity, ShippingCompany
 from .serializers import AddressSerializer
 
 
 User = get_user_model()
+
+
+def shipping_logo_upload(name="shipping-logo.png"):
+    content = BytesIO()
+    Image.new("RGB", (4, 4), "blue").save(content, format="PNG")
+    return SimpleUploadedFile(name, content.getvalue(), content_type="image/png")
+
+
+class ShippingCompanyAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            username="shipping-admin",
+            email="shipping-admin@example.com",
+            phone="+201000000090",
+            password="Passw0rd!",
+            role=User.Role.ADMIN,
+        )
+        self.customer = User.objects.create_user(
+            username="shipping-client",
+            email="shipping-client@example.com",
+            phone="+201000000091",
+            password="Passw0rd!",
+            role=User.Role.CLIENT,
+        )
+        self.cairo = ServiceCity.objects.create(name="Cairo Shipping")
+        self.giza = ServiceCity.objects.create(name="Giza Shipping")
+        self.client.force_authenticate(self.admin)
+
+    def test_admin_can_create_and_filter_multi_city_shipping_company(self):
+        response = self.client.post(
+            "/api/v1/locations/shipping-companies/",
+            {
+                "name": "Fast Ship",
+                "service_city_ids": [self.cairo.id, self.giza.id],
+                "is_active": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(
+            {city["id"] for city in response.data["service_cities"]},
+            {self.cairo.id, self.giza.id},
+        )
+        filtered = self.client.get(
+            f"/api/v1/locations/shipping-companies/?service_city_id={self.giza.id}"
+        )
+        self.assertEqual([row["name"] for row in filtered.data], ["Fast Ship"])
+
+    def test_admin_can_upload_shipping_company_logo(self):
+        response = self.client.post(
+            "/api/v1/locations/shipping-companies/",
+            {
+                "name": "Logo Shipping",
+                "service_city_ids": [self.cairo.id],
+                "logo": shipping_logo_upload(),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertIn("/media/shipping-companies/", response.data["logo_url"])
+        company = ShippingCompany.objects.get(name="Logo Shipping")
+        self.assertTrue(company.logo.storage.exists(company.logo.name))
+
+    def test_company_requires_at_least_one_active_city_and_unique_name(self):
+        inactive_city = ServiceCity.objects.create(
+            name="Inactive Shipping City",
+            is_active=False,
+        )
+        missing_city = self.client.post(
+            "/api/v1/locations/shipping-companies/",
+            {"name": "No City", "service_city_ids": []},
+            format="json",
+        )
+        inactive = self.client.post(
+            "/api/v1/locations/shipping-companies/",
+            {"name": "Inactive City Company", "service_city_ids": [inactive_city.id]},
+            format="json",
+        )
+        ShippingCompany.objects.create(name="Unique Company").service_cities.add(
+            self.cairo
+        )
+        duplicate = self.client.post(
+            "/api/v1/locations/shipping-companies/",
+            {"name": "unique company", "service_city_ids": [self.giza.id]},
+            format="json",
+        )
+
+        self.assertEqual(missing_city.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(inactive.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(duplicate.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_client_lists_only_active_non_archived_companies_for_city(self):
+        active = ShippingCompany.objects.create(name="Visible Shipping")
+        active.service_cities.add(self.cairo)
+        inactive = ShippingCompany.objects.create(
+            name="Hidden Shipping",
+            is_active=False,
+        )
+        inactive.service_cities.add(self.cairo)
+        archived = ShippingCompany.objects.create(
+            name="Archived Shipping",
+            archived_at=timezone.now(),
+        )
+        archived.service_cities.add(self.cairo)
+        other = ShippingCompany.objects.create(name="Other City Shipping")
+        other.service_cities.add(self.giza)
+        self.client.force_authenticate(self.customer)
+
+        response = self.client.get(
+            f"/api/v1/locations/shipping-companies/?service_city_id={self.cairo.id}"
+        )
+        forbidden = self.client.post(
+            "/api/v1/locations/shipping-companies/",
+            {"name": "Forbidden", "service_city_ids": [self.cairo.id]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([row["id"] for row in response.data], [active.id])
+        self.assertEqual(forbidden.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_used_company_is_archived_and_can_be_restored(self):
+        company = ShippingCompany.objects.create(name="Used Shipping")
+        company.service_cities.add(self.cairo)
+        classification = MarketClassification.objects.create(name="Shipping Market")
+        market = Market.objects.create(
+            classification=classification,
+            name="Shipping Order Market",
+        )
+        Order.objects.create(
+            user=self.customer,
+            market=market,
+            shipping_company=company,
+            payment_method="cash",
+        )
+
+        deleted = self.client.delete(
+            f"/api/v1/locations/shipping-companies/{company.id}/"
+        )
+        archived = self.client.get(
+            "/api/v1/locations/shipping-companies/?archived=true"
+        )
+        restored = self.client.patch(
+            f"/api/v1/locations/shipping-companies/{company.id}/",
+            {"restore": True},
+            format="json",
+        )
+
+        self.assertEqual(deleted.status_code, status.HTTP_200_OK)
+        self.assertEqual(deleted.data["action"], "archived")
+        self.assertEqual([row["id"] for row in archived.data], [company.id])
+        self.assertEqual(restored.status_code, status.HTTP_200_OK)
+        self.assertIsNone(restored.data["archived_at"])
+        self.assertFalse(restored.data["is_active"])
+
+    def test_admin_can_explicitly_archive_unused_company(self):
+        company = ShippingCompany.objects.create(name="Unused Shipping")
+        company.service_cities.add(self.cairo)
+
+        archived = self.client.patch(
+            f"/api/v1/locations/shipping-companies/{company.id}/",
+            {"archive": True},
+            format="json",
+        )
+
+        self.assertEqual(archived.status_code, status.HTTP_200_OK)
+        self.assertIsNotNone(archived.data["archived_at"])
+        self.assertFalse(archived.data["is_active"])
+        self.assertTrue(ShippingCompany.objects.filter(pk=company.id).exists())
+
+
 
 
 class AddressAPITests(TestCase):

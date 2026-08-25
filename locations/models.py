@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models.functions import Lower
 
 class ServiceCity(models.Model):
     name = models.CharField(max_length=100)
@@ -41,6 +42,7 @@ class ServiceCity(models.Model):
             or self.markets.exists()
             or self.offers.exists()
             or self.home_campaigns.exists()
+            or self.shipping_companies.exists()
             or CourierProfile.objects.filter(
                 service_city=self,
                 user__deleted_at__isnull=True,
@@ -50,6 +52,38 @@ class ServiceCity(models.Model):
             or self.market_region_users.filter(deleted_at__isnull=True).exists()
         )
         return "archive" if is_protected else "delete"
+
+    def __str__(self):
+        return self.name
+
+
+class ShippingCompany(models.Model):
+    name = models.CharField(max_length=150)
+    logo = models.ImageField(
+        upload_to="shipping-companies/",
+        blank=True,
+        null=True,
+    )
+    service_cities = models.ManyToManyField(
+        ServiceCity,
+        related_name="shipping_companies",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    archived_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("name", "id")
+        constraints = [
+            models.UniqueConstraint(
+                Lower("name"),
+                name="locations_shipping_company_name_ci_unique",
+            ),
+        ]
+
+    def get_deletion_mode(self):
+        return "archive" if self.orders.exists() else "delete"
 
     def __str__(self):
         return self.name

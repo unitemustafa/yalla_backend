@@ -14,6 +14,7 @@ def order_queryset():
             "delivery_address__service_city",
             "delivery_address__delivery_area",
             "delivery_address__delivery_area__service_city",
+            "shipping_company",
             "assigned_representative",
             "assigned_representative__courier_profile",
             "assigned_representative__courier_profile__service_city",

@@ -3,13 +3,14 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from accounts.models import User
+from config.image_validation import validate_safe_image
 
 from .coverage import (
     contains_point,
     coverage_is_configured,
     matching_delivery_area,
 )
-from .models import Address, DeliveryArea, ServiceCity
+from .models import Address, DeliveryArea, ServiceCity, ShippingCompany
 
 
 class ServiceCitySerializer(serializers.ModelSerializer):
@@ -99,6 +100,118 @@ class ServiceCitySerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("Delivery price cannot be negative.")
         return value
+
+
+class ShippingCompanyServiceCitySummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ServiceCity
+        fields = ("id", "name", "is_active", "archived_at")
+
+
+class ShippingCompanySummarySerializer(serializers.ModelSerializer):
+    logo_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ShippingCompany
+        fields = ("id", "name", "logo_url")
+
+    def get_logo_url(self, instance) -> str | None:
+        if not instance.logo:
+            return None
+        try:
+            url = instance.logo.url
+        except ValueError:
+            return None
+        request = self.context.get("request")
+        return request.build_absolute_uri(url) if request else url
+
+
+class ShippingCompanySerializer(ShippingCompanySummarySerializer):
+    logo = serializers.ImageField(
+        write_only=True,
+        required=False,
+        allow_null=False,
+    )
+    remove_logo = serializers.BooleanField(write_only=True, required=False)
+    service_city_ids = serializers.PrimaryKeyRelatedField(
+        queryset=ServiceCity.objects.filter(
+            is_active=True,
+            archived_at__isnull=True,
+        ),
+        source="service_cities",
+        many=True,
+        allow_empty=False,
+    )
+    service_cities = ShippingCompanyServiceCitySummarySerializer(
+        many=True,
+        read_only=True,
+    )
+    deletion_mode = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ShippingCompany
+        fields = (
+            "id",
+            "name",
+            "logo",
+            "remove_logo",
+            "logo_url",
+            "service_city_ids",
+            "service_cities",
+            "is_active",
+            "archived_at",
+            "deletion_mode",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "logo_url",
+            "archived_at",
+            "deletion_mode",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_deletion_mode(self, instance) -> str:
+        return instance.get_deletion_mode()
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Name is required.")
+        duplicate = ShippingCompany.objects.filter(name__iexact=value)
+        if self.instance is not None:
+            duplicate = duplicate.exclude(pk=self.instance.pk)
+        if duplicate.exists():
+            raise serializers.ValidationError(
+                "A shipping company with this name already exists."
+            )
+        return value
+
+    def validate_logo(self, value):
+        if value.size > 5 * 1024 * 1024:
+            raise serializers.ValidationError(
+                "Shipping company logo must be 5 MB or smaller."
+            )
+        return validate_safe_image(value)
+
+    def create(self, validated_data):
+        validated_data.pop("remove_logo", False)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        logo = validated_data.get("logo")
+        remove_logo = validated_data.pop("remove_logo", False)
+        old_logo = instance.logo if logo is not None or remove_logo else None
+        if remove_logo and logo is None:
+            validated_data["logo"] = None
+        instance = super().update(instance, validated_data)
+        if old_logo and old_logo.name:
+            current_name = instance.logo.name if instance.logo else ""
+            if old_logo.name != current_name:
+                old_logo.delete(save=False)
+        return instance
 
 
 class DeliveryAreaSerializer(ServiceCitySerializer):

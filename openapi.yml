@@ -1423,6 +1423,16 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/home/market-types/reorder/:
+    post:
+      operationId: v1_home_market_types_reorder_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
   /api/v1/home/markets/:
     get:
       operationId: v1_home_markets_retrieve
@@ -1984,6 +1994,154 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v1/locations/shipping-companies/:
+    get:
+      operationId: v1_locations_shipping_companies_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedShippingCompanyList'
+          description: ''
+    post:
+      operationId: v1_locations_shipping_companies_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShippingCompanyRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ShippingCompanyRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ShippingCompanyRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShippingCompany'
+          description: ''
+  /api/v1/locations/shipping-companies/{company_id}/:
+    get:
+      operationId: v1_locations_shipping_companies_retrieve_by_company_id
+      parameters:
+      - in: path
+        name: company_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShippingCompany'
+          description: ''
+    put:
+      operationId: v1_locations_shipping_companies_update_by_company_id
+      parameters:
+      - in: path
+        name: company_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShippingCompanyRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ShippingCompanyRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ShippingCompanyRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShippingCompany'
+          description: ''
+    patch:
+      operationId: v1_locations_shipping_companies_partial_update_by_company_id
+      parameters:
+      - in: path
+        name: company_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedShippingCompanyRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedShippingCompanyRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedShippingCompanyRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShippingCompany'
+          description: ''
+    delete:
+      operationId: v1_locations_shipping_companies_destroy_by_company_id
+      parameters:
+      - in: path
+        name: company_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/market-region/detect/:
     post:
       operationId: v1_market_region_detect_create
@@ -2202,6 +2360,87 @@ paths:
       parameters:
       - in: path
         name: offer_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/offers/home-campaigns/:
+    get:
+      operationId: v1_offers_home_campaigns_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_offers_home_campaigns_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/offers/home-campaigns/{campaign_id}/:
+    get:
+      operationId: v1_offers_home_campaigns_retrieve_by_campaign_id
+      parameters:
+      - in: path
+        name: campaign_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_offers_home_campaigns_partial_update_by_campaign_id
+      parameters:
+      - in: path
+        name: campaign_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_offers_home_campaigns_destroy_by_campaign_id
+      parameters:
+      - in: path
+        name: campaign_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/offers/home-campaigns/{campaign_id}/media/:
+    post:
+      operationId: v1_offers_home_campaigns_media_create_by_campaign_id
+      parameters:
+      - in: path
+        name: campaign_id
         schema:
           type: integer
         required: true
@@ -3967,6 +4206,16 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v2/home/market-types/reorder/:
+    post:
+      operationId: v2_home_market_types_reorder_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
   /api/v2/home/markets/:
     get:
       operationId: v2_home_markets_retrieve
@@ -4528,6 +4777,154 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v2/locations/shipping-companies/:
+    get:
+      operationId: v2_locations_shipping_companies_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedShippingCompanyList'
+          description: ''
+    post:
+      operationId: v2_locations_shipping_companies_create
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShippingCompanyRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ShippingCompanyRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ShippingCompanyRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShippingCompany'
+          description: ''
+  /api/v2/locations/shipping-companies/{company_id}/:
+    get:
+      operationId: v2_locations_shipping_companies_retrieve_by_company_id
+      parameters:
+      - in: path
+        name: company_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShippingCompany'
+          description: ''
+    put:
+      operationId: v2_locations_shipping_companies_update_by_company_id
+      parameters:
+      - in: path
+        name: company_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShippingCompanyRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ShippingCompanyRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ShippingCompanyRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShippingCompany'
+          description: ''
+    patch:
+      operationId: v2_locations_shipping_companies_partial_update_by_company_id
+      parameters:
+      - in: path
+        name: company_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedShippingCompanyRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedShippingCompanyRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedShippingCompanyRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShippingCompany'
+          description: ''
+    delete:
+      operationId: v2_locations_shipping_companies_destroy_by_company_id
+      parameters:
+      - in: path
+        name: company_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v2/market-region/detect/:
     post:
       operationId: v2_market_region_detect_create
@@ -4746,6 +5143,87 @@ paths:
       parameters:
       - in: path
         name: offer_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/offers/home-campaigns/:
+    get:
+      operationId: v2_offers_home_campaigns_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_offers_home_campaigns_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/offers/home-campaigns/{campaign_id}/:
+    get:
+      operationId: v2_offers_home_campaigns_retrieve_by_campaign_id
+      parameters:
+      - in: path
+        name: campaign_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_offers_home_campaigns_partial_update_by_campaign_id
+      parameters:
+      - in: path
+        name: campaign_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v2_offers_home_campaigns_destroy_by_campaign_id
+      parameters:
+      - in: path
+        name: campaign_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/offers/home-campaigns/{campaign_id}/media/:
+    post:
+      operationId: v2_offers_home_campaigns_media_create_by_campaign_id
+      parameters:
+      - in: path
+        name: campaign_id
         schema:
           type: integer
         required: true
@@ -5145,6 +5623,13 @@ components:
           additionalProperties: {}
           nullable: true
           readOnly: true
+        shipping_company_id:
+          type: integer
+          readOnly: true
+        shipping_company:
+          allOf:
+          - $ref: '#/components/schemas/ShippingCompanySummary'
+          readOnly: true
         assigned_representative_id:
           type: integer
           readOnly: true
@@ -5377,6 +5862,8 @@ components:
       - rejection_reason
       - review_status
       - service_city
+      - shipping_company
+      - shipping_company_id
       - status
       - subtotal_price
       - total_price
@@ -5603,15 +6090,13 @@ components:
           pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
         eta_min_minutes:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
           nullable: true
         eta_max_minutes:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
           nullable: true
         is_active:
           type: boolean
@@ -5666,15 +6151,13 @@ components:
           pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
         eta_min_minutes:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
           nullable: true
         eta_max_minutes:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
           nullable: true
         is_active:
           type: boolean
@@ -5876,6 +6359,13 @@ components:
           type: object
           additionalProperties: {}
           nullable: true
+          readOnly: true
+        shipping_company_id:
+          type: integer
+          readOnly: true
+        shipping_company:
+          allOf:
+          - $ref: '#/components/schemas/ShippingCompanySummary'
           readOnly: true
         assigned_representative_id:
           type: integer
@@ -6096,6 +6586,8 @@ components:
       - rejection_reason
       - review_status
       - service_city
+      - shipping_company
+      - shipping_company_id
       - status
       - updated_at
       - user_id
@@ -6178,9 +6670,8 @@ components:
           readOnly: true
         quantity:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
         unit_price:
           type: string
           format: decimal
@@ -6200,9 +6691,8 @@ components:
           type: integer
         quantity:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
         unit_price:
           type: string
           format: decimal
@@ -6551,6 +7041,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ServiceCity'
+    PaginatedShippingCompanyList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShippingCompany'
     PatchedDeliveryAreaRequest:
       type: object
       properties:
@@ -6585,15 +7098,13 @@ components:
           pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
         eta_min_minutes:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
           nullable: true
         eta_max_minutes:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
           nullable: true
         is_active:
           type: boolean
@@ -6685,6 +7196,26 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        is_active:
+          type: boolean
+    PatchedShippingCompanyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 150
+        logo:
+          type: string
+          format: binary
+          writeOnly: true
+        remove_logo:
+          type: boolean
+          writeOnly: true
+        service_city_ids:
+          type: array
+          items:
+            type: integer
         is_active:
           type: boolean
     RepresentativeLogin:
@@ -6850,6 +7381,138 @@ components:
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
         is_active:
           type: boolean
+      required:
+      - name
+    ShippingCompany:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 150
+        logo_url:
+          type: string
+          nullable: true
+          readOnly: true
+        service_city_ids:
+          type: array
+          items:
+            type: integer
+        service_cities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShippingCompanyServiceCitySummary'
+          readOnly: true
+        is_active:
+          type: boolean
+        archived_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        deletion_mode:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - archived_at
+      - created_at
+      - deletion_mode
+      - id
+      - logo_url
+      - name
+      - service_cities
+      - service_city_ids
+      - updated_at
+    ShippingCompanyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 150
+        logo:
+          type: string
+          format: binary
+          writeOnly: true
+        remove_logo:
+          type: boolean
+          writeOnly: true
+        service_city_ids:
+          type: array
+          items:
+            type: integer
+        is_active:
+          type: boolean
+      required:
+      - name
+      - service_city_ids
+    ShippingCompanyServiceCitySummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - id
+      - name
+    ShippingCompanyServiceCitySummaryRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        is_active:
+          type: boolean
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - name
+    ShippingCompanySummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 150
+        logo_url:
+          type: string
+          nullable: true
+          readOnly: true
+      required:
+      - id
+      - logo_url
+      - name
+    ShippingCompanySummaryRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 150
       required:
       - name
     TypeEnum:
