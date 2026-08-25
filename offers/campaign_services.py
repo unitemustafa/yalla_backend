@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.utils import timezone
 
 from catalog.models import Product
@@ -8,18 +9,7 @@ from markets.region import (
     visible_offer_queryset,
     visible_product_queryset,
 )
-from orders.models import Order
-
 from .models import HomeCampaign
-
-
-def _audience_for(user):
-    has_completed_order = user.orders.filter(status=Order.Status.DELIVERED).exists()
-    return (
-        HomeCampaign.Audience.RETURNING_CLIENTS
-        if has_completed_order
-        else HomeCampaign.Audience.NEW_CLIENTS
-    )
 
 
 def _media_is_ready(campaign):
@@ -84,12 +74,10 @@ def active_home_campaign_for(user):
     if selection is None:
         return None
     now = timezone.now()
-    audience = _audience_for(user)
     queryset = HomeCampaign.objects.filter(
         is_active=True,
         start_time__lte=now,
         end_time__gt=now,
-        audience__in=(HomeCampaign.Audience.ALL_CLIENTS, audience),
     )
     if selection["mode"] == user.MarketRegionMode.GENERAL:
         queryset = queryset.filter(show_in_general=True, service_city__isnull=True)
@@ -105,8 +93,17 @@ def active_home_campaign_for(user):
         "target_product__market",
         "target_market__classification",
         "target_product_category",
-    ).order_by("-priority", "-updated_at", "-id")
-    for campaign in queryset:
-        if _media_is_ready(campaign) and _target_is_available(campaign, user):
-            return campaign
-    return None
+    ).order_by("created_at", "id")
+    eligible = [
+        campaign
+        for campaign in queryset
+        if _media_is_ready(campaign) and _target_is_available(campaign, user)
+    ]
+    if not eligible:
+        return None
+    rotation_minutes = max(
+        1,
+        int(getattr(settings, "HOME_CAMPAIGN_ROTATION_MINUTES", 30)),
+    )
+    slot = int(now.timestamp()) // (rotation_minutes * 60)
+    return eligible[slot % len(eligible)]

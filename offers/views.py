@@ -49,7 +49,7 @@ class HomeCampaignListCreateView(APIView):
             "target_product",
             "target_market",
             "target_product_category",
-        ).order_by("-priority", "-updated_at", "-id")
+        ).order_by("-updated_at", "-id")
         return paginated_list_response(
             request,
             queryset,

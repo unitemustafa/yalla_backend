@@ -2,9 +2,11 @@ from datetime import timedelta
 from decimal import Decimal
 import base64
 import struct
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -19,8 +21,6 @@ from catalog.models import (
 )
 from locations.models import ServiceCity
 from markets.models import Market, MarketClassification
-from orders.models import Order
-
 from .models import HomeCampaign
 
 
@@ -121,18 +121,17 @@ class HomeCampaignAPITests(APITestCase):
         payload = {
             "internal_name": "First order campaign",
             "is_active": True,
-            "priority": 10,
             "start_time": (self.now - timedelta(hours=1)).isoformat(),
             "end_time": (self.now + timedelta(days=2)).isoformat(),
             "show_in_general": False,
             "service_city_id": self.city.id,
-            "audience": HomeCampaign.Audience.ALL_CLIENTS,
             "teaser_text": "توصيل مجاني على أول طلب",
             "title": "توصيل مجاني",
             "description": "اطلب الآن واستمتع بالتوصيل المجاني.",
             "template": HomeCampaign.Template.HERO,
             "sheet_size": HomeCampaign.SheetSize.LARGE,
             "content_alignment": HomeCampaign.Alignment.CENTER,
+            "use_theme_colors": True,
             "media_type": HomeCampaign.MediaType.NONE,
             "open_mode": HomeCampaign.OpenMode.TAP_ONLY,
             "dismiss_behavior": HomeCampaign.DismissBehavior.COLLAPSE_ONLY,
@@ -146,12 +145,10 @@ class HomeCampaignAPITests(APITestCase):
         return HomeCampaign.objects.create(
             internal_name=overrides.pop("internal_name", "Campaign"),
             is_active=overrides.pop("is_active", True),
-            priority=overrides.pop("priority", 10),
             start_time=overrides.pop("start_time", self.now - timedelta(hours=1)),
             end_time=overrides.pop("end_time", self.now + timedelta(days=2)),
             show_in_general=overrides.pop("show_in_general", False),
             service_city=overrides.pop("service_city", self.city),
-            audience=overrides.pop("audience", HomeCampaign.Audience.ALL_CLIENTS),
             teaser_text=overrides.pop("teaser_text", "شريط الحملة"),
             title=overrides.pop("title", "عنوان الحملة"),
             description=overrides.pop("description", "وصف الحملة"),
@@ -174,11 +171,13 @@ class HomeCampaignAPITests(APITestCase):
 
         updated = self.client.patch(
             f"{CAMPAIGNS_BASE}{campaign_id}/",
-            {"priority": 99},
+            {"use_theme_colors": False},
             format="json",
         )
         self.assertEqual(updated.status_code, status.HTTP_200_OK)
-        self.assertEqual(updated.data["priority"], 99)
+        self.assertFalse(updated.data["use_theme_colors"])
+        self.assertNotIn("priority", updated.data)
+        self.assertNotIn("audience", updated.data)
 
         deleted = self.client.delete(f"{CAMPAIGNS_BASE}{campaign_id}/")
         self.assertEqual(deleted.status_code, status.HTTP_204_NO_CONTENT)
@@ -209,12 +208,10 @@ class HomeCampaignAPITests(APITestCase):
         self.assertEqual(insecure_url.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("external_url", insecure_url.data)
 
-    def test_home_returns_only_highest_priority_eligible_campaign(self):
-        self.create_campaign(internal_name="Lower", priority=5, teaser_text="الأقل")
+    def test_home_returns_one_eligible_campaign_with_theme_color_mode(self):
         selected = self.create_campaign(
-            internal_name="Higher",
-            priority=50,
-            teaser_text="الأعلى",
+            internal_name="Selected",
+            teaser_text="الحملة",
             action_type=HomeCampaign.ActionType.PRODUCT,
             target_product=self.product,
             cta_label="افتح المنتج",
@@ -225,38 +222,48 @@ class HomeCampaignAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["home_campaign"]["id"], selected.id)
-        self.assertEqual(response.data["home_campaign"]["teaser"]["text"], "الأعلى")
+        self.assertEqual(response.data["home_campaign"]["teaser"]["text"], "الحملة")
+        self.assertTrue(response.data["home_campaign"]["sheet"]["use_theme_colors"])
         self.assertEqual(
             response.data["home_campaign"]["action"]["target"]["id"],
             self.product.id,
         )
 
-    def test_equal_priority_prefers_latest_update_then_highest_id(self):
-        first = self.create_campaign(internal_name="First", priority=20)
-        second = self.create_campaign(internal_name="Second", priority=20)
+    @override_settings(HOME_CAMPAIGN_ROTATION_MINUTES=30)
+    def test_eligible_campaigns_rotate_every_thirty_minutes(self):
+        first = self.create_campaign(internal_name="First")
+        second = self.create_campaign(internal_name="Second")
         self.authenticate(self.user)
 
-        initial_response = self.client.get("/api/v1/home/")
-        self.assertEqual(initial_response.data["home_campaign"]["id"], second.id)
+        with patch("offers.campaign_services.timezone.now", return_value=self.now):
+            initial_response = self.client.get("/api/v1/home/")
+        with patch(
+            "offers.campaign_services.timezone.now",
+            return_value=self.now + timedelta(minutes=30),
+        ):
+            rotated_response = self.client.get("/api/v1/home/")
+        with patch(
+            "offers.campaign_services.timezone.now",
+            return_value=self.now + timedelta(minutes=60),
+        ):
+            repeated_response = self.client.get("/api/v1/home/")
 
-        first.teaser_text = "Updated first"
-        first.save(update_fields=("teaser_text", "updated_at"))
-        updated_response = self.client.get("/api/v1/home/")
-        self.assertEqual(updated_response.data["home_campaign"]["id"], first.id)
+        first_id = initial_response.data["home_campaign"]["id"]
+        self.assertIn(first_id, {first.id, second.id})
+        self.assertNotEqual(rotated_response.data["home_campaign"]["id"], first_id)
+        self.assertEqual(repeated_response.data["home_campaign"]["id"], first_id)
 
     def test_schedule_and_city_scope_exclude_campaigns(self):
         other_city = ServiceCity.objects.create(
             name="Other Campaign City",
             delivery_price=Decimal("25.00"),
         )
-        self.create_campaign(priority=30, service_city=other_city)
+        self.create_campaign(service_city=other_city)
         self.create_campaign(
-            priority=20,
             start_time=self.now + timedelta(hours=1),
             end_time=self.now + timedelta(days=2),
         )
         self.create_campaign(
-            priority=10,
             start_time=self.now - timedelta(days=2),
             end_time=self.now - timedelta(hours=1),
         )
@@ -269,7 +276,6 @@ class HomeCampaignAPITests(APITestCase):
 
     def test_unavailable_internal_target_is_skipped(self):
         self.create_campaign(
-            priority=50,
             action_type=HomeCampaign.ActionType.PRODUCT,
             target_product=self.product,
             cta_label="افتح المنتج",
@@ -282,35 +288,6 @@ class HomeCampaignAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIsNone(response.data["home_campaign"])
-
-    def test_new_and_returning_audiences_follow_delivered_orders(self):
-        new_campaign = self.create_campaign(
-            priority=20,
-            audience=HomeCampaign.Audience.NEW_CLIENTS,
-            teaser_text="عميل جديد",
-        )
-        returning_campaign = self.create_campaign(
-            priority=10,
-            audience=HomeCampaign.Audience.RETURNING_CLIENTS,
-            teaser_text="عميل عائد",
-        )
-        self.authenticate(self.user)
-        new_response = self.client.get("/api/v1/home/")
-        self.assertEqual(new_response.data["home_campaign"]["id"], new_campaign.id)
-
-        Order.objects.create(
-            user=self.user,
-            market=self.market,
-            service_city=self.city,
-            order_scope=Order.Scope.SERVICE_CITY,
-            payment_method="cash",
-            status=Order.Status.DELIVERED,
-        )
-        returning_response = self.client.get("/api/v1/home/")
-        self.assertEqual(
-            returning_response.data["home_campaign"]["id"],
-            returning_campaign.id,
-        )
 
     def test_video_upload_rejects_duration_over_thirty_seconds(self):
         campaign = self.create_campaign(is_active=False)

@@ -1,6 +1,7 @@
 import re
 from urllib.parse import urlparse
 
+from django.conf import settings
 from rest_framework import serializers
 
 from catalog.models import Product, ProductCategory
@@ -60,19 +61,18 @@ class AdminHomeCampaignSerializer(serializers.ModelSerializer):
             "internal_name",
             "is_active",
             "effective_status",
-            "priority",
             "start_time",
             "end_time",
             "show_in_general",
             "service_city_id",
             "service_city",
-            "audience",
             "teaser_text",
             "title",
             "description",
             "template",
             "sheet_size",
             "content_alignment",
+            "use_theme_colors",
             "teaser_background_color",
             "teaser_text_color",
             "sheet_background_color",
@@ -289,6 +289,7 @@ class ClientHomeCampaignSerializer(serializers.ModelSerializer):
             "template": instance.template,
             "size": instance.sheet_size,
             "alignment": instance.content_alignment,
+            "use_theme_colors": instance.use_theme_colors,
             "background_color": instance.sheet_background_color,
             "text_color": instance.sheet_text_color,
             "button_background_color": instance.button_background_color,
@@ -349,4 +350,8 @@ class ClientHomeCampaignSerializer(serializers.ModelSerializer):
         return {
             "open_mode": instance.open_mode,
             "dismiss_behavior": instance.dismiss_behavior,
+            "rotation_seconds": max(
+                60,
+                int(getattr(settings, "HOME_CAMPAIGN_ROTATION_MINUTES", 30)) * 60,
+            ),
         }

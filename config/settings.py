@@ -486,3 +486,7 @@ API_SINGLE_UPLOAD_REQUEST_SIZE = int(
 API_PRODUCT_UPLOAD_REQUEST_SIZE = int(
     os.environ.get("API_PRODUCT_UPLOAD_REQUEST_SIZE", str(55 * 1024 * 1024))
 )
+# Eligible home campaigns rotate automatically instead of using manual priority.
+HOME_CAMPAIGN_ROTATION_MINUTES = int(
+    os.environ.get("HOME_CAMPAIGN_ROTATION_MINUTES", "30")
+)

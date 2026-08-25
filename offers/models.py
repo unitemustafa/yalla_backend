@@ -144,11 +144,6 @@ class OfferItem(models.Model):
 
 
 class HomeCampaign(models.Model):
-    class Audience(models.TextChoices):
-        ALL_CLIENTS = "all_clients", "All clients"
-        NEW_CLIENTS = "new_clients", "New clients"
-        RETURNING_CLIENTS = "returning_clients", "Returning clients"
-
     class Template(models.TextChoices):
         HERO = "hero", "Hero"
         SPLIT = "split", "Split"
@@ -189,7 +184,6 @@ class HomeCampaign(models.Model):
 
     internal_name = models.CharField(max_length=160)
     is_active = models.BooleanField(default=False, db_index=True)
-    priority = models.PositiveIntegerField(default=0, db_index=True)
     start_time = models.DateTimeField(db_index=True)
     end_time = models.DateTimeField(db_index=True)
 
@@ -201,12 +195,6 @@ class HomeCampaign(models.Model):
         blank=True,
         null=True,
     )
-    audience = models.CharField(
-        max_length=24,
-        choices=Audience.choices,
-        default=Audience.ALL_CLIENTS,
-    )
-
     teaser_text = models.CharField(max_length=160)
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
@@ -225,6 +213,7 @@ class HomeCampaign(models.Model):
         choices=Alignment.choices,
         default=Alignment.CENTER,
     )
+    use_theme_colors = models.BooleanField(default=True)
     teaser_background_color = models.CharField(max_length=7, default="#FF5A00")
     teaser_text_color = models.CharField(max_length=7, default="#FFFFFF")
     sheet_background_color = models.CharField(max_length=7, default="#FFFFFF")
@@ -311,7 +300,7 @@ class HomeCampaign(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ("-priority", "-updated_at", "-id")
+        ordering = ("created_at", "id")
         constraints = (
             models.CheckConstraint(
                 condition=models.Q(end_time__gt=models.F("start_time")),
