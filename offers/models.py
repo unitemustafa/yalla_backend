@@ -1,6 +1,8 @@
 from django.db import models
 from django.utils import timezone
 
+from config.media import raw_public_media_storage
+
 
 class Offer(models.Model):
     class OfferType(models.TextChoices):
@@ -139,3 +141,193 @@ class OfferItem(models.Model):
 
     def __str__(self):
         return f"{self.offer} - {self.variant} x{self.quantity}"
+
+
+class HomeCampaign(models.Model):
+    class Audience(models.TextChoices):
+        ALL_CLIENTS = "all_clients", "All clients"
+        NEW_CLIENTS = "new_clients", "New clients"
+        RETURNING_CLIENTS = "returning_clients", "Returning clients"
+
+    class Template(models.TextChoices):
+        HERO = "hero", "Hero"
+        SPLIT = "split", "Split"
+        MEDIA_FOCUS = "media_focus", "Media focus"
+
+    class SheetSize(models.TextChoices):
+        MEDIUM = "medium", "Medium"
+        LARGE = "large", "Large"
+        NEAR_FULL = "near_full", "Near full"
+
+    class Alignment(models.TextChoices):
+        START = "start", "Start"
+        CENTER = "center", "Center"
+
+    class MediaType(models.TextChoices):
+        NONE = "none", "None"
+        IMAGE = "image", "Image"
+        VIDEO = "video", "Video"
+
+    class OpenMode(models.TextChoices):
+        TAP_ONLY = "tap_only", "Tap only"
+        ONCE_PER_SESSION = "once_per_session", "Once per session"
+        ONCE_PER_DAY = "once_per_day", "Once per day"
+
+    class DismissBehavior(models.TextChoices):
+        COLLAPSE_ONLY = "collapse_only", "Collapse only"
+        HIDE_SESSION = "hide_session", "Hide for session"
+        HIDE_DAY = "hide_day", "Hide for day"
+
+    class ActionType(models.TextChoices):
+        NONE = "none", "None"
+        OFFER = "offer", "Offer"
+        PRODUCT = "product", "Product"
+        MARKET = "market", "Market"
+        PRODUCT_CATEGORY = "product_category", "Product category"
+        EXTERNAL_URL = "external_url", "External URL"
+        COPY_TEXT = "copy_text", "Copy text"
+
+    internal_name = models.CharField(max_length=160)
+    is_active = models.BooleanField(default=False, db_index=True)
+    priority = models.PositiveIntegerField(default=0, db_index=True)
+    start_time = models.DateTimeField(db_index=True)
+    end_time = models.DateTimeField(db_index=True)
+
+    show_in_general = models.BooleanField(default=True)
+    service_city = models.ForeignKey(
+        "locations.ServiceCity",
+        on_delete=models.PROTECT,
+        related_name="home_campaigns",
+        blank=True,
+        null=True,
+    )
+    audience = models.CharField(
+        max_length=24,
+        choices=Audience.choices,
+        default=Audience.ALL_CLIENTS,
+    )
+
+    teaser_text = models.CharField(max_length=160)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    template = models.CharField(
+        max_length=24,
+        choices=Template.choices,
+        default=Template.HERO,
+    )
+    sheet_size = models.CharField(
+        max_length=24,
+        choices=SheetSize.choices,
+        default=SheetSize.LARGE,
+    )
+    content_alignment = models.CharField(
+        max_length=12,
+        choices=Alignment.choices,
+        default=Alignment.CENTER,
+    )
+    teaser_background_color = models.CharField(max_length=7, default="#FF5A00")
+    teaser_text_color = models.CharField(max_length=7, default="#FFFFFF")
+    sheet_background_color = models.CharField(max_length=7, default="#FFFFFF")
+    sheet_text_color = models.CharField(max_length=7, default="#202124")
+    button_background_color = models.CharField(max_length=7, default="#FF5A00")
+    button_text_color = models.CharField(max_length=7, default="#FFFFFF")
+
+    media_type = models.CharField(
+        max_length=12,
+        choices=MediaType.choices,
+        default=MediaType.NONE,
+    )
+    teaser_image = models.ImageField(
+        upload_to="home-campaigns/teasers/",
+        blank=True,
+        null=True,
+    )
+    sheet_image = models.ImageField(
+        upload_to="home-campaigns/images/",
+        blank=True,
+        null=True,
+    )
+    video = models.FileField(
+        upload_to="home-campaigns/videos/",
+        storage=raw_public_media_storage,
+        blank=True,
+        null=True,
+    )
+    video_poster = models.ImageField(
+        upload_to="home-campaigns/posters/",
+        blank=True,
+        null=True,
+    )
+
+    open_mode = models.CharField(
+        max_length=24,
+        choices=OpenMode.choices,
+        default=OpenMode.TAP_ONLY,
+    )
+    dismiss_behavior = models.CharField(
+        max_length=24,
+        choices=DismissBehavior.choices,
+        default=DismissBehavior.COLLAPSE_ONLY,
+    )
+
+    action_type = models.CharField(
+        max_length=24,
+        choices=ActionType.choices,
+        default=ActionType.NONE,
+    )
+    cta_label = models.CharField(max_length=80, blank=True, default="")
+    target_offer = models.ForeignKey(
+        Offer,
+        on_delete=models.SET_NULL,
+        related_name="home_campaigns",
+        blank=True,
+        null=True,
+    )
+    target_product = models.ForeignKey(
+        "catalog.Product",
+        on_delete=models.SET_NULL,
+        related_name="home_campaigns",
+        blank=True,
+        null=True,
+    )
+    target_market = models.ForeignKey(
+        "markets.Market",
+        on_delete=models.SET_NULL,
+        related_name="home_campaigns",
+        blank=True,
+        null=True,
+    )
+    target_product_category = models.ForeignKey(
+        "catalog.ProductCategory",
+        on_delete=models.SET_NULL,
+        related_name="home_campaigns",
+        blank=True,
+        null=True,
+    )
+    external_url = models.URLField(blank=True, default="")
+    copy_text = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-priority", "-updated_at", "-id")
+        constraints = (
+            models.CheckConstraint(
+                condition=models.Q(end_time__gt=models.F("start_time")),
+                name="offers_home_campaign_end_after_start",
+            ),
+        )
+
+    def __str__(self):
+        return self.internal_name
+
+    def get_effective_status(self, now=None):
+        now = now or timezone.now()
+        if not self.is_active:
+            return "inactive"
+        if self.end_time <= now:
+            return "expired"
+        if self.start_time > now:
+            return "scheduled"
+        return "active"

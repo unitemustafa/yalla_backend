@@ -1,6 +1,9 @@
 from django.urls import path
 
 from .views import (
+    HomeCampaignDetailView,
+    HomeCampaignListCreateView,
+    HomeCampaignMediaUploadView,
     OfferDetailView,
     OfferImageUploadView,
     OfferListCreateView,
@@ -8,6 +11,21 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        "home-campaigns/",
+        HomeCampaignListCreateView.as_view(),
+        name="home-campaign-list-create",
+    ),
+    path(
+        "home-campaigns/<int:campaign_id>/media/",
+        HomeCampaignMediaUploadView.as_view(),
+        name="home-campaign-media-upload",
+    ),
+    path(
+        "home-campaigns/<int:campaign_id>/",
+        HomeCampaignDetailView.as_view(),
+        name="home-campaign-detail",
+    ),
     path(
         "<int:offer_id>/send-notification/",
         OfferSendNotificationView.as_view(),

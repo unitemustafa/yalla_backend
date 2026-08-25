@@ -17,6 +17,8 @@ from catalog.models import Product, ProductAddition, ProductVariant
 from dashboard.models import DashboardSettings
 from locations.models import DeliveryArea, ServiceCity
 from orders.models import Order
+from offers.campaign_serializers import ClientHomeCampaignSerializer
+from offers.campaign_services import active_home_campaign_for
 
 from .models import Market, MarketClassification, MarketType
 from .region import (
@@ -179,6 +181,7 @@ class HomeView(APIView):
             )
             .order_by("-created_at", "-id")
         )
+        home_campaign = active_home_campaign_for(request.user)
         classifications = (
             MarketClassification.objects.filter(
                 markets__id__in=market_ids,
@@ -209,6 +212,12 @@ class HomeView(APIView):
                     many=True,
                     context=serializer_context,
                 ).data,
+                "home_campaign": ClientHomeCampaignSerializer(
+                    home_campaign,
+                    context={"request": request},
+                ).data
+                if home_campaign is not None
+                else None,
                 "market_classifications": HomeMarketClassificationSerializer(
                     classifications,
                     many=True,

@@ -43,6 +43,7 @@ def service_city_queryset():
         Q(delivery_areas__isnull=False)
         | Q(markets__isnull=False)
         | Q(offers__isnull=False)
+        | Q(home_campaigns__isnull=False)
         | Q(
             courier_profiles__isnull=False,
             courier_profiles__user__deleted_at__isnull=True,
@@ -70,6 +71,7 @@ def service_city_relation_counts(city):
         "delivery_areas": city.delivery_areas.count(),
         "markets": city.markets.distinct().count(),
         "offers": city.offers.distinct().count(),
+        "home_campaigns": city.home_campaigns.distinct().count(),
         "couriers": CourierProfile.objects.filter(
             service_city=city,
             user__deleted_at__isnull=True,

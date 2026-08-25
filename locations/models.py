@@ -40,6 +40,7 @@ class ServiceCity(models.Model):
             self.delivery_areas.exists()
             or self.markets.exists()
             or self.offers.exists()
+            or self.home_campaigns.exists()
             or CourierProfile.objects.filter(
                 service_city=self,
                 user__deleted_at__isnull=True,

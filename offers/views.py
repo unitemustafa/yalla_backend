@@ -21,12 +21,133 @@ from markets.region import (
 )
 from markets.serializers import HomeOfferSerializer
 
-from .models import Offer
+from .models import HomeCampaign, Offer
 from .images import OfferImageStorageError, replace_offer_image
 from .serializers import AdminOfferSerializer, OfferImageUploadSerializer
+from .campaign_serializers import (
+    AdminHomeCampaignSerializer,
+    HomeCampaignMediaSerializer,
+)
 
 
 logger = logging.getLogger(__name__)
+
+
+class HomeCampaignListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _require_admin(request):
+        if request.user.role != User.Role.ADMIN:
+            raise PermissionDenied("Only admin users can manage home campaigns.")
+
+    def get(self, request):
+        self._require_admin(request)
+        queryset = HomeCampaign.objects.select_related(
+            "service_city",
+            "target_offer",
+            "target_product",
+            "target_market",
+            "target_product_category",
+        ).order_by("-priority", "-updated_at", "-id")
+        return paginated_list_response(
+            request,
+            queryset,
+            AdminHomeCampaignSerializer,
+        )
+
+    def post(self, request):
+        self._require_admin(request)
+        serializer = AdminHomeCampaignSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        campaign = serializer.save()
+        return Response(
+            AdminHomeCampaignSerializer(
+                campaign,
+                context={"request": request},
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class HomeCampaignDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _require_admin(request):
+        if request.user.role != User.Role.ADMIN:
+            raise PermissionDenied("Only admin users can manage home campaigns.")
+
+    @staticmethod
+    def _campaign(campaign_id):
+        return get_object_or_404(
+            HomeCampaign.objects.select_related(
+                "service_city",
+                "target_offer",
+                "target_product",
+                "target_market",
+                "target_product_category",
+            ),
+            pk=campaign_id,
+        )
+
+    def get(self, request, campaign_id):
+        self._require_admin(request)
+        return Response(
+            AdminHomeCampaignSerializer(
+                self._campaign(campaign_id),
+                context={"request": request},
+            ).data
+        )
+
+    def patch(self, request, campaign_id):
+        self._require_admin(request)
+        campaign = self._campaign(campaign_id)
+        serializer = AdminHomeCampaignSerializer(
+            campaign,
+            data=request.data,
+            partial=True,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        campaign = serializer.save()
+        return Response(
+            AdminHomeCampaignSerializer(
+                campaign,
+                context={"request": request},
+            ).data
+        )
+
+    def delete(self, request, campaign_id):
+        self._require_admin(request)
+        self._campaign(campaign_id).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class HomeCampaignMediaUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, campaign_id):
+        if request.user.role != User.Role.ADMIN:
+            raise PermissionDenied("Only admin users can manage home campaigns.")
+        campaign = get_object_or_404(HomeCampaign, pk=campaign_id)
+        serializer = HomeCampaignMediaSerializer(
+            campaign,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        campaign = serializer.save()
+        return Response(
+            AdminHomeCampaignSerializer(
+                campaign,
+                context={"request": request},
+            ).data
+        )
 
 
 class OfferListCreateView(APIView):

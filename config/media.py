@@ -72,6 +72,15 @@ class OptimizedPublicMediaStorage(
 
 
 @deconstructible
+class RawPublicMediaStorage(FileSystemStorage):
+    """Public storage for validated non-image media such as campaign MP4s."""
+
+    def save(self, name, content, max_length=None):
+        name = _uuid_name(name, extension="mp4")
+        return super().save(name, content, max_length=max_length)
+
+
+@deconstructible
 class OptimizedPrivateMediaStorage(
     OptimizedImageStorageMixin,
     FileSystemStorage,
@@ -84,3 +93,4 @@ class OptimizedPrivateMediaStorage(
 
 
 private_media_storage = OptimizedPrivateMediaStorage()
+raw_public_media_storage = RawPublicMediaStorage()

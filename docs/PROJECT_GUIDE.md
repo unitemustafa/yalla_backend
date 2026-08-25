@@ -669,7 +669,7 @@ Production settings fail fast when important requirements are unsafe or absent. 
 
 ### 14.1 Storage behavior
 
-All environments use filesystem storage. Validated uploads are normalized to metadata-free WebP files with UUID names. Public files use `MEDIA_URL`; order images and delivery proofs live in a separate private root and are served only after Django authorization through Nginx `X-Accel-Redirect`. Tests use temporary local media/static directories and leave no artifacts in the repository.
+All environments use filesystem storage. Validated image uploads are normalized to metadata-free WebP files with UUID names; validated Home Campaign MP4 files keep their MP4 bytes and receive UUID names. Public files use `MEDIA_URL`; order images and delivery proofs live in a separate private root and are served only after Django authorization through Nginx `X-Accel-Redirect`. Tests use temporary local media/static directories and leave no artifacts in the repository.
 
 ### 14.2 Health and observability
 
