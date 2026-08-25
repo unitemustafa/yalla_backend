@@ -39,7 +39,13 @@ class AdminProductWriteMixin:
             data = dict(data)
         if isinstance(data.get("images"), (list, tuple)):
             data["image_uploads"] = list(data["images"])
-        for key in ("attributes", "variants", "attribute_values", "additions"):
+        for key in (
+            "attributes",
+            "variants",
+            "attribute_values",
+            "additions",
+            "subcategory_ids",
+        ):
             value = data.get(key)
             if key == "additions" and isinstance(value, list) and len(value) == 1:
                 value = value[0]
@@ -89,31 +95,62 @@ class AdminProductWriteMixin:
             )
 
         market = attrs.get("market") or getattr(self.instance, "market", None)
-        subcategory = attrs.get("subcategory") or getattr(
-            self.instance,
-            "subcategory",
-            None,
+        selected_subcategories = attrs.get("subcategories")
+        subcategory_error_field = (
+            "subcategory_ids" if selected_subcategories is not None else "subcategory_id"
         )
-        if market is not None and subcategory is not None:
-            if not MarketSubcategory.objects.filter(
+        legacy_subcategory = attrs.get("subcategory")
+        if selected_subcategories is not None:
+            if not selected_subcategories:
+                raise serializers.ValidationError(
+                    {"subcategory_ids": "Select at least one subcategory."}
+                )
+            if legacy_subcategory is not None:
+                selected_ids = {item.id for item in selected_subcategories}
+                if legacy_subcategory.id not in selected_ids:
+                    raise serializers.ValidationError(
+                        {"subcategory_id": "Primary subcategory must be selected."}
+                    )
+            else:
+                attrs["subcategory"] = selected_subcategories[0]
+        elif legacy_subcategory is not None:
+            selected_subcategories = [legacy_subcategory]
+        elif self.instance is not None:
+            selected_subcategories = list(self.instance.subcategories.all())
+            if not selected_subcategories and self.instance.subcategory_id:
+                selected_subcategories = [self.instance.subcategory]
+        else:
+            raise serializers.ValidationError(
+                {"subcategory_ids": "Select at least one subcategory."}
+            )
+
+        existing_ids = set()
+        if self.instance is not None:
+            existing_ids.update(
+                self.instance.subcategories.values_list("id", flat=True)
+            )
+            if self.instance.subcategory_id:
+                existing_ids.add(self.instance.subcategory_id)
+        for subcategory in selected_subcategories:
+            if market is not None and not MarketSubcategory.objects.filter(
                 market=market,
                 subcategory=subcategory,
             ).exists():
                 raise serializers.ValidationError(
                     {
-                        "subcategory_id": (
-                            "Subcategory must be assigned to the selected market."
+                        subcategory_error_field: (
+                            "Every subcategory must be assigned to the selected market."
                         )
                     }
                 )
             unchanged_inactive = (
                 self.instance is not None
-                and self.instance.subcategory_id == subcategory.id
-                and self.instance.market_id == market.id
+                and self.instance.market_id == getattr(market, "id", None)
+                and subcategory.id in existing_ids
             )
             if not subcategory.is_active and not unchanged_inactive:
                 raise serializers.ValidationError(
-                    {"subcategory_id": "Subcategory must be active."}
+                    {subcategory_error_field: "Subcategories must be active."}
                 )
 
         category = attrs.get("category") or getattr(self.instance, "category", None)
@@ -291,7 +328,9 @@ class AdminProductWriteMixin:
         attributes = validated_data.pop("attributes", [])
         variants = validated_data.pop("variants", [])
         additions = validated_data.pop("additions", [])
+        subcategories = validated_data.pop("subcategories", None)
         product = Product.objects.create(**validated_data)
+        product.subcategories.set(subcategories or [product.subcategory])
         self._replace_product_attribute_values(product, attribute_values)
         self._replace_attributes(product, attributes)
         self._replace_variants(product, variants)
@@ -314,7 +353,13 @@ class AdminProductWriteMixin:
         attributes = validated_data.pop("attributes", None)
         variants = validated_data.pop("variants", None)
         additions = validated_data.pop("additions", None)
+        subcategories = validated_data.pop("subcategories", None)
+        legacy_subcategory_supplied = "subcategory" in validated_data
         instance = super().update(instance, validated_data)
+        if subcategories is not None:
+            instance.subcategories.set(subcategories)
+        elif legacy_subcategory_supplied:
+            instance.subcategories.set([instance.subcategory])
         if attribute_values is not None:
             self._replace_product_attribute_values(instance, attribute_values)
         if attributes is not None:

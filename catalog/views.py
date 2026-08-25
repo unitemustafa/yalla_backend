@@ -57,6 +57,7 @@ def product_queryset():
             "subcategory",
         )
         .prefetch_related(
+            "subcategories",
             "category__attributes__options",
             "attributes__options",
             "attribute_values__attribute__options",
@@ -74,7 +75,6 @@ def product_queryset():
 def store_subcategory_queryset():
     return StoreSubcategory.objects.annotate(
         market_count=Count("markets", distinct=True),
-        product_count=Count("products", distinct=True),
     ).order_by("name_ar", "id")
 
 
@@ -150,7 +150,10 @@ class StoreSubcategoryDetailView(APIView):
 
     def delete(self, request, subcategory_id):
         subcategory = self.get_subcategory(subcategory_id)
-        if subcategory.product_count:
+        product_count = Product.objects.filter(
+            Q(subcategory=subcategory) | Q(subcategories=subcategory)
+        ).distinct().count()
+        if product_count:
             subcategory.is_active = False
             subcategory.save(update_fields=("is_active", "updated_at"))
             return Response(
@@ -160,7 +163,7 @@ class StoreSubcategoryDetailView(APIView):
                         "بواسطة منتجات حالية."
                     ),
                     "action": "archived",
-                    "product_count": subcategory.product_count,
+                    "product_count": product_count,
                 },
                 status=status.HTTP_200_OK,
             )

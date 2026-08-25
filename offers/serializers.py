@@ -70,6 +70,7 @@ class OfferProductSerializer(serializers.ModelSerializer):
     market_id = serializers.IntegerField(read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
     subcategory = ProductSubcategorySerializer(read_only=True)
+    subcategories = ProductSubcategorySerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
@@ -78,6 +79,7 @@ class OfferProductSerializer(serializers.ModelSerializer):
             "market_id",
             "category_id",
             "subcategory",
+            "subcategories",
             "is_available",
             "name",
             "description",

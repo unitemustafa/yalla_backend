@@ -203,6 +203,49 @@ class StoreSubcategoryAPITests(APITestCase):
         self.assertTrue(valid.is_valid(), valid.errors)
         self.assertEqual(valid.save().subcategory_id, self.meals.id)
 
+    def test_product_can_appear_in_multiple_subcategories_and_move_between_them(self):
+        market = self.create_market()
+        serializer = AdminProductSerializer(
+            data={
+                "market_id": market.id,
+                "subcategory_ids": [self.meals.id, self.drinks.id],
+                "name": "Combo",
+                "is_available": False,
+            }
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        product = serializer.save()
+        self.assertEqual(product.subcategory_id, self.meals.id)
+        self.assertEqual(
+            set(product.subcategories.values_list("id", flat=True)),
+            {self.meals.id, self.drinks.id},
+        )
+        self.assertEqual(
+            {item["id"] for item in AdminProductSerializer(product).data["subcategories"]},
+            {self.meals.id, self.drinks.id},
+        )
+        storefront = MarketWithStoreProductsSerializer(
+            market,
+            context={"products_by_market": {market.id: [product]}},
+        ).data
+        self.assertEqual(
+            {item["id"] for item in storefront["products"][0]["subcategories"]},
+            {self.meals.id, self.drinks.id},
+        )
+
+        move = AdminProductSerializer(
+            product,
+            data={"subcategory_ids": [self.drinks.id]},
+            partial=True,
+        )
+        self.assertTrue(move.is_valid(), move.errors)
+        moved = move.save()
+        self.assertEqual(moved.subcategory_id, self.drinks.id)
+        self.assertEqual(
+            list(moved.subcategories.values_list("id", flat=True)),
+            [self.drinks.id],
+        )
+
     def test_used_subcategory_cannot_be_unassigned_and_is_archived_on_delete(self):
         market = self.create_market()
         product = Product.objects.create(

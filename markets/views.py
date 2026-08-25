@@ -131,6 +131,7 @@ class HomeView(APIView):
             )
             .select_related("market__classification")
             .prefetch_related(
+                "subcategories",
                 "market__service_cities",
                 "market__delivery_areas",
                 "attributes__options",
@@ -351,6 +352,7 @@ class MarketClassificationSummaryView(APIView):
                 )
                 .select_related("market__classification", "subcategory")
                 .prefetch_related(
+                    "subcategories",
                     "images",
                     Prefetch(
                         "variants",
@@ -496,6 +498,7 @@ class MarketStorefrontDetailView(APIView):
             )
             .select_related("market__classification", "subcategory")
             .prefetch_related(
+                "subcategories",
                 "images",
                 Prefetch(
                     "variants",

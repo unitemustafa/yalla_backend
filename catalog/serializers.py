@@ -1,6 +1,7 @@
 import json
 
 from django.db import transaction
+from django.db.models import Q
 from rest_framework import serializers
 
 from config.image_validation import validate_safe_image
@@ -98,7 +99,7 @@ class ProductCategorySerializer(serializers.ModelSerializer):
 
 class StoreSubcategorySerializer(serializers.ModelSerializer):
     market_count = serializers.IntegerField(read_only=True)
-    product_count = serializers.IntegerField(read_only=True)
+    product_count = serializers.SerializerMethodField()
 
     class Meta:
         model = StoreSubcategory
@@ -125,6 +126,11 @@ class StoreSubcategorySerializer(serializers.ModelSerializer):
 
     def validate_name_ar(self, value):
         return self._validate_unique_name(value, "name_ar")
+
+    def get_product_count(self, subcategory):
+        return Product.objects.filter(
+            Q(subcategory=subcategory) | Q(subcategories=subcategory)
+        ).distinct().count()
 
     def validate_name_en(self, value):
         return self._validate_unique_name(value, "name_en")
@@ -459,8 +465,17 @@ class AdminProductSerializer(AdminProductWriteMixin, serializers.ModelSerializer
         queryset=StoreSubcategory.objects.all(),
         source="subcategory",
         write_only=True,
+        required=False,
     )
     subcategory = ProductSubcategorySerializer(read_only=True)
+    subcategory_ids = serializers.PrimaryKeyRelatedField(
+        queryset=StoreSubcategory.objects.all(),
+        source="subcategories",
+        many=True,
+        write_only=True,
+        required=False,
+    )
+    subcategories = ProductSubcategorySerializer(many=True, read_only=True)
     attributes = ProductAttributeSerializer(many=True, required=False)
     attribute_values = AttributeValueSerializer(many=True, required=False)
     variants = ProductVariantSerializer(many=True, required=False)
@@ -499,6 +514,8 @@ class AdminProductSerializer(AdminProductWriteMixin, serializers.ModelSerializer
             "category_id",
             "subcategory",
             "subcategory_id",
+            "subcategories",
+            "subcategory_ids",
             "theme",
             "is_popular",
             "is_available",
@@ -542,6 +559,7 @@ class LikedProductSerializer(serializers.ModelSerializer):
     variants = LikedProductVariantSerializer(many=True, read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
     subcategory = ProductSubcategorySerializer(read_only=True)
+    subcategories = ProductSubcategorySerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
@@ -549,6 +567,7 @@ class LikedProductSerializer(serializers.ModelSerializer):
             "id",
             "market",
             "subcategory",
+            "subcategories",
             "theme",
             "is_popular",
             "is_available",

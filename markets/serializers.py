@@ -616,6 +616,7 @@ class HomeProductSerializer(serializers.ModelSerializer):
     attributes = HomeProductAttributeSerializer(many=True, read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
     subcategory = ProductSubcategorySerializer(read_only=True)
+    subcategories = ProductSubcategorySerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
@@ -631,6 +632,7 @@ class HomeProductSerializer(serializers.ModelSerializer):
             "is_available",
             "market",
             "subcategory",
+            "subcategories",
             "attributes",
             "variants",
         )
@@ -654,6 +656,7 @@ class MarketClassificationProductSerializer(serializers.ModelSerializer):
     images = ProductImageSerializer(many=True, read_only=True)
     variants = HomeVariantSerializer(many=True, read_only=True)
     subcategory = ProductSubcategorySerializer(read_only=True)
+    subcategories = ProductSubcategorySerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
@@ -667,6 +670,7 @@ class MarketClassificationProductSerializer(serializers.ModelSerializer):
             "theme",
             "is_popular",
             "subcategory",
+            "subcategories",
             "variants",
         )
 

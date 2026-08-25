@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Q
 from rest_framework import serializers
 
 from catalog.models import Product
@@ -145,8 +146,10 @@ class AdminMarketWriteMixin:
             removed_ids
             and Product.objects.filter(
                 market=self.instance,
-                subcategory_id__in=removed_ids,
-            ).exists()
+            ).filter(
+                Q(subcategory_id__in=removed_ids)
+                | Q(subcategories__id__in=removed_ids)
+            ).distinct().exists()
         ):
             raise serializers.ValidationError(
                 {
