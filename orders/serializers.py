@@ -18,6 +18,7 @@ from offers.models import Offer
 
 from .media import protected_order_media_url
 from .models import Order, OrderEvent, OrderItem, OrderMarketSection, OrderOffer
+from .pricing import calculate_multi_market_fee, ordered_market_ids
 from .services import allowed_statuses_for_order
 from .write_validation import OrderWriteValidationMixin
 
@@ -134,12 +135,23 @@ class OrderPreviewSerializer(serializers.Serializer):
     )
     items = OrderPreviewItemSerializer(many=True, required=False)
     offers = OrderPreviewOfferSerializer(many=True, required=False)
+    market_order = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
+        write_only=True,
+    )
 
     def validate(self, attrs):
         user = self.context.get("preview_user") or self.context["request"].user
         has_explicit_address = "delivery_address" in attrs
         items = attrs.get("items", [])
         offers = attrs.get("offers", [])
+        market_order = attrs.get("market_order", [])
+        if len(market_order) != len(set(market_order)):
+            raise serializers.ValidationError(
+                {"market_order": "Market order cannot contain duplicate market IDs."}
+            )
         self._validate_selected_content(user, items, offers)
 
         current_selection = current_market_region_selection(user)
@@ -272,9 +284,11 @@ class OrderPreviewSerializer(serializers.Serializer):
             selected_lines_by_variant,
             offers,
         )
+        market_order = self._ordered_market_ids(market_groups)
 
         market_groups_data, summary = self._preview_market_groups(
             market_groups,
+            market_order=market_order,
             service_city=service_city,
             order_scope=order_scope,
             delivery_area=delivery_area,
@@ -323,6 +337,7 @@ class OrderPreviewSerializer(serializers.Serializer):
         self,
         market_groups,
         *,
+        market_order,
         service_city,
         order_scope,
         delivery_area,
@@ -336,10 +351,22 @@ class OrderPreviewSerializer(serializers.Serializer):
             "subtotal": Decimal("0.00"),
             "discount_total": Decimal("0.00"),
             "delivery_total": Decimal("0.00"),
+            "multi_market_fee_rate": Decimal("0.00"),
+            "multi_market_fee": Decimal("0.00"),
             "grand_total": Decimal("0.00"),
         }
+        fee_rate, multi_market_fee = calculate_multi_market_fee(
+            max(
+                market_groups[market_id]["products_subtotal"]
+                - market_groups[market_id]["total_offer_discounts"],
+                Decimal("0.00"),
+            )
+            for market_id in market_order
+        )
+        totals["multi_market_fee_rate"] = fee_rate
+        totals["multi_market_fee"] = multi_market_fee
         fixed_delivery_applied = False
-        for market_id in sorted(market_groups):
+        for market_id in market_order:
             group = market_groups[market_id]
             delivery_available = self._market_serves_city(
                 group["market"], service_city, order_scope
@@ -397,8 +424,18 @@ class OrderPreviewSerializer(serializers.Serializer):
                     },
                 }
             )
+        totals["grand_total"] += multi_market_fee
         summary = {name: self._money(value) for name, value in totals.items()}
         return groups_data, summary
+
+    def _ordered_market_ids(self, groups):
+        try:
+            return ordered_market_ids(
+                groups,
+                self.validated_data.get("market_order", []),
+            )
+        except ValueError as exc:
+            raise serializers.ValidationError({"market_order": str(exc)}) from exc
 
     def _product_market_groups(self, items):
         market_groups = {}
@@ -798,7 +835,7 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
         delivery_note = self.validated_data.get("delivery_note", "").strip()
         shipping_company = self.validated_data.get("shipping_company")
         order_groups = self.validated_data["order_groups"]
-        sorted_market_ids = sorted(order_groups)
+        sorted_market_ids = self._ordered_market_ids(order_groups)
         subtotal = sum(
             (order_groups[market_id]["products_subtotal"] for market_id in sorted_market_ids),
             Decimal("0.00"),
@@ -810,6 +847,14 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
             ),
             Decimal("0.00"),
         )
+        multi_market_fee_rate, multi_market_fee = calculate_multi_market_fee(
+            max(
+                order_groups[market_id]["products_subtotal"]
+                - order_groups[market_id]["total_offer_discounts"],
+                Decimal("0.00"),
+            )
+            for market_id in sorted_market_ids
+        )
         parent_delivery_price = (
             Decimal("0.00")
             if has_free_delivery
@@ -817,7 +862,12 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
             if delivery_type == Order.DeliveryType.FIXED_AREA
             else None
         )
-        total = subtotal - discount + (parent_delivery_price or Decimal("0.00"))
+        total = (
+            subtotal
+            - discount
+            + (parent_delivery_price or Decimal("0.00"))
+            + multi_market_fee
+        )
         first_group = order_groups[sorted_market_ids[0]]
 
         order = Order.objects.create(
@@ -846,6 +896,8 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
             description=description,
             delivery_price=parent_delivery_price,
             subtotal_price=subtotal,
+            multi_market_fee_rate=multi_market_fee_rate,
+            multi_market_fee=multi_market_fee,
             total_price=max(total, Decimal("0.00")),
             delivery_note=delivery_note,
         )
@@ -1336,6 +1388,8 @@ class OrderSerializer(
             "review_status",
             "delivery_price",
             "subtotal_price",
+            "multi_market_fee_rate",
+            "multi_market_fee",
             "total_price",
             "image",
             "assigned_at",
@@ -1377,6 +1431,8 @@ class OrderSerializer(
             "rejected_by",
             "rejected_at",
             "rejection_reason",
+            "multi_market_fee_rate",
+            "multi_market_fee",
             "created_at",
             "updated_at",
         )
@@ -1542,6 +1598,9 @@ class OrderSerializer(
         offers = validated_data.pop("order_offers", None)
         instance = super().update(instance, validated_data)
         if items is not None or offers is not None:
+            market_order = [
+                section.market_id for section in self._market_sections(instance)
+            ]
             current_items = list(instance.items.all()) if items is None else items
             current_offers = (
                 list(instance.order_offers.all()) if offers is None else offers
@@ -1549,11 +1608,16 @@ class OrderSerializer(
             instance.market_sections.all().delete()
             instance.items.all().delete()
             instance.order_offers.all().delete()
-            self._replace_sections(instance, current_items, current_offers)
+            self._replace_sections(
+                instance,
+                current_items,
+                current_offers,
+                market_order=market_order,
+            )
         return instance
 
     @staticmethod
-    def _replace_sections(order, items, offers):
+    def _replace_sections(order, items, offers, *, market_order=None):
         groups = {}
 
         def group_for_market(market):
@@ -1587,13 +1651,41 @@ class OrderSerializer(
                     "offer": offer_item.offer,
                     "discount_amount": offer_item.discount_amount,
                 }
+                if offer_item.section_id:
+                    offer_data["market_discounts"] = {
+                        offer_item.section.market_id: {
+                            "market": offer_item.section.market,
+                            "discount_amount": offer_item.discount_amount,
+                        }
+                    }
             else:
                 offer_data = offer_item
+            market_discounts = offer_data.get("market_discounts") or {}
+            if market_discounts:
+                for market_discount in market_discounts.values():
+                    group = group_for_market(market_discount["market"])
+                    split_offer_data = {
+                        "offer": offer_data["offer"],
+                        "discount_amount": market_discount["discount_amount"],
+                    }
+                    group["offers"].append(split_offer_data)
+                    group["discount"] += split_offer_data["discount_amount"]
+                continue
             group = group_for_market(offer_data["offer"].market)
-            group["offers"].append(offer_data)
-            group["discount"] += offer_data.get("discount_amount", Decimal("0.00"))
+            stored_offer_data = {
+                "offer": offer_data["offer"],
+                "discount_amount": offer_data.get(
+                    "discount_amount", Decimal("0.00")
+                ),
+            }
+            group["offers"].append(stored_offer_data)
+            group["discount"] += stored_offer_data["discount_amount"]
 
-        for sort_order, market_id in enumerate(sorted(groups)):
+        try:
+            section_market_ids = ordered_market_ids(groups, market_order)
+        except ValueError:
+            section_market_ids = list(groups)
+        for sort_order, market_id in enumerate(section_market_ids):
             group = groups[market_id]
             section = OrderMarketSection.objects.create(
                 order=order,
@@ -1644,6 +1736,8 @@ class OrderListSerializer(serializers.ModelSerializer):
             "delivery_price",
             "subtotal_price",
             "discount",
+            "multi_market_fee_rate",
+            "multi_market_fee",
             "total_price",
             "assigned_representative_id",
             "assigned_representative",
@@ -1694,6 +1788,8 @@ class AdminOrderCreateSerializer(OrderSerializer):
         "order_scope",
         "discount",
         "subtotal_price",
+        "multi_market_fee_rate",
+        "multi_market_fee",
         "total_price",
         "image",
         "delivery_proof",
@@ -1713,6 +1809,15 @@ class AdminOrderCreateSerializer(OrderSerializer):
         many=True,
         required=False,
     )
+    market_order = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
+        write_only=True,
+    )
+
+    class Meta(OrderSerializer.Meta):
+        fields = OrderSerializer.Meta.fields + ("market_order",)
 
     def get_fields(self):
         fields = super().get_fields()
@@ -1741,6 +1846,11 @@ class AdminOrderCreateSerializer(OrderSerializer):
 
         items = attrs.get("items", [])
         offers = attrs.get("order_offers", [])
+        market_order = attrs.get("market_order", [])
+        if len(market_order) != len(set(market_order)):
+            errors["market_order"] = "Market order cannot contain duplicate market IDs."
+        if errors:
+            raise serializers.ValidationError(errors)
         first_market = self._first_market_from_lines(items, offers)
         if first_market is not None:
             attrs["market"] = first_market
@@ -1755,12 +1865,16 @@ class AdminOrderCreateSerializer(OrderSerializer):
     def create(self, validated_data):
         items = validated_data.pop("items", [])
         offers = validated_data.pop("order_offers", [])
+        requested_market_order = validated_data.pop("market_order", [])
         has_free_delivery = OrderPreviewSerializer._has_free_delivery_offer(offers)
         items, offers = self._server_priced_lines(items, offers)
-        if items:
-            validated_data["market"] = items[0]["variant"].product.market
-        elif offers:
-            validated_data["market"] = offers[0]["offer"].market
+        market_pricing = self._market_pricing(items, offers)
+        try:
+            market_order = ordered_market_ids(market_pricing, requested_market_order)
+        except ValueError as exc:
+            raise serializers.ValidationError({"market_order": str(exc)}) from exc
+        if market_order:
+            validated_data["market"] = market_pricing[market_order[0]]["market"]
         subtotal = sum(
             item["unit_price"] * item["quantity"]
             for item in items
@@ -1768,6 +1882,14 @@ class AdminOrderCreateSerializer(OrderSerializer):
         discount = sum(
             item.get("discount_amount", Decimal("0.00"))
             for item in offers
+        )
+        multi_market_fee_rate, multi_market_fee = calculate_multi_market_fee(
+            max(
+                market_pricing[market_id]["subtotal"]
+                - market_pricing[market_id]["discount"],
+                Decimal("0.00"),
+            )
+            for market_id in market_order
         )
         delivery_price = (
             Decimal("0.00")
@@ -1786,7 +1908,7 @@ class AdminOrderCreateSerializer(OrderSerializer):
             else Order.ExternalShippingStatus.PENDING_QUOTE
         )
         delivery_total = delivery_price or Decimal("0.00")
-        total = subtotal + delivery_total - discount
+        total = subtotal + delivery_total - discount + multi_market_fee
 
         validated_data.update(
             {
@@ -1797,13 +1919,46 @@ class AdminOrderCreateSerializer(OrderSerializer):
                 "review_status": Order.ReviewStatus.PENDING_REVIEW,
                 "discount": discount,
                 "subtotal_price": subtotal,
+                "multi_market_fee_rate": multi_market_fee_rate,
+                "multi_market_fee": multi_market_fee,
                 "total_price": max(total, Decimal("0.00")),
             }
         )
 
         order = Order.objects.create(**validated_data)
-        self._replace_sections(order, items, offers)
+        self._replace_sections(order, items, offers, market_order=market_order)
         return order
+
+    @staticmethod
+    def _market_pricing(items, offers):
+        groups = {}
+
+        def group_for(market):
+            return groups.setdefault(
+                market.id,
+                {
+                    "market": market,
+                    "subtotal": Decimal("0.00"),
+                    "discount": Decimal("0.00"),
+                },
+            )
+
+        for item in items:
+            group = group_for(item["variant"].product.market)
+            group["subtotal"] += item["unit_price"] * item["quantity"]
+        for item in offers:
+            offer = item["offer"]
+            market_discounts = item.get("market_discounts") or {}
+            if market_discounts:
+                for market_discount in market_discounts.values():
+                    group_for(market_discount["market"])["discount"] += (
+                        market_discount["discount_amount"]
+                    )
+            elif offer.market_id:
+                group_for(offer.market)["discount"] += item.get(
+                    "discount_amount", Decimal("0.00")
+                )
+        return groups
 
     def _server_priced_lines(self, items, offers):
         priced_items = []
@@ -1830,16 +1985,20 @@ class AdminOrderCreateSerializer(OrderSerializer):
         priced_offers = []
         for offer_item in offers:
             offer = offer_item["offer"]
-            offer_products_subtotal = Decimal("0.00")
+            offer_products_subtotals_by_market = {}
             for (
                 variant,
                 offer_quantity,
                 apply_product_discount,
             ) in OrderPreviewSerializer._offer_variant_rows(offer):
                 product = variant.product
+                market_subtotal = offer_products_subtotals_by_market.setdefault(
+                    product.market_id,
+                    {"market": product.market, "subtotal": Decimal("0.00")},
+                )
                 selected_lines = selected_lines_by_variant.get(variant.id, [])
                 if selected_lines:
-                    offer_products_subtotal += sum(
+                    market_subtotal["subtotal"] += sum(
                         line["subtotal"] for line in selected_lines
                     )
                     continue
@@ -1862,15 +2021,29 @@ class AdminOrderCreateSerializer(OrderSerializer):
                         "subtotal": subtotal,
                     }
                 )
-                offer_products_subtotal += subtotal
+                market_subtotal["subtotal"] += subtotal
+
+            market_discounts = {
+                market_id: {
+                    "market": market_values["market"],
+                    "discount_amount": OrderPreviewSerializer._percentage_amount(
+                        market_values["subtotal"], offer.discount
+                    ),
+                }
+                for market_id, market_values in offer_products_subtotals_by_market.items()
+            }
 
             priced_offers.append(
                 {
                     "offer": offer,
-                    "discount_amount": OrderPreviewSerializer._percentage_amount(
-                        offer_products_subtotal,
-                        offer.discount,
+                    "discount_amount": sum(
+                        (
+                            values["discount_amount"]
+                            for values in market_discounts.values()
+                        ),
+                        Decimal("0.00"),
                     ),
+                    "market_discounts": market_discounts,
                 }
             )
 

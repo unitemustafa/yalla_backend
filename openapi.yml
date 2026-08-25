@@ -5717,6 +5717,16 @@ components:
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
           readOnly: true
+        multi_market_fee_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+          readOnly: true
+        multi_market_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
         total_price:
           type: string
           format: decimal
@@ -5854,6 +5864,8 @@ components:
       - market_count
       - market_names_summary
       - market_sections
+      - multi_market_fee
+      - multi_market_fee_rate
       - order_scope
       - payment_method
       - pickup_stops
@@ -5898,6 +5910,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AdminOrderOfferCreateRequest'
+        market_order:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+          writeOnly: true
       required:
       - payment_method
       - user_id
@@ -6090,13 +6108,15 @@ components:
           pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
         eta_min_minutes:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         eta_max_minutes:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         is_active:
           type: boolean
@@ -6151,13 +6171,15 @@ components:
           pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
         eta_min_minutes:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         eta_max_minutes:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         is_active:
           type: boolean
@@ -6447,6 +6469,16 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        multi_market_fee_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+          readOnly: true
+        multi_market_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
         total_price:
           type: string
           format: decimal
@@ -6579,6 +6611,8 @@ components:
       - market_count
       - market_names_summary
       - market_sections
+      - multi_market_fee
+      - multi_market_fee_rate
       - payment_method
       - pickup_stops
       - rejected_at
@@ -6670,8 +6704,9 @@ components:
           readOnly: true
         quantity:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         unit_price:
           type: string
           format: decimal
@@ -6691,8 +6726,9 @@ components:
           type: integer
         quantity:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         unit_price:
           type: string
           format: decimal
@@ -6763,6 +6799,14 @@ components:
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
         discount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        multi_market_fee_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+        multi_market_fee:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
@@ -7098,13 +7142,15 @@ components:
           pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
         eta_min_minutes:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         eta_max_minutes:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         is_active:
           type: boolean

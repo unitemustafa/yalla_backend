@@ -433,7 +433,12 @@ class OrderDeliveryPriceView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        total = order.subtotal_price - order.discount + delivery_price
+        total = (
+            order.subtotal_price
+            - order.discount
+            + delivery_price
+            + order.multi_market_fee
+        )
         order.delivery_price = delivery_price
         order.total_price = max(total, Decimal("0.00"))
         if order.delivery_type == Order.DeliveryType.FIXED_AREA:

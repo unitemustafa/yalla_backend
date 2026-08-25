@@ -133,6 +133,16 @@ class Order(models.Model):
         default=None,
     )
     subtotal_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    multi_market_fee_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+    )
+    multi_market_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+    )
     total_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     image = models.ImageField(
         upload_to="orders/",
@@ -177,6 +187,14 @@ class Order(models.Model):
                     | models.Q(delivery_price__gte=0)
                 ),
                 name="orders_order_delivery_price_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(multi_market_fee_rate__gte=0),
+                name="orders_order_multi_market_fee_rate_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(multi_market_fee__gte=0),
+                name="orders_order_multi_market_fee_non_negative",
             ),
             models.CheckConstraint(
                 condition=(

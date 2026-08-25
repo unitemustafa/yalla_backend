@@ -791,6 +791,44 @@ class OrderAPITests(APITestCase):
         self.assertEqual(order.delivery_price, Decimal("75.50"))
         self.assertEqual(order.total_price, Decimal("1075.50"))
 
+    def test_delivery_price_update_preserves_saved_multi_market_fee(self):
+        other_address = Address.objects.create(
+            user=self.customer,
+            name="Multi Market Other Area",
+            service_city=self.service_city,
+            delivery_type=Address.DeliveryType.DELIVERY,
+        )
+        payload = self.payload()
+        payload["delivery_address_id"] = other_address.id
+        payload.pop("service_city_id")
+        payload["items"].append(
+            {"variant_id": self.second_variant.id, "quantity": 1}
+        )
+        payload["offers"] = []
+        create_response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(create_response.data["multi_market_fee"], "35.00")
+
+        response = self.client.patch(
+            f"{ORDERS_BASE}/{create_response.data['id']}/delivery-price/",
+            {"delivery_price": "75.50"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["multi_market_fee"], "35.00")
+        self.assertEqual(response.data["total_price"], "1810.50")
+
+    def test_existing_order_defaults_to_zero_multi_market_fee(self):
+        order = Order.objects.create(
+            user=self.customer,
+            market=self.market,
+            payment_method="cash",
+        )
+
+        self.assertEqual(order.multi_market_fee_rate, Decimal("0.00"))
+        self.assertEqual(order.multi_market_fee, Decimal("0.00"))
+
     @patch("notifications.order_services.send_notification_push")
     def test_admin_can_send_delivery_quote_for_customer_approval(self, send_push):
         other_address = Address.objects.create(
@@ -998,7 +1036,9 @@ class OrderAPITests(APITestCase):
         self.assertEqual(order.subtotal_price, Decimal("1700.00"))
         self.assertEqual(order.discount, Decimal("240.00"))
         self.assertEqual(order.delivery_price, Decimal("120.00"))
-        self.assertEqual(order.total_price, Decimal("1580.00"))
+        self.assertEqual(order.multi_market_fee_rate, Decimal("5.00"))
+        self.assertEqual(order.multi_market_fee, Decimal("28.00"))
+        self.assertEqual(order.total_price, Decimal("1608.00"))
         self.assertEqual(order.market_sections.count(), 2)
         self.assertEqual(
             set(order.market_sections.values_list("market_id", flat=True)),
@@ -1037,6 +1077,45 @@ class OrderAPITests(APITestCase):
         self.assertEqual(preview_response.data["summary"]["discount_total"], f"{order.discount:.2f}")
         self.assertEqual(preview_response.data["summary"]["delivery_total"], f"{order.delivery_price:.2f}")
         self.assertEqual(preview_response.data["summary"]["grand_total"], f"{order.total_price:.2f}")
+
+    def test_admin_multi_market_offer_uses_each_market_net_total(self):
+        OfferItem.objects.create(offer=self.offer, variant=self.second_variant)
+        OfferItem.objects.create(offer=self.offer, variant=self.variant)
+        payload = {
+            "user_id": self.customer.id,
+            "address_id": self.address.id,
+            "payment_method": "cash_on_delivery",
+            "items": [],
+            "offers": [{"offer_id": self.offer.id}],
+            "market_order": [self.second_market.id, self.market.id],
+        }
+
+        preview_response = self.client.post(
+            f"{ORDERS_BASE}/preview/", payload, format="json"
+        )
+        create_response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
+
+        self.assertEqual(preview_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        order = Order.objects.get(pk=create_response.data["id"])
+        self.assertEqual(order.discount, Decimal("120.00"))
+        self.assertEqual(order.multi_market_fee, Decimal("23.00"))
+        self.assertEqual(order.total_price, Decimal("1223.00"))
+        self.assertEqual(
+            preview_response.data["summary"]["grand_total"],
+            f"{order.total_price:.2f}",
+        )
+        self.assertEqual(
+            list(
+                order.market_sections.values_list(
+                    "market_id", "discount", "sort_order"
+                )
+            ),
+            [
+                (self.second_market.id, Decimal("70.00"), 0),
+                (self.market.id, Decimal("50.00"), 1),
+            ],
+        )
 
     def test_fixed_area_delivery_is_included_once_in_preview_and_admin_create(self):
         self.variant.price = Decimal("157.50")
@@ -1521,7 +1600,44 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.data["summary"]["subtotal"], "1700.00")
         self.assertEqual(response.data["summary"]["discount_total"], "240.00")
         self.assertEqual(response.data["summary"]["delivery_total"], "120.00")
-        self.assertEqual(response.data["summary"]["grand_total"], "1580.00")
+        self.assertEqual(response.data["summary"]["multi_market_fee_rate"], "5.00")
+        self.assertEqual(response.data["summary"]["multi_market_fee"], "28.00")
+        self.assertEqual(response.data["summary"]["grand_total"], "1608.00")
+
+    def test_market_order_controls_the_fee_exempt_market_and_saved_sections(self):
+        self.authenticate_customer()
+        payload = {
+            "address_id": self.address.id,
+            "market_order": [self.second_market.id, self.market.id],
+            "items": [
+                {"variant_id": self.variant.id, "quantity": 1},
+                {"variant_id": self.second_variant.id, "quantity": 1},
+            ],
+        }
+
+        preview_response = self.client.post(
+            f"{ORDERS_BASE}/preview/", payload, format="json"
+        )
+        self.assertEqual(preview_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [group["market"]["id"] for group in preview_response.data["market_groups"]],
+            [self.second_market.id, self.market.id],
+        )
+        self.assertEqual(preview_response.data["summary"]["multi_market_fee"], "25.00")
+
+        create_response = self.client.post(
+            f"{ORDERS_BASE}/create/",
+            {**payload, "payment_method": "cash_on_delivery"},
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        order = Order.objects.get(pk=create_response.data[0]["id"])
+        self.assertEqual(order.multi_market_fee_rate, Decimal("5.00"))
+        self.assertEqual(order.multi_market_fee, Decimal("25.00"))
+        self.assertEqual(
+            list(order.market_sections.values_list("market_id", flat=True)),
+            [self.second_market.id, self.market.id],
+        )
 
     def test_product_percentage_discount_is_applied_to_preview_and_order(self):
         self.product.discount = Decimal("50.00")
@@ -1835,10 +1951,20 @@ class OrderAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
-        first_market = response.data["market_groups"][0]
+        self.assertEqual(
+            [group["market"]["id"] for group in response.data["market_groups"]],
+            [self.second_market.id, self.market.id],
+        )
+        first_market = next(
+            group
+            for group in response.data["market_groups"]
+            if group["market"]["id"] == self.market.id
+        )
         self.assertEqual(first_market["pricing"]["products_subtotal"], "500.00")
         self.assertEqual(first_market["pricing"]["total_offer_discounts"], "50.00")
-        self.assertEqual(first_market["pricing"]["market_total"], "570.00")
+        self.assertEqual(first_market["pricing"]["market_total"], "450.00")
+        self.assertEqual(response.data["summary"]["multi_market_fee"], "23.00")
+        self.assertEqual(response.data["summary"]["grand_total"], "1293.00")
         self.assertEqual(
             first_market["selected_offers"][0]["offer_products_subtotal"],
             "500.00",
@@ -1944,6 +2070,8 @@ class OrderAPITests(APITestCase):
         payload = {
             "address_id": self.address.id,
             "payment_method": "cash_on_delivery",
+            "market_order": [self.market.id, self.second_market.id],
+            "items": [{"variant_id": self.second_variant.id, "quantity": 1}],
             "offers": [{"offer_id": self.offer.id}],
         }
 
@@ -1964,14 +2092,16 @@ class OrderAPITests(APITestCase):
         self.assertEqual(preview_market["pricing"]["delivery_price"], "0.00")
         self.assertEqual(preview_market["pricing"]["market_total"], "500.00")
         self.assertEqual(preview_response.data["summary"]["delivery_total"], "0.00")
-        self.assertEqual(preview_response.data["summary"]["grand_total"], "500.00")
+        self.assertEqual(preview_response.data["summary"]["multi_market_fee"], "35.00")
+        self.assertEqual(preview_response.data["summary"]["grand_total"], "1235.00")
 
         self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
         created_order = create_response.data[0]
-        self.assertEqual(created_order["subtotal_price"], "500.00")
+        self.assertEqual(created_order["subtotal_price"], "1200.00")
         self.assertEqual(created_order["discount"], "0.00")
         self.assertEqual(created_order["delivery_price"], "0.00")
-        self.assertEqual(created_order["total_price"], "500.00")
+        self.assertEqual(created_order["multi_market_fee"], "35.00")
+        self.assertEqual(created_order["total_price"], "1235.00")
         self.assertEqual(created_order["offers"][0]["discount_amount"], "0.00")
 
     def test_client_create_order_creates_one_parent_order_with_market_sections(self):
@@ -2022,7 +2152,8 @@ class OrderAPITests(APITestCase):
         self.assertEqual(parent_order.subtotal_price, Decimal("1700.00"))
         self.assertEqual(parent_order.discount, Decimal("240.00"))
         self.assertEqual(parent_order.delivery_price, Decimal("120.00"))
-        self.assertEqual(parent_order.total_price, Decimal("1580.00"))
+        self.assertEqual(parent_order.multi_market_fee, Decimal("28.00"))
+        self.assertEqual(parent_order.total_price, Decimal("1608.00"))
         self.assertEqual(parent_order.items.count(), 2)
         self.assertEqual(parent_order.order_offers.count(), 2)
         sections = list(parent_order.market_sections.order_by("sort_order"))
@@ -2253,7 +2384,8 @@ class OrderAPITests(APITestCase):
         self.assertIsNone(order.delivery_area_id)
         self.assertEqual(order.delivery_type, Order.DeliveryType.DELIVERY)
         self.assertIsNone(order.delivery_price)
-        self.assertEqual(order.total_price, Decimal("1200.00"))
+        self.assertEqual(order.multi_market_fee, Decimal("35.00"))
+        self.assertEqual(order.total_price, Decimal("1235.00"))
         self.assertEqual(order.market_sections.count(), 2)
         self.assertTrue(response.data[0]["is_multi_market"])
         self.assertEqual(response.data[0]["market_count"], 2)

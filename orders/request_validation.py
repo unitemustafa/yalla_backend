@@ -51,6 +51,9 @@ def normalized_order_request_data(data, *, include_create_fields=False):
         ],
     }
 
+    if "market_order" in data:
+        normalized["market_order"] = data.get("market_order")
+
     address_id = data.get("address_id", data.get("delivery_address_id"))
     service_city_id = data.get("service_city_id")
     if address_id not in (None, ""):
