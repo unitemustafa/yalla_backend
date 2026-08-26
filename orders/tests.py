@@ -255,6 +255,71 @@ class OrderAPITests(APITestCase):
         )
         self.assertNotIn(order.delivery_proof.name, response.data["delivery_proof"])
 
+    def test_courier_detail_exposes_complete_delivery_context_and_order_image(self):
+        company = ShippingCompany.objects.create(name="Courier Shipping")
+        company.service_cities.add(self.service_city)
+        self.address.recipient_name = "Delivery Recipient"
+        self.address.recipient_phone = "+213555799999"
+        self.address.street = "Main Street"
+        self.address.building_name = "Building 7"
+        self.address.apartment_number = "12"
+        self.address.floor = "3"
+        self.address.additional_instructions = "Call on arrival"
+        self.address.formatted_address = "Main Street, Building 7"
+        self.address.save()
+        self.customer.avatar_url = "https://example.com/customer.png"
+        self.customer.save(update_fields=["avatar_url"])
+        order = self.create_order_with_private_media()
+        order.delivery_address = self.address
+        order.shipping_company = company
+        order.description = "Customer requested careful handling"
+        order.payment_method = "cash_on_delivery"
+        order.fulfillment_type = Order.FulfillmentType.DIRECT
+        order.external_shipping_status = Order.ExternalShippingStatus.NOT_REQUIRED
+        order.eta_min_minutes = 25
+        order.eta_max_minutes = 40
+        order.subtotal_price = Decimal("500.00")
+        order.discount = Decimal("50.00")
+        order.multi_market_fee = Decimal("10.00")
+        order.total_price = Decimal("580.00")
+        order.save()
+        OrderItem.objects.create(
+            order=order,
+            variant=self.variant,
+            quantity=1,
+            unit_price=Decimal("500.00"),
+        )
+        OrderOffer.objects.create(
+            order=order,
+            offer=self.offer,
+            discount_amount=Decimal("50.00"),
+        )
+
+        self.client.force_authenticate(self.representative)
+        response = self.client.get(f"/api/v1/courier/orders/{order.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(
+            response.data["image"],
+            f"http://testserver{ORDERS_BASE}/{order.id}/image/",
+        )
+        self.assertEqual(response.data["description"], order.description)
+        self.assertEqual(response.data["payment_method"], "cash_on_delivery")
+        self.assertEqual(response.data["shipping_company"]["name"], company.name)
+        self.assertEqual(response.data["eta_min_minutes"], 25)
+        self.assertEqual(response.data["subtotal_price"], "500.00")
+        self.assertEqual(response.data["multi_market_fee"], "10.00")
+        self.assertEqual(
+            response.data["delivery_address"]["additional_instructions"],
+            "Call on arrival",
+        )
+        self.assertEqual(
+            response.data["customer"]["avatar_url"],
+            "https://example.com/customer.png",
+        )
+        self.assertEqual(response.data["items"][0]["variant"]["sku"], "BURGER-1")
+        self.assertEqual(response.data["offers"][0]["offer"]["title"], "Lunch")
+
     def test_inactive_client_cannot_preview_or_create_with_existing_access_token(self):
         token = RefreshToken.for_user(self.customer).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")

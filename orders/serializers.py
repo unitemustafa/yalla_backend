@@ -1178,14 +1178,65 @@ class AdminOrderOfferCreateSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "created_at")
 
 
-def user_summary(user):
+def user_summary(user, request=None):
     full_name = user.get_full_name().strip()
+    avatar_url = user.avatar_url or None
+    if user.avatar_image:
+        avatar_url = user.avatar_image.url
+        if request is not None:
+            avatar_url = request.build_absolute_uri(avatar_url)
     return {
         "id": user.id,
         "name": full_name or user.username,
         "first_name": user.first_name,
         "last_name": user.last_name,
         "phone": user.phone,
+        "avatar_url": avatar_url,
+    }
+
+
+def order_delivery_address_data(address):
+    if address is None:
+        return None
+    return {
+        "id": address.id,
+        "name": address.name,
+        "label": address.label,
+        "details": address.details,
+        "formatted_address": address.formatted_address,
+        "address_type": address.address_type,
+        "recipient_name": address.recipient_name,
+        "recipient_phone": address.recipient_phone,
+        "street": address.street,
+        "building_name": address.building_name,
+        "apartment_number": address.apartment_number,
+        "floor": address.floor,
+        "company_name": address.company_name,
+        "additional_instructions": address.additional_instructions,
+        "governorate": address.governorate,
+        "district": address.district,
+        "latitude": address.latitude,
+        "longitude": address.longitude,
+        "manual_city": address.manual_city,
+        "manual_area": address.manual_area,
+        "service_city": (
+            ServiceCitySummarySerializer(address.service_city).data
+            if address.service_city_id
+            else None
+        ),
+        "delivery_area": (
+            DeliveryAreaSummarySerializer(address.delivery_area).data
+            if address.delivery_area_id
+            else None
+        ),
+        "delivery_type": address.delivery_type,
+        "fulfillment_type": address.fulfillment_type,
+        "delivery_price_preview": (
+            f"{address.delivery_area.delivery_price:.2f}"
+            if address.delivery_type == Address.DeliveryType.FIXED_AREA
+            and address.delivery_area_id
+            else None
+        ),
     }
 
 
@@ -1438,7 +1489,7 @@ class OrderSerializer(
         )
 
     def get_customer(self, instance) -> dict:
-        return user_summary(instance.user)
+        return user_summary(instance.user, self.context.get("request"))
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -1468,35 +1519,7 @@ class OrderSerializer(
         return data
 
     def get_delivery_address(self, instance) -> dict | None:
-        address = instance.delivery_address
-        if address is None:
-            return None
-        return {
-            "id": address.id,
-            "name": address.name,
-            "details": address.details,
-            "latitude": address.latitude,
-            "longitude": address.longitude,
-            "manual_city": address.manual_city,
-            "manual_area": address.manual_area,
-            "service_city": (
-                ServiceCitySummarySerializer(address.service_city).data
-                if address.service_city_id
-                else None
-            ),
-            "delivery_area": (
-                DeliveryAreaSummarySerializer(address.delivery_area).data
-                if address.delivery_area_id
-                else None
-            ),
-            "delivery_type": address.delivery_type,
-            "delivery_price_preview": (
-                f"{address.delivery_area.delivery_price:.2f}"
-                if address.delivery_type == Address.DeliveryType.FIXED_AREA
-                and address.delivery_area_id
-                else None
-            ),
-        }
+        return order_delivery_address_data(instance.delivery_address)
 
     def get_delivery_price_status(self, instance) -> str:
         if (
@@ -1746,7 +1769,7 @@ class OrderListSerializer(serializers.ModelSerializer):
         )
 
     def get_customer(self, instance) -> dict:
-        return user_summary(instance.user)
+        return user_summary(instance.user, self.context.get("request"))
 
     def get_delivery_address(self, instance) -> dict | None:
         return OrderSerializer(context=self.context).get_delivery_address(instance)
@@ -2175,9 +2198,16 @@ class CourierOrderOfferSerializer(serializers.ModelSerializer):
             "id": offer.id,
             "title": offer.title,
             "description": offer.description,
+            "image": self._image_url(offer.image),
             "type": offer.type,
             "discount": offer.discount,
         }
+
+    def _image_url(self, image):
+        if not image:
+            return None
+        request = self.context.get("request")
+        return request.build_absolute_uri(image.url) if request else image.url
 
 
 class CourierOrderListSerializer(serializers.ModelSerializer):
@@ -2213,7 +2243,7 @@ class CourierOrderListSerializer(serializers.ModelSerializer):
         )
 
     def get_customer(self, instance):
-        return user_summary(instance.user)
+        return user_summary(instance.user, self.context.get("request"))
 
     def get_market_count(self, instance):
         annotated_count = getattr(instance, "sections_count", None)
@@ -2240,39 +2270,16 @@ class CourierOrderListSerializer(serializers.ModelSerializer):
         return sum(item.quantity for item in instance.items.all())
 
     def get_delivery_address(self, instance):
-        if instance.delivery_address is None:
-            return None
-        return {
-            "id": instance.delivery_address.id,
-            "name": instance.delivery_address.name,
-            "details": instance.delivery_address.details,
-            "latitude": instance.delivery_address.latitude,
-            "longitude": instance.delivery_address.longitude,
-            "manual_city": instance.delivery_address.manual_city,
-            "manual_area": instance.delivery_address.manual_area,
-            "service_city": (
-                ServiceCitySummarySerializer(
-                    instance.delivery_address.service_city
-                ).data
-                if instance.delivery_address.service_city_id
-                else None
-            ),
-            "delivery_area": (
-                DeliveryAreaSummarySerializer(
-                    instance.delivery_address.delivery_area
-                ).data
-                if instance.delivery_address.delivery_area_id
-                else None
-            ),
-            "delivery_type": instance.delivery_address.delivery_type,
-        }
+        return order_delivery_address_data(instance.delivery_address)
 
 
 class CourierOrderDetailSerializer(
     ProtectedOrderMediaMixin,
     CourierOrderListSerializer,
 ):
+    image = serializers.SerializerMethodField()
     delivery_proof = serializers.SerializerMethodField()
+    shipping_company = ShippingCompanySummarySerializer(read_only=True)
     items = CourierOrderItemSerializer(many=True, read_only=True)
     offers = CourierOrderOfferSerializer(
         source="order_offers",
@@ -2283,14 +2290,25 @@ class CourierOrderDetailSerializer(
 
     class Meta(CourierOrderListSerializer.Meta):
         fields = CourierOrderListSerializer.Meta.fields + (
+            "image",
+            "payment_method",
+            "description",
+            "fulfillment_type",
+            "external_shipping_status",
+            "eta_min_minutes",
+            "eta_max_minutes",
+            "shipping_company",
             "market_sections",
             "items",
             "offers",
             "subtotal_price",
             "discount",
+            "multi_market_fee_rate",
+            "multi_market_fee",
             "delivery_note",
             "delivery_proof",
             "delivered_at",
+            "updated_at",
         )
 
 
