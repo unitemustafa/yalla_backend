@@ -83,6 +83,13 @@ server {
     location /_protected-media/ {
         internal;
         alias /srv/yalla/media/private/;
+
+        # X-Accel-Redirect starts a new internal response and does not retain
+        # arbitrary headers from Django. Preserve only the origin that
+        # django-cors-headers already validated; an empty value is not emitted.
+        set $protected_media_cors_origin $upstream_http_access_control_allow_origin;
+        add_header Access-Control-Allow-Origin $protected_media_cors_origin always;
+        add_header Vary "Origin" always;
         add_header Cache-Control "private, no-store" always;
         add_header X-Content-Type-Options "nosniff" always;
     }
