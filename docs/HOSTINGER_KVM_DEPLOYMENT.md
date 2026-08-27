@@ -45,10 +45,10 @@ key, or any other production credential to GitHub.
    are:
 
    ```dotenv
-   DOMAIN=drmustafa.dev
-   ALLOWED_HOSTS=api.drmustafa.dev
-   CORS_ALLOWED_ORIGINS=https://drmustafa.dev,http://localhost:3000,https://yalla-admin-smoky.vercel.app
-   CSRF_TRUSTED_ORIGINS=https://api.drmustafa.dev,https://drmustafa.dev,http://localhost:3000,https://yalla-admin-smoky.vercel.app
+   DOMAIN=yallamarket.org
+   ALLOWED_HOSTS=api.yallamarket.org
+   CORS_ALLOWED_ORIGINS=https://yallamarket.org,http://localhost:3000,https://yalla-admin-smoky.vercel.app
+   CSRF_TRUSTED_ORIGINS=https://api.yallamarket.org,https://yallamarket.org,http://localhost:3000,https://yalla-admin-smoky.vercel.app
    ```
 
    Origins must not include a trailing slash. Vercel redirects HTTP to HTTPS,
@@ -66,7 +66,7 @@ key, or any other production credential to GitHub.
    as verified. The SMTP login belongs in `EMAIL_HOST_USER` only.
 
 3. Create a Cloudflare Origin CA certificate that covers
-   `api.drmustafa.dev`. Paste the certificate and private key on the VPS, then
+   `api.yallamarket.org`. Paste the certificate and private key on the VPS, then
    restrict the key permissions:
 
    ```bash
@@ -104,8 +104,8 @@ subnet.
 
    ```bash
    docker compose --env-file .env.production ps
-   curl --fail --silent --show-error https://api.drmustafa.dev/healthz/
-   curl --fail --silent --show-error https://api.drmustafa.dev/readyz/
+   curl --fail --silent --show-error https://api.yallamarket.org/healthz/
+   curl --fail --silent --show-error https://api.yallamarket.org/readyz/
    ```
 
 5. Run
