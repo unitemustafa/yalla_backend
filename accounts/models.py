@@ -40,6 +40,7 @@ class User(AbstractUser):
 
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=30, unique=True)
+    city = models.CharField(max_length=100, blank=True)
     role = models.CharField(max_length=30, choices=Role.choices, default=Role.CLIENT)
     gender = models.CharField(max_length=20, blank=True)
     birth_date = models.DateField(null=True, blank=True)
@@ -120,6 +121,7 @@ class PendingRegistration(models.Model):
     username = models.CharField(max_length=150)
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=30, unique=True)
+    city = models.CharField(max_length=100, blank=True)
     password_hash = models.CharField(max_length=128)
     terms_accepted_at = models.DateTimeField()
     privacy_policy_version = models.CharField(max_length=20, blank=True)

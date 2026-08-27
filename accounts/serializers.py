@@ -137,6 +137,7 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
             "username",
             "email",
             "phone",
+            "city",
             "gender",
             "birth_date",
             "avatar_url",
@@ -287,6 +288,12 @@ class RegisterSerializer(
     )
     email = serializers.EmailField()
     phone = serializers.CharField(max_length=30)
+    city = serializers.CharField(
+        max_length=100,
+        required=False,
+        allow_blank=True,
+        default="",
+    )
     password = serializers.CharField(write_only=True, trim_whitespace=False)
     password_confirm = serializers.CharField(write_only=True, trim_whitespace=False)
     terms_accepted = serializers.BooleanField()

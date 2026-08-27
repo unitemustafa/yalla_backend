@@ -88,6 +88,7 @@ def permanently_delete_client_account(user):
     user.phone = f"deleted-{deletion_key}"[:30]
     user.first_name = ""
     user.last_name = ""
+    user.city = ""
     user.gender = ""
     user.birth_date = None
     user.avatar_url = None

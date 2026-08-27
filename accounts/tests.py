@@ -92,6 +92,7 @@ class AuthenticationAPITests(APITestCase):
             "username": "yalla_customer",
             "email": self.email.upper(),
             "phone": "+213555000001",
+            "city": "Cairo",
             "password": self.password,
             "password_confirm": self.password,
             "terms_accepted": True,
@@ -157,6 +158,7 @@ class AuthenticationAPITests(APITestCase):
         pending = PendingRegistration.objects.get(email=self.email)
         self.assertTrue(pending.password_hash)
         self.assertEqual(pending.username, "yalla_customer")
+        self.assertEqual(pending.city, "Cairo")
 
         login_response = self.client.post(
             f"{AUTH_BASE}/login",
@@ -182,6 +184,8 @@ class AuthenticationAPITests(APITestCase):
         self.assertTrue(user.is_active)
         self.assertTrue(user.is_verified)
         self.assertTrue(user.check_password(self.password))
+        self.assertEqual(user.city, "Cairo")
+        self.assertEqual(verify_response.data["user"]["city"], "Cairo")
         self.assertFalse(PendingRegistration.objects.filter(pk=pending.pk).exists())
 
     def test_registration_rejects_duplicate_active_email(self):

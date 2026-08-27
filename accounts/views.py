@@ -232,6 +232,7 @@ class RegisterView(APIView):
         registration.first_name = data["first_name"]
         registration.last_name = data["last_name"]
         registration.phone = data["phone"]
+        registration.city = data["city"]
         registration.terms_accepted_at = timezone.now()
         registration.password_hash = make_password(data["password"])
         try:
@@ -353,6 +354,7 @@ class VerifyRegistrationOTPView(APIView):
             username=registration.username,
             email=registration.email,
             phone=registration.phone,
+            city=registration.city,
             first_name=registration.first_name,
             last_name=registration.last_name,
             password=registration.password_hash,
