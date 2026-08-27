@@ -96,6 +96,10 @@ services:
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env.production}
+      # The official image renders /etc/nginx/templates only when the
+      # container starts. Changing this value makes Compose recreate Nginx
+      # for every deployed Git revision, so template updates take effect.
+      DEPLOYMENT_REVISION: ${DEPLOYMENT_REVISION:-unknown}
     ports:
       - "80:80"
       - "443:443"
