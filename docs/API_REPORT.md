@@ -3,7 +3,7 @@
 آخر تحقق: 2026-07-13
 
 مصدر التحقق: الكود الحالي، اختبارات بوقت متحكم فيه، وطلبات `curl` فعلية على خادم محلي بقاعدة SQLite مؤقتة وحسابات عميل مخصصة للاختبار.
-الهدف من هذا الملف: مرجع ربط واضح للعميل، لوحة الإدارة، والمندوب. الأمثلة مأخوذة من استجابات فعلية، لكن قيم `id` والتواريخ أمثلة seed وقد تختلف بعد إعادة إنشاء البيانات.
+الهدف من هذا الملف: مرجع ربط واضح للعميل، لوحة الإدارة، والطيار. الأمثلة مأخوذة من استجابات فعلية، لكن قيم `id` والتواريخ أمثلة seed وقد تختلف بعد إعادة إنشاء البيانات.
 
 ## قواعد عامة
 
@@ -33,7 +33,7 @@
 - عنوان طلب `general` يجب أن يكون عنواناً يدوياً عاماً: `service_city_id=null`, `delivery_area_id=null`, مع `manual_city` و`manual_area` كنص.
 - طلب `service_city` يحتاج `service_city`. يستخدم `fixed_area` فقط إذا كان العنوان مربوطاً بـ `delivery_area` نشطة وتابعة لنفس المدينة، وإلا يكون `delivery_type=delivery` و`delivery_area=null`.
 - سعر توصيل المنطقة الثابتة يضاف مرة واحدة على الطلب الأب، وليس مرة لكل محل داخل multi-market.
-- المندوبون للطلب العام: أي مندوب نشط لديه courier profile. طلب المدينة: المطابقة حسب `Order.service_city` فقط.
+- الطيارون للطلب العام: أي طيار نشط لديه courier profile. طلب المدينة: المطابقة حسب `Order.service_city` فقط.
 
 ## قيم ثابتة مهمة
 
@@ -70,7 +70,7 @@
 | POST | `/api/v1/auth/resend-verification/` | عام | إعادة إرسال OTP |
 | POST | `/api/v1/auth/login/` | عام | تسجيل دخول عام |
 | POST | `/api/v1/auth/login/client/` | عام | دخول عميل فقط |
-| POST | `/api/v1/auth/login/representative/` | عام | دخول مندوب فقط |
+| POST | `/api/v1/auth/login/representative/` | عام | دخول طيار فقط |
 | POST | `/api/v1/auth/login/admin/` | عام | دخول إدارة فقط |
 | POST | `/api/v1/auth/refresh/` | عام | تحديث access token |
 | POST | `/api/v1/auth/logout/` | مستخدم | خروج |
@@ -78,7 +78,7 @@
 | GET/PATCH | `/api/v1/auth/client/profile/` | Client | ملف العميل |
 | GET/POST | `/api/v1/auth/users/` | Admin | إدارة المستخدمين |
 | GET/PATCH/DELETE | `/api/v1/auth/users/{user_id}/` | Admin | مستخدم محدد |
-| GET | `/api/v1/auth/representatives/` | Admin | المندوبون |
+| GET | `/api/v1/auth/representatives/` | Admin | الطيارون |
 | GET | `/api/v1/auth/check-username/` | عام | فحص username |
 | GET | `/api/v1/auth/check-email/` | عام | فحص email |
 | GET | `/api/v1/auth/check-phone/` | عام | فحص phone |
@@ -146,18 +146,18 @@
 | GET/POST | `/api/v1/orders/` | Admin | قائمة/إنشاء إداري |
 | GET/PATCH/DELETE | `/api/v1/orders/{order_id}/` | Admin | تفاصيل/تعديل/إلغاء |
 | PATCH | `/api/v1/orders/{order_id}/status/` | Admin | تحديث الحالة |
-| PATCH | `/api/v1/orders/{order_id}/assignment/` | Admin | إسناد مندوب |
+| PATCH | `/api/v1/orders/{order_id}/assignment/` | Admin | إسناد طيار |
 | GET | `/api/v1/admin/order-review/blocker/` | Admin | هل يوجد طلبات مراجعة عالقة |
-| POST | `/api/v1/admin/orders/{order_id}/approve/` | Admin | اعتماد الطلب وإرجاع المندوبين المتاحين |
+| POST | `/api/v1/admin/orders/{order_id}/approve/` | Admin | اعتماد الطلب وإرجاع الطيارين المتاحين |
 | POST | `/api/v1/admin/orders/{order_id}/reject/` | Admin | رفض الطلب |
-| GET | `/api/v1/admin/orders/{order_id}/service-city-representatives/` | Admin | مندوبون مؤهلون للطلب |
+| GET | `/api/v1/admin/orders/{order_id}/service-city-representatives/` | Admin | طيارون مؤهلون للطلب |
 
 ### Courier / Notifications / Dashboard
 
 | Method | Path | Auth | ملاحظات |
 |---|---|---|---|
-| GET | `/api/v1/courier/orders/` | Courier | طلبات المندوب، يدعم `?status=` |
-| GET | `/api/v1/courier/orders/{order_id}/` | Courier | تفاصيل طلب مسند للمندوب |
+| GET | `/api/v1/courier/orders/` | Courier | طلبات الطيار، يدعم `?status=` |
+| GET | `/api/v1/courier/orders/{order_id}/` | Courier | تفاصيل طلب مسند للطيار |
 | PATCH | `/api/v1/courier/orders/{order_id}/status/` | Courier | انتقال الحالة |
 | GET | `/api/v1/notifications/` | مستخدم | إشعارات المستخدم، فلاتر: `unread`, `type`, `audience`, `is_blocking`, `is_resolved` |
 | PATCH | `/api/v1/notifications/{notification_id}/read/` | مستخدم | تعليم إشعار كمقروء |
@@ -284,7 +284,7 @@ Response `200` الفعلي المنقح:
 - refresh token القديم يدخل blacklist فور التدوير ولا يمكن إعادة استخدامه.
 - لا يوجد refresh خلفي دوري لإبقاء تطبيق غير مستخدم مسجلاً.
 - السياسة تطبق على دخول `client` و`representative` من تطبيقات الهاتف. سلوك admin بقي منفصلاً كما كان.
-- توكن عميل أو مندوب قديم بلا session claims يعامل مؤقتاً بمهلة 8 ساعات من `iat` لأن اختيار الجلسة الأصلي لا يمكن استعادته بأمان.
+- توكن عميل أو طيار قديم بلا session claims يعامل مؤقتاً بمهلة 8 ساعات من `iat` لأن اختيار الجلسة الأصلي لا يمكن استعادته بأمان.
 
 Refresh request الفعلي:
 
@@ -475,7 +475,7 @@ Response الكامل يحتوي أيضاً `courier_profile` لأن الدور 
   "user": {
     "id": "5",
     "first_name": "أحمد",
-    "last_name": "مندوب",
+    "last_name": "طيار",
     "username": "seed_courier1",
     "email": "seed.courier1@yalla.seed",
     "phone": "+201001000004",
@@ -1168,7 +1168,7 @@ Create response `201`: لاحظ أنها قائمة بعنصر واحد.
 - `delivery_type="delivery"`
 - `delivery_price=null`
 - `market_sections` يحتوي كل محل داخل الطلب الأب.
-- `pickup_stops` يستخدم لتتبع استلام المندوب من كل محل.
+- `pickup_stops` يستخدم لتتبع استلام الطيار من كل محل.
 - `items` و`offers` ما زالت موجودة كتوافق قديم، لكن الربط الجديد الأفضل يعتمد على `market_sections` أو `grouped_items/grouped_offers`.
 
 ## Service-City Fixed-Area Order
@@ -1408,8 +1408,8 @@ Create response `201`:
 - `delivery_area=null`.
 - `delivery_type="delivery"`.
 - `delivery_price=null`.
-- `delivery_address.manual_area` يظهر للمندوب والإدارة.
-- إسناد المندوب يطابق `Order.service_city` وليس `delivery_area`.
+- `delivery_address.manual_area` يظهر للطيار والإدارة.
+- إسناد الطيار يطابق `Order.service_city` وليس `delivery_area`.
 
 ## Order Response Contract
 
@@ -1420,7 +1420,7 @@ Create response `201`:
 | `id` | number | رقم الطلب |
 | `customer` | object | `id`, `name`, `phone` |
 | `delivery_address` | object/null | يحتوي `manual_city`, `manual_area`, `delivery_area`, `delivery_type` |
-| `assigned_representative_id` | number/null | المندوب المسند |
+| `assigned_representative_id` | number/null | الطيار المسند |
 | `market` | object | أول محل للتوافق القديم |
 | `order_scope` | string | `general` أو `service_city` |
 | `service_city` | object/null | null في الطلب العام |
@@ -1434,7 +1434,7 @@ Create response `201`:
 | `market_sections` | array | المصدر الأساسي لتجميع المحلات |
 | `grouped_items` | array | توافق للعرض حسب المحل |
 | `grouped_offers` | array | توافق للعروض حسب المحل |
-| `pickup_stops` | array | نقاط الاستلام للمندوب |
+| `pickup_stops` | array | نقاط الاستلام للطيار |
 | `items` | array | توافق قديم، لا يكفي وحده للـ multi-market |
 | `offers` | array | توافق قديم |
 
@@ -1481,7 +1481,7 @@ Response example:
     {
       "representative_id": 5,
       "user_id": 5,
-      "name": "أحمد مندوب",
+      "name": "أحمد طيار",
       "phone": "+201001000004",
       "service_city_id": 1,
       "service_city": "القاهرة"
@@ -1489,7 +1489,7 @@ Response example:
     {
       "representative_id": 6,
       "user_id": 6,
-      "name": "محمود مندوب",
+      "name": "محمود طيار",
       "phone": "+201001000005",
       "service_city_id": 1,
       "service_city": "القاهرة"
@@ -1498,7 +1498,7 @@ Response example:
 }
 ```
 
-للطلب العام `service_city` في هذه الاستجابة يكون `null`، و`available_representatives` يرجع أي مندوب نشط لديه `courier_profile`.
+للطلب العام `service_city` في هذه الاستجابة يكون `null`، و`available_representatives` يرجع أي طيار نشط لديه `courier_profile`.
 
 ### Representatives for order
 
@@ -1506,8 +1506,8 @@ Response example:
 GET /api/v1/admin/orders/{order_id}/service-city-representatives/
 ```
 
-- طلب `service_city`: يرجع مندوبين نفس `Order.service_city`.
-- طلب `general`: يرجع كل المندوبين النشطين المتاحين أصحاب profile، و`service_city=null`.
+- طلب `service_city`: يرجع طيارين نفس `Order.service_city`.
+- طلب `general`: يرجع كل الطيارين النشطين المتاحين أصحاب profile، و`service_city=null`.
 
 ### Assign courier
 
@@ -1537,7 +1537,7 @@ Response example:
   "representative": {
     "representative_id": 5,
     "user_id": 5,
-    "name": "أحمد مندوب",
+    "name": "أحمد طيار",
     "phone": "+201001000004",
     "service_city_id": 1,
     "service_city": "القاهرة"
@@ -1625,7 +1625,7 @@ Response example:
 ]
 ```
 
-`delivery_address` في courier response يحتوي `manual_city` و`manual_area` حتى تظهر المناطق اليدوية للمندوب.
+`delivery_address` في courier response يحتوي `manual_city` و`manual_area` حتى تظهر المناطق اليدوية للطيار.
 
 ### Status transitions
 
@@ -1648,7 +1648,7 @@ Request:
 }
 ```
 
-إذا أرسل المندوب انتقالاً غير مسموح يرجع:
+إذا أرسل الطيار انتقالاً غير مسموح يرجع:
 
 ```json
 {

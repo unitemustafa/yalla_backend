@@ -320,7 +320,7 @@ class OrderWriteValidationMixin:
             raise serializers.ValidationError(
                 {
                     "assigned_representative_id": (
-                        "هذا المندوب لا يعمل في نفس مدينة الطلب."
+                        "هذا الطيار لا يعمل في نفس مدينة الطلب."
                     )
                 }
             )

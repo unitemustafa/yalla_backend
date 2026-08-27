@@ -2415,7 +2415,7 @@
     },
     {
       "name": "02 Admin Users",
-      "description": "إدارة المستخدمين والمندوبين. يتطلب Admin JWT.",
+      "description": "إدارة المستخدمين والطيارين. يتطلب Admin JWT.",
       "item": [
         {
           "name": "Users & Representatives",
@@ -11952,7 +11952,7 @@
     },
     {
       "name": "10 Courier",
-      "description": "قائمة طلبات المندوب وتفاصيلها وتحديث دورة التوصيل.",
+      "description": "قائمة طلبات الطيار وتفاصيلها وتحديث دورة التوصيل.",
       "item": [
         {
           "name": "Orders",

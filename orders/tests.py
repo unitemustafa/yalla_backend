@@ -2918,7 +2918,7 @@ class OrderAPITests(APITestCase):
         self.assertEqual(mismatch_response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             mismatch_response.data["representative_id"],
-            "هذا المندوب لا يعمل في نفس مدينة الطلب.",
+            "هذا الطيار لا يعمل في نفس مدينة الطلب.",
         )
 
         assign_response = self.client.patch(

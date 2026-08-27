@@ -644,7 +644,7 @@ class OrderAssignmentView(APIView):
             and profile.service_city_id != courier_service_city.id
         ):
             return Response(
-                {"representative_id": ("هذا المندوب لا يعمل في نفس مدينة الطلب.")},
+                {"representative_id": ("هذا الطيار لا يعمل في نفس مدينة الطلب.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         old_status = order.status

@@ -53,7 +53,7 @@ class UserLocationSeederMixin:
                 "email": "seed.courier@yalla.test",
                 "username": "seed_courier",
                 "first_name": "أحمد",
-                "last_name": "مندوب",
+                "last_name": "طيار",
                 "phone": "+201001000004",
                 "role": User.Role.REPRESENTATIVE,
                 "is_staff": False,
@@ -273,7 +273,7 @@ class UserLocationSeederMixin:
             ),
             (
                 users["seed.courier@yalla.test"],
-                "منطقة المندوب",
+                "منطقة الطيار",
                 "30.0444000",
                 "31.2357000",
                 "القاهرة",
@@ -283,8 +283,8 @@ class UserLocationSeederMixin:
             (users["seed.sara@yalla.test"], "المنزل", "31.2140000", "29.9540000", "الإسكندرية", "سموحة", True),
             (users["seed.sara@yalla.test"], "الجامعة", "31.2188000", "29.9423000", "الإسكندرية", "سيدي جابر", False),
             (users["seed.nadir@yalla.test"], "المنزل", "31.0379000", "31.3576000", "المنصورة", "حي الجامعة", True),
-            (users["seed.courier2@yalla.test"], "منطقة المندوب", "29.9888000", "31.1477000", "الجيزة", "الهرم", True),
-            (users["seed.courier3@yalla.test"], "منطقة المندوب", "31.2140000", "29.9540000", "الإسكندرية", "سموحة", True),
+            (users["seed.courier2@yalla.test"], "منطقة الطيار", "29.9888000", "31.1477000", "الجيزة", "الهرم", True),
+            (users["seed.courier3@yalla.test"], "منطقة الطيار", "31.2140000", "29.9540000", "الإسكندرية", "سموحة", True),
         ]
         for user, name, latitude, longitude, city_name, area_name, is_default in addresses:
             delivery_area = areas[area_name]

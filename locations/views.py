@@ -271,7 +271,7 @@ class DeliveryAreaDetailView(
         if CourierProfile.objects.filter(delivery_area=area).exists():
             return self.archive(
                 area,
-                "تمت أرشفة منطقة التوصيل لأنها مستخدمة بواسطة مندوبين.",
+                "تمت أرشفة منطقة التوصيل لأنها مستخدمة بواسطة طيارين.",
             )
 
         if Order.objects.filter(

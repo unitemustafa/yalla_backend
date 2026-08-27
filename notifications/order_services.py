@@ -39,12 +39,12 @@ def _content(event_type, order_id, status):
             f"طلبك #{order_id} تم تأكيده.",
         ),
         Order.Status.ASSIGNED: (
-            "تم تعيين مندوب لطلبك 🚚",
-            f"تم تعيين مندوب لتوصيل طلبك #{order_id}.",
+            "تم تعيين طيار لطلبك 🚚",
+            f"تم تعيين طيار لتوصيل طلبك #{order_id}.",
         ),
         Order.Status.PICKED_UP: (
             "تم استلام طلبك من المحلات 📦",
-            f"المندوب استلم طلبك #{order_id} من المحلات.",
+            f"الطيار استلم طلبك #{order_id} من المحلات.",
         ),
         Order.Status.DELIVERED: (
             "تم توصيل طلبك 🎉",
@@ -70,13 +70,13 @@ def _notification_type(event_type):
 ADMIN_COURIER_STATUS_EVENTS = {
     Order.Status.PICKED_UP: (
         "courier_order_picked_up",
-        "المندوب استلم الطلب",
-        "المندوب {courier} استلم الطلب #{order_id} من المحلات.",
+        "الطيار استلم الطلب",
+        "الطيار {courier} استلم الطلب #{order_id} من المحلات.",
     ),
     Order.Status.DELIVERED: (
         "courier_order_delivered",
         "تم تسليم الطلب",
-        "المندوب {courier} سلّم الطلب #{order_id} للعميل.",
+        "الطيار {courier} سلّم الطلب #{order_id} للعميل.",
     ),
 }
 
@@ -91,7 +91,7 @@ def create_admin_courier_order_status_notification(order, event, new_status):
     courier_name = (
         courier.get_full_name().strip() or courier.username
         if courier is not None
-        else "المندوب"
+        else "الطيار"
     )
     notification, _ = Notification.objects.get_or_create(
         audience=Notification.Audience.ADMIN,

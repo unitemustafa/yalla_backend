@@ -115,8 +115,8 @@ def create_admin_courier_availability_notification(
     return Notification.objects.create(
         audience=Notification.Audience.ADMIN,
         type=Notification.Type.COURIER_AVAILABILITY_CHANGED,
-        title="تحديث حالة المندوب",
-        message=f"المندوب {courier_name} أصبح {availability_label}.",
+        title="تحديث حالة الطيار",
+        message=f"الطيار {courier_name} أصبح {availability_label}.",
         data={
             "event": "courier_availability_changed",
             "courier_id": str(courier.id),
@@ -161,7 +161,7 @@ def create_courier_password_changed_notification(courier):
 def create_courier_account_notification(courier, *, restored):
     if restored:
         title = "تم استعادة حسابك"
-        message = "تم استعادة حساب المندوب بواسطة فريق دعم يلا ماركت."
+        message = "تم استعادة حساب الطيار بواسطة فريق دعم يلا ماركت."
         event = "courier_account_restored"
         route = "login"
     else:
@@ -187,7 +187,7 @@ def create_courier_profile_updated_notification(courier):
         courier,
         notification_type=Notification.Type.COURIER_PROFILE_UPDATED,
         title="تم تحديث بيانات حسابك",
-        message="تم تحديث بيانات المندوب.",
+        message="تم تحديث بيانات الطيار.",
         data={"event": "courier_profile_updated", "route": "courier_profile"},
     )
 
