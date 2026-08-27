@@ -107,10 +107,10 @@ def _product_recipients(product):
     for recipient in recipients:
         city_id = recipient["market_region_service_city_id"]
         recipient["region_name"] = (
-            active_cities.get(city_id, "السوق العام")
+            active_cities.get(city_id, "جاهز للشحن")
             if recipient["market_region_mode"]
             == User.MarketRegionMode.SERVICE_CITY
-            else "السوق العام"
+            else "جاهز للشحن"
         )
     return recipients, list(active_cities.values())
 

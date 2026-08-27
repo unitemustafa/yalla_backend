@@ -173,7 +173,7 @@ class OrderPreviewSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {
                     "service_city_id": (
-                        "يجب ترك مدينة الخدمة فارغة لطلبات السوق العام."
+                        "يجب ترك مدينة الخدمة فارغة لطلبات جاهز للشحن."
                     )
                 }
             )

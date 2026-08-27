@@ -417,7 +417,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
 
         if not show_in_general and not service_cities_to_check:
             message = (
-                "اختر الظهور في العام أو مدينة خدمة واحدة على الأقل."
+                "اختر الظهور في جاهز للشحن أو مدينة خدمة واحدة على الأقل."
             )
             raise serializers.ValidationError(
                 {
@@ -480,7 +480,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
             if any(item.status != Market.Status.ACTIVE for item in product_markets.values()):
                 raise serializers.ValidationError({"product_ids": "كل منتجات الباكج يجب أن تكون من محلات نشطة."})
             if any(item.scope != Market.Scope.SERVICE_CITY for item in product_markets.values()):
-                raise serializers.ValidationError({"product_ids": "لا يمكن خلط منتجات السوق العام مع منتجات مدينة خدمة."})
+                raise serializers.ValidationError({"product_ids": "لا يمكن خلط منتجات جاهز للشحن مع منتجات مدينة خدمة."})
             selected_city = service_cities_to_check[0] if len(service_cities_to_check) == 1 else None
             if selected_city and any(not self._market_serves_service_city(item, selected_city) for item in product_markets.values()):
                 raise serializers.ValidationError({"product_ids": "هذا المنتج تابع لمحل لا يخدم مدينة العرض المحددة."})

@@ -2492,12 +2492,12 @@ class OrderAPITests(APITestCase):
         self.assertEqual(market_response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             market_response.data["items"][0],
-            "لا يمكن دمج محلات عامة مع محلات مدينة في نفس الطلب",
+            "لا يمكن دمج محلات جاهزة للشحن مع محلات مدينة في نفس الطلب",
         )
         self.assertEqual(offer_response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             offer_response.data["offers"][0],
-            "لا يمكن استخدام عرض مدينة داخل طلب عام",
+            "لا يمكن استخدام عرض مدينة داخل طلب جاهز للشحن",
         )
 
     def test_general_manual_address_allows_preview_with_null_delivery_price(self):

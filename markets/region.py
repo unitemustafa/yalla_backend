@@ -16,9 +16,9 @@ from .models import Market
 REGION_SELECTION_REQUIRED_MESSAGE = (
     "Select a market browsing region before loading market content."
 )
-MIXED_MARKET_SCOPE_MESSAGE = "لا يمكن دمج محلات عامة مع محلات مدينة في نفس الطلب"
-SERVICE_CITY_OFFER_IN_GENERAL_MESSAGE = "لا يمكن استخدام عرض مدينة داخل طلب عام"
-GENERAL_OFFER_IN_SERVICE_CITY_MESSAGE = "لا يمكن استخدام عرض عام داخل طلب مدينة"
+MIXED_MARKET_SCOPE_MESSAGE = "لا يمكن دمج محلات جاهزة للشحن مع محلات مدينة في نفس الطلب"
+SERVICE_CITY_OFFER_IN_GENERAL_MESSAGE = "لا يمكن استخدام عرض مدينة داخل طلب جاهز للشحن"
+GENERAL_OFFER_IN_SERVICE_CITY_MESSAGE = "لا يمكن استخدام عرض جاهز للشحن داخل طلب مدينة"
 MIXED_SERVICE_CITY_MARKETS_MESSAGE = "لا يمكن دمج منتجات من مدن مختلفة في نفس الطلب"
 EARTH_RADIUS_KM = 6371.0088
 

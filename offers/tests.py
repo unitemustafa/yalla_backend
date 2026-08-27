@@ -323,7 +323,7 @@ class OfferAPITests(APITestCase):
         )
         self.assertEqual(list(notifications.values_list("recipient_id", flat=True)), [self.client_user.id])
         self.assertNotIn(city_client.id, notifications.values_list("recipient_id", flat=True))
-        self.assertEqual(notifications.get().data["region_name"], "السوق العام")
+        self.assertEqual(notifications.get().data["region_name"], "جاهز للشحن")
         send_push.assert_called_once()
 
     def test_inactive_and_future_offers_create_no_immediate_notification(self):

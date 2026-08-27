@@ -152,9 +152,9 @@ def _offer_recipients(offer):
                 market_region_service_city__isnull=True,
             ).values("id")
         )
-        region_names = ["السوق العام"]
+        region_names = ["جاهز للشحن"]
         for recipient in recipients:
-            recipient["region_name"] = "السوق العام"
+            recipient["region_name"] = "جاهز للشحن"
     else:
         active_cities = list(
             offer.service_cities.filter(is_active=True).values("id", "name")
@@ -195,7 +195,7 @@ def _create_dispatch_notifications(offer, dispatch, recipients, region_names):
             if offer.show_in_general:
                 title = "🔥 عرض جديد متاح الآن"
                 message = (
-                    f"عرض «{offer.title}» من {market_name} متاح في السوق العام! "
+                    f"عرض «{offer.title}» من {market_name} متاح ضمن جاهز للشحن! "
                     f"{price_text} لفترة محدودة، شوفه قبل ما يخلص."
                 )
             else:

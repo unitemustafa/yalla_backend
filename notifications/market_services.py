@@ -162,7 +162,7 @@ def dispatch_pending_market_notification_for_product(product_id):
             return None
 
         service_city = None
-        region_name = "السوق العام"
+        region_name = "جاهز للشحن"
         if market.scope == Market.Scope.SERVICE_CITY:
             active_cities = list(
                 market.service_cities.filter(is_active=True).order_by("id")[:2]
