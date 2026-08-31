@@ -123,6 +123,9 @@ class PendingRegistration(models.Model):
     phone = models.CharField(max_length=30, unique=True)
     city = models.CharField(max_length=100, blank=True)
     password_hash = models.CharField(max_length=128)
+    firebase_uid = models.CharField(max_length=128, null=True, blank=True, unique=True)
+    auth_provider = models.CharField(max_length=20, blank=True)
+    avatar_url = models.URLField(null=True, blank=True)
     terms_accepted_at = models.DateTimeField()
     privacy_policy_version = models.CharField(max_length=20, blank=True)
     otp_code_hash = models.CharField(max_length=128, blank=True)
@@ -137,6 +140,31 @@ class PendingRegistration(models.Model):
                 Lower("username"),
                 name="accounts_pending_username_ci_unique",
             ),
+        ]
+
+
+class SocialIdentity(models.Model):
+    class Provider(models.TextChoices):
+        GOOGLE = "google", "Google"
+        FACEBOOK = "facebook", "Facebook"
+        APPLE = "apple", "Apple"
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="social_identities",
+    )
+    firebase_uid = models.CharField(max_length=128, unique=True)
+    provider = models.CharField(max_length=20, choices=Provider.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "provider"],
+                name="accounts_social_identity_user_provider_unique",
+            )
         ]
 
 

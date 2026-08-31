@@ -50,6 +50,7 @@ from .services import (
     registration_expires_at,
     verify_otp,
 )
+from .social_auth import SocialTokenError, verify_social_id_token
 from .validation import (
     RequiredFieldMessagesMixin,
     contains_whitespace,
@@ -469,6 +470,63 @@ class ClientLoginSerializer(LoginSerializer):
     remember = serializers.BooleanField(required=False, default=False)
 
 
+class SocialTokenSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
+    id_token = serializers.CharField(write_only=True, trim_whitespace=False)
+    remember = serializers.BooleanField(required=False, default=False)
+
+    def validate_id_token(self, value):
+        try:
+            self.social_identity = verify_social_id_token(value)
+        except SocialTokenError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        return value
+
+
+class SocialSignupSerializer(SocialTokenSerializer):
+    first_name = serializers.CharField(
+        max_length=150,
+        validators=[no_whitespace_validator],
+    )
+    last_name = serializers.CharField(
+        max_length=150,
+        allow_blank=True,
+        required=False,
+        default="",
+    )
+    username = serializers.CharField(
+        max_length=150,
+        validators=[no_whitespace_validator, UnicodeUsernameValidator()],
+    )
+    phone = serializers.CharField(max_length=30)
+    city = serializers.CharField(
+        max_length=100,
+        allow_blank=True,
+        required=False,
+        default="",
+    )
+    terms_accepted = serializers.BooleanField()
+
+    def validate_username(self, value):
+        username = value.strip()
+        reject_whitespace(username)
+        return username
+
+    def validate_phone(self, value):
+        reject_whitespace(value)
+        return normalize_egyptian_phone(value)
+
+    def validate_terms_accepted(self, value):
+        if not value:
+            raise serializers.ValidationError(
+                "You must accept the terms and conditions."
+            )
+        return value
+
+
+class SocialLinkSerializer(SocialTokenSerializer):
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
+
+
 class RepresentativeLoginSerializer(LoginSerializer):
     """Courier-app session choice; omitted values are temporary by default."""
 
@@ -557,13 +615,43 @@ class DeleteAccountSerializer(RequiredFieldMessagesMixin, serializers.Serializer
         write_only=True,
         trim_whitespace=False,
         style={"input_type": "password"},
+        required=False,
+        allow_blank=True,
     )
 
-    def validate_password(self, value):
+    id_token = serializers.CharField(
+        write_only=True,
+        trim_whitespace=False,
+        required=False,
+        allow_blank=True,
+    )
+
+    def validate(self, attrs):
         user = self.context["request"].user
-        if not user.check_password(value):
-            raise serializers.ValidationError("The password is incorrect.")
-        return value
+        password = attrs.get("password") or ""
+        id_token = attrs.get("id_token") or ""
+        if password:
+            if not user.check_password(password):
+                raise serializers.ValidationError(
+                    {"password": "The password is incorrect."}
+                )
+            return attrs
+        if id_token:
+            try:
+                identity = verify_social_id_token(id_token)
+            except SocialTokenError as exc:
+                raise serializers.ValidationError({"id_token": str(exc)}) from exc
+            if not user.social_identities.filter(
+                firebase_uid=identity.firebase_uid,
+            ).exists():
+                raise serializers.ValidationError(
+                    {"id_token": "Social reauthentication does not match this account."}
+                )
+            return attrs
+        field = "password" if user.has_usable_password() else "id_token"
+        raise serializers.ValidationError(
+            {field: "Reauthentication is required to delete this account."}
+        )
 
 
 class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):

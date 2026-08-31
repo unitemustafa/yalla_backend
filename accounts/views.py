@@ -20,7 +20,12 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from config.pagination import paginated_list_response
 
-from .models import CourierProfile, OneTimePassword, PendingRegistration
+from .models import (
+    CourierProfile,
+    OneTimePassword,
+    PendingRegistration,
+    SocialIdentity,
+)
 from .permissions import IsAdminRole, IsClientRole
 from .client_sessions import (
     access_expires_in,
@@ -44,6 +49,9 @@ from .serializers import (
     RepresentativeLoginSerializer,
     RegisterSerializer,
     ResetPasswordSerializer,
+    SocialLinkSerializer,
+    SocialSignupSerializer,
+    SocialTokenSerializer,
     UserUpdateSerializer,
     UserSerializer,
     phone_candidates,
@@ -235,6 +243,9 @@ class RegisterView(APIView):
         registration.city = data["city"]
         registration.terms_accepted_at = timezone.now()
         registration.password_hash = make_password(data["password"])
+        registration.firebase_uid = None
+        registration.auth_provider = ""
+        registration.avatar_url = None
         try:
             with transaction.atomic():
                 registration.save()
@@ -364,10 +375,17 @@ class VerifyRegistrationOTPView(APIView):
             terms_accepted=True,
             terms_accepted_at=registration.terms_accepted_at,
             privacy_policy_version=registration.privacy_policy_version,
+            avatar_url=registration.avatar_url,
         )
         try:
             with transaction.atomic():
                 user.save()
+                if registration.firebase_uid:
+                    SocialIdentity.objects.create(
+                        user=user,
+                        firebase_uid=registration.firebase_uid,
+                        provider=registration.auth_provider,
+                    )
         except IntegrityError:
             return Response(
                 {
@@ -447,6 +465,271 @@ class LoginView(APIView):
 class ClientLoginView(LoginView):
     role = User.Role.CLIENT
     serializer_class = ClientLoginSerializer
+
+
+def _social_client_error(user):
+    if user.deleted_at is not None or not user.is_active:
+        return Response(
+            {"code": "account_inactive", "detail": "Account is inactive."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if user.role != User.Role.CLIENT:
+        return Response(
+            {
+                "code": "client_account_required",
+                "detail": "Social sign-in is only available for client accounts.",
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if not user.is_verified:
+        return Response(
+            {"code": "email_verification_required", "email": user.email},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
+class SocialSessionView(APIView):
+    permission_classes = [AllowAny]
+    rate_limit_scopes = ("login_ip", "login_identifier")
+
+    def post(self, request):
+        serializer = SocialTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        identity = serializer.social_identity
+        linked = SocialIdentity.objects.select_related("user").filter(
+            firebase_uid=identity.firebase_uid,
+        ).first()
+        if linked is not None:
+            error = _social_client_error(linked.user)
+            if error is not None:
+                return error
+            update_successful_login(linked.user)
+            return Response(
+                {
+                    "status": "authenticated",
+                    **token_payload(
+                        linked.user,
+                        request=request,
+                        remember=serializer.validated_data["remember"],
+                    ),
+                }
+            )
+
+        existing_user = User.objects.filter(
+            email__iexact=identity.email,
+            deleted_at__isnull=True,
+        ).first()
+        if existing_user is not None:
+            return Response(
+                {
+                    "status": "account_link_required",
+                    "email": identity.email,
+                    "provider": identity.provider,
+                }
+            )
+        return Response(
+            {
+                "status": "profile_completion_required",
+                "email": identity.email,
+                "provider": identity.provider,
+                "email_verified": identity.email_verified,
+                "first_name": identity.first_name,
+                "last_name": identity.last_name,
+                "avatar_url": identity.avatar_url,
+            }
+        )
+
+
+class SocialSignupView(APIView):
+    permission_classes = [AllowAny]
+    rate_limit_scopes = ("signup_ip", "signup_email")
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = SocialSignupSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        identity = serializer.social_identity
+
+        linked = SocialIdentity.objects.select_for_update().select_related(
+            "user"
+        ).filter(firebase_uid=identity.firebase_uid).first()
+        if linked is not None:
+            error = _social_client_error(linked.user)
+            if error is not None:
+                return error
+            return Response(
+                token_payload(
+                    linked.user,
+                    request=request,
+                    remember=data["remember"],
+                )
+            )
+
+        matching_users = list(
+            User.objects.select_for_update()
+            .filter(deleted_at__isnull=True)
+            .filter(
+                Q(email__iexact=identity.email)
+                | Q(username__iexact=data["username"])
+                | Q(phone__in=phone_candidates(data["phone"]))
+            )
+        )
+        errors = _social_duplicate_errors(identity.email, data, matching_users)
+        if errors:
+            if set(errors) == {"email"}:
+                return Response(
+                    {
+                        "status": "account_link_required",
+                        "email": identity.email,
+                        "provider": identity.provider,
+                    }
+                )
+            raise ValidationError(errors)
+
+        if identity.email_verified:
+            user = _create_social_user(identity, data)
+            SocialIdentity.objects.create(
+                user=user,
+                firebase_uid=identity.firebase_uid,
+                provider=identity.provider,
+            )
+            update_successful_login(user)
+            return Response(
+                token_payload(
+                    user,
+                    request=request,
+                    remember=data["remember"],
+                ),
+                status=status.HTTP_201_CREATED,
+            )
+
+        pending_conflicts = list(
+            PendingRegistration.objects.select_for_update()
+            .filter(
+                Q(email__iexact=identity.email)
+                | Q(username__iexact=data["username"])
+                | Q(phone__in=phone_candidates(data["phone"]))
+            )
+        )
+        registration = next(
+            (
+                item
+                for item in pending_conflicts
+                if item.email.lower() == identity.email
+            ),
+            None,
+        )
+        if any(item.pk != getattr(registration, "pk", None) for item in pending_conflicts):
+            raise ValidationError(
+                {"detail": "Another pending registration uses these details."}
+            )
+        if registration is None:
+            registration = PendingRegistration(email=identity.email)
+        registration.first_name = data["first_name"]
+        registration.last_name = data["last_name"]
+        registration.username = data["username"]
+        registration.phone = data["phone"]
+        registration.city = data["city"]
+        registration.password_hash = make_password(None)
+        registration.terms_accepted_at = timezone.now()
+        registration.firebase_uid = identity.firebase_uid
+        registration.auth_provider = identity.provider
+        registration.avatar_url = identity.avatar_url
+        registration.save()
+        try:
+            registration, code, cooldown_data = issue_registration_otp(registration)
+        except OTPCooldownError as exc:
+            return otp_cooldown_error_response(exc, registration=registration)
+        return Response(
+            {
+                "detail": "Registration OTP sent.",
+                "email": registration.email,
+                "verification_required": True,
+                "registration_expires_at": registration_expires_at(
+                    registration
+                ).isoformat(),
+                **otp_cooldown_response_data(cooldown_data),
+                **otp_response_data(code),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class SocialLinkView(APIView):
+    permission_classes = [AllowAny]
+    rate_limit_scopes = ("login_ip", "login_identifier")
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = SocialLinkSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        identity = serializer.social_identity
+        data = serializer.validated_data
+        user = User.objects.select_for_update().filter(
+            email__iexact=identity.email,
+            deleted_at__isnull=True,
+        ).first()
+        if user is None or not user.check_password(data["password"]):
+            return Response(
+                {"detail": "Invalid email or password."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        error = _social_client_error(user)
+        if error is not None:
+            return error
+        linked = SocialIdentity.objects.select_for_update().filter(
+            firebase_uid=identity.firebase_uid,
+        ).first()
+        if linked is not None and linked.user_id != user.id:
+            raise ValidationError(
+                {"detail": "This social account is linked to another account."}
+            )
+        SocialIdentity.objects.get_or_create(
+            firebase_uid=identity.firebase_uid,
+            defaults={"user": user, "provider": identity.provider},
+        )
+        update_successful_login(user)
+        return Response(
+            token_payload(
+                user,
+                request=request,
+                remember=data["remember"],
+            )
+        )
+
+
+def _social_duplicate_errors(email, data, users):
+    errors = {}
+    if any(user.email.lower() == email for user in users):
+        errors["email"] = ["An account with this email already exists."]
+    if any(user.username.lower() == data["username"].lower() for user in users):
+        errors["username"] = ["This username is already taken."]
+    phones = set(phone_candidates(data["phone"]))
+    if any(user.phone in phones for user in users):
+        errors["phone"] = ["An account with this phone number already exists."]
+    return errors
+
+
+def _create_social_user(identity, data):
+    user = User(
+        username=data["username"],
+        email=identity.email,
+        phone=data["phone"],
+        city=data["city"],
+        first_name=data["first_name"],
+        last_name=data["last_name"],
+        avatar_url=identity.avatar_url,
+        role=User.Role.CLIENT,
+        is_active=True,
+        is_verified=True,
+        terms_accepted=True,
+        terms_accepted_at=timezone.now(),
+    )
+    user.set_unusable_password()
+    user.save()
+    return user
 
 
 class RepresentativeLoginView(LoginView):

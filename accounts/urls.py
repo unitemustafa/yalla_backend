@@ -19,6 +19,9 @@ from .views import (
     RepresentativeLoginView,
     ResendRegistrationOTPView,
     ResetPasswordView,
+    SocialLinkView,
+    SocialSessionView,
+    SocialSignupView,
     VerifyRegistrationOTPView,
 )
 
@@ -45,6 +48,20 @@ urlpatterns = [
     path("login/", LoginView.as_view(), name="login-slash"),
     path("login/client", ClientLoginView.as_view(), name="client-login"),
     path("login/client/", ClientLoginView.as_view(), name="client-login-slash"),
+    path("social/session", SocialSessionView.as_view(), name="social-session"),
+    path(
+        "social/session/",
+        SocialSessionView.as_view(),
+        name="social-session-slash",
+    ),
+    path("social/signup", SocialSignupView.as_view(), name="social-signup"),
+    path(
+        "social/signup/",
+        SocialSignupView.as_view(),
+        name="social-signup-slash",
+    ),
+    path("social/link", SocialLinkView.as_view(), name="social-link"),
+    path("social/link/", SocialLinkView.as_view(), name="social-link-slash"),
     path(
         "login/representative",
         RepresentativeLoginView.as_view(),

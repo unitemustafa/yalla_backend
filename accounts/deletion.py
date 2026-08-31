@@ -70,6 +70,7 @@ def permanently_delete_client_account(user):
 
     user.notifications.all().delete()
     user.client_devices.all().delete()
+    user.social_identities.all().delete()
     OneTimePassword.objects.filter(user=user).delete()
     user.liked_products.clear()
     PartnerApplication.objects.filter(applicant=user).update(
