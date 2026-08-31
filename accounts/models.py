@@ -39,7 +39,7 @@ class User(AbstractUser):
         SERVICE_CITY = "service_city", "Service city"
 
     email = models.EmailField(unique=True)
-    phone = models.CharField(max_length=30, unique=True)
+    phone = models.CharField(max_length=30, unique=True, null=True)
     city = models.CharField(max_length=100, blank=True)
     role = models.CharField(max_length=30, choices=Role.choices, default=Role.CLIENT)
     gender = models.CharField(max_length=20, blank=True)
@@ -47,6 +47,7 @@ class User(AbstractUser):
     avatar_url = models.URLField(null=True, blank=True, db_column="avatar")
     avatar_image = models.ImageField(upload_to="avatars/", blank=True, null=True)
     username_changed_at = models.DateTimeField(null=True, blank=True)
+    profile_username_pending = models.BooleanField(default=False)
 
     terms_accepted = models.BooleanField(default=False)
     terms_accepted_at = models.DateTimeField(null=True, blank=True)

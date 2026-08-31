@@ -9,6 +9,7 @@ from rest_framework.test import APITestCase
 
 from .deletion import permanently_delete_client_account
 from .models import PendingRegistration, SocialIdentity, User
+from .serializers import AdminUserWriteSerializer
 from .social_auth import (
     SocialTokenError,
     VerifiedSocialIdentity,
@@ -52,6 +53,12 @@ class SocialAuthenticationTests(APITestCase):
         payload.update(overrides)
         return payload
 
+    def test_admin_user_creation_still_requires_phone(self):
+        serializer = AdminUserWriteSerializer()
+
+        self.assertTrue(serializer.fields["phone"].required)
+        self.assertFalse(serializer.fields["phone"].allow_null)
+
     @patch("accounts.social_auth.get_firebase_app", return_value=object())
     @patch("accounts.social_auth.auth.verify_id_token")
     def test_expired_firebase_token_keeps_specific_error(
@@ -80,7 +87,7 @@ class SocialAuthenticationTests(APITestCase):
             verify_social_id_token("revoked-token")
 
     @patch("accounts.serializers.verify_social_id_token")
-    def test_unknown_identity_requests_profile_completion(self, verify_token):
+    def test_verified_identity_signs_in_with_incomplete_profile(self, verify_token):
         verify_token.return_value = social_identity()
 
         response = self.client.post(
@@ -89,9 +96,55 @@ class SocialAuthenticationTests(APITestCase):
             format="json",
         )
 
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["status"], "authenticated")
+        self.assertIn("accessToken", response.data)
+        user = User.objects.get(email="social@example.com")
+        self.assertIsNone(user.phone)
+        self.assertTrue(user.terms_accepted)
+        self.assertIsNotNone(user.terms_accepted_at)
+        self.assertTrue(user.profile_username_pending)
+        self.assertFalse(user.has_usable_password())
+        self.assertTrue(
+            SocialIdentity.objects.filter(
+                user=user,
+                firebase_uid="firebase-google-1",
+            ).exists()
+        )
+
+    @patch("accounts.serializers.verify_social_id_token")
+    def test_incomplete_social_profile_can_be_completed_later(self, verify_token):
+        verify_token.return_value = social_identity()
+        session_response = self.client.post(
+            f"{AUTH_BASE}/social/session",
+            {"id_token": "firebase-id-token"},
+            format="json",
+        )
+        user = User.objects.get(email="social@example.com")
+        self.client.force_authenticate(user)
+
+        response = self.client.patch(
+            f"{AUTH_BASE}/client/profile/",
+            {
+                "username": "social.customer",
+                "phone": "+201001234567",
+                "city": "Cairo",
+                "gender": "male",
+                "birth_date": "1995-04-12",
+            },
+            format="json",
+        )
+
+        self.assertEqual(session_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["status"], "profile_completion_required")
-        self.assertEqual(response.data["email"], "social@example.com")
+        user.refresh_from_db()
+        self.assertEqual(user.username, "social.customer")
+        self.assertEqual(user.phone, "+201001234567")
+        self.assertEqual(user.city, "Cairo")
+        self.assertEqual(user.gender, "male")
+        self.assertEqual(user.birth_date.isoformat(), "1995-04-12")
+        self.assertTrue(user.terms_accepted)
+        self.assertFalse(user.profile_username_pending)
 
     @patch("accounts.serializers.verify_social_id_token")
     def test_verified_social_signup_creates_passwordless_client(self, verify_token):
@@ -173,12 +226,23 @@ class SocialAuthenticationTests(APITestCase):
             },
         )
 
+        session_response = self.client.post(
+            f"{AUTH_BASE}/social/session",
+            {"id_token": "firebase-id-token"},
+            format="json",
+        )
+
         response = self.client.post(
             f"{AUTH_BASE}/social/signup",
             self.social_payload(),
             format="json",
         )
 
+        self.assertEqual(session_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            session_response.data["status"],
+            "profile_completion_required",
+        )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(response.data["verification_required"])
         pending = PendingRegistration.objects.get(email="social@example.com")

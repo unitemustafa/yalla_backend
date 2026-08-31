@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
 from django.conf import settings
@@ -528,6 +530,28 @@ class SocialSessionView(APIView):
                     "provider": identity.provider,
                 }
             )
+
+        if identity.email_verified:
+            with transaction.atomic():
+                user = _create_incomplete_social_user(identity)
+                SocialIdentity.objects.create(
+                    user=user,
+                    firebase_uid=identity.firebase_uid,
+                    provider=identity.provider,
+                )
+            update_successful_login(user)
+            return Response(
+                {
+                    "status": "authenticated",
+                    **token_payload(
+                        user,
+                        request=request,
+                        remember=serializer.validated_data["remember"],
+                    ),
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
         return Response(
             {
                 "status": "profile_completion_required",
@@ -726,6 +750,32 @@ def _create_social_user(identity, data):
         is_verified=True,
         terms_accepted=True,
         terms_accepted_at=timezone.now(),
+    )
+    user.set_unusable_password()
+    user.save()
+    return user
+
+
+def _create_incomplete_social_user(identity):
+    while True:
+        username = f"yalla_{uuid4().hex[:16]}"
+        if not User.objects.filter(username__iexact=username).exists():
+            break
+
+    user = User(
+        username=username,
+        email=identity.email,
+        phone=None,
+        city="",
+        first_name=identity.first_name,
+        last_name=identity.last_name,
+        avatar_url=identity.avatar_url,
+        role=User.Role.CLIENT,
+        is_active=True,
+        is_verified=True,
+        terms_accepted=True,
+        terms_accepted_at=timezone.now(),
+        profile_username_pending=True,
     )
     user.set_unusable_password()
     user.save()

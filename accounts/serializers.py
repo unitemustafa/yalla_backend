@@ -143,6 +143,7 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
             "birth_date",
             "avatar_url",
             "username_changed_at",
+            "profile_username_pending",
             "role",
             "is_active",
             "is_verified",
@@ -154,6 +155,7 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
         read_only_fields = ("is_staff", "is_superuser")
         extra_kwargs = {
             "is_verified": {"read_only": True},
+            "profile_username_pending": {"read_only": True},
         }
 
     def get_has_password(self, obj):
@@ -668,6 +670,7 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
     )
     email = serializers.EmailField(required=False)
     phone = serializers.CharField(max_length=30, required=False)
+    city = serializers.CharField(max_length=100, required=False, allow_blank=True)
     gender = serializers.CharField(max_length=20, required=False, allow_blank=True)
     birth_date = serializers.DateField(required=False, allow_null=True)
     avatar_url = serializers.URLField(required=False, allow_blank=True)
@@ -779,6 +782,8 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
         ):
             instance.username_changed_at = timezone.now()
             update_fields.append("username_changed_at")
+            instance.profile_username_pending = False
+            update_fields.append("profile_username_pending")
 
         for field, value in validated_data.items():
             if getattr(instance, field) == value:
@@ -809,6 +814,7 @@ class AdminUserWriteSerializer(
     PasswordValidationMixin,
     serializers.ModelSerializer,
 ):
+    phone = serializers.CharField(max_length=30)
     password = serializers.CharField(
         required=False,
         write_only=True,
