@@ -252,7 +252,9 @@ class NotificationAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual([item["id"] for item in response.data], [self.admin_notification.id])
+        self.assertEqual(
+            [item["id"] for item in response.data], [self.admin_notification.id]
+        )
         self.assertEqual(response.data[0]["order_id"], self.order.id)
 
     def test_admin_only_sees_new_orders_and_courier_pickup_or_delivery(self):
@@ -312,7 +314,9 @@ class NotificationAPITests(APITestCase):
         final_count_response = self.client.get("/api/v1/notifications/unread-count/")
 
         self.assertEqual(count_response.data["unread_count"], 1)
-        self.assertEqual([item["id"] for item in list_response.data], [self.courier_notification.id])
+        self.assertEqual(
+            [item["id"] for item in list_response.data], [self.courier_notification.id]
+        )
         self.assertEqual(read_response.status_code, status.HTTP_200_OK)
         self.assertTrue(read_response.data["is_read"])
         self.assertEqual(admin_read_response.status_code, status.HTTP_404_NOT_FOUND)
@@ -501,13 +505,17 @@ class NotificationAPITests(APITestCase):
         self.assertTrue(notification.is_read)
         self.assertIsNotNone(notification.resolved_at)
         self.assertIsNotNone(notification.read_at)
-        delete_response = self.client.delete(f"/api/v1/notifications/{notification.id}/")
+        delete_response = self.client.delete(
+            f"/api/v1/notifications/{notification.id}/"
+        )
         self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
 
     def test_unauthenticated_delete_is_rejected(self):
         self.client.credentials()
 
-        response = self.client.delete(f"/api/v1/notifications/{self.admin_notification.id}/")
+        response = self.client.delete(
+            f"/api/v1/notifications/{self.admin_notification.id}/"
+        )
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
@@ -523,10 +531,14 @@ class NotificationAPITests(APITestCase):
         )
         self.authenticate(self.admin)
 
-        response = self.client.delete(f"/api/v1/notifications/{normal_notification.id}/")
+        response = self.client.delete(
+            f"/api/v1/notifications/{normal_notification.id}/"
+        )
 
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(Notification.objects.filter(pk=normal_notification.pk).exists())
+        self.assertFalse(
+            Notification.objects.filter(pk=normal_notification.pk).exists()
+        )
 
     def test_non_visible_or_other_recipient_notification_returns_404(self):
         self.authenticate(self.customer)
@@ -546,10 +558,14 @@ class NotificationAPITests(APITestCase):
     def test_unresolved_blocking_notification_cannot_be_deleted(self):
         self.authenticate(self.admin)
 
-        response = self.client.delete(f"/api/v1/notifications/{self.admin_notification.id}/")
+        response = self.client.delete(
+            f"/api/v1/notifications/{self.admin_notification.id}/"
+        )
 
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
-        self.assertTrue(Notification.objects.filter(pk=self.admin_notification.pk).exists())
+        self.assertTrue(
+            Notification.objects.filter(pk=self.admin_notification.pk).exists()
+        )
 
     def test_resolved_blocking_notification_can_be_deleted(self):
         self.admin_notification.is_read = True
@@ -559,10 +575,14 @@ class NotificationAPITests(APITestCase):
         self.admin_notification.save()
         self.authenticate(self.admin)
 
-        response = self.client.delete(f"/api/v1/notifications/{self.admin_notification.id}/")
+        response = self.client.delete(
+            f"/api/v1/notifications/{self.admin_notification.id}/"
+        )
 
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(Notification.objects.filter(pk=self.admin_notification.pk).exists())
+        self.assertFalse(
+            Notification.objects.filter(pk=self.admin_notification.pk).exists()
+        )
 
     def test_clear_read_deletes_only_eligible_visible_notifications(self):
         visible_read_normal = Notification.objects.create(
@@ -620,7 +640,9 @@ class NotificationAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["deleted_count"], 2)
-        self.assertFalse(Notification.objects.filter(pk=visible_read_normal.pk).exists())
+        self.assertFalse(
+            Notification.objects.filter(pk=visible_read_normal.pk).exists()
+        )
         self.assertFalse(
             Notification.objects.filter(pk=visible_resolved_blocking.pk).exists()
         )

@@ -9,6 +9,9 @@ from locations.models import Address, DeliveryArea, ServiceCity
 
 EPHEMERAL_MODEL_LABELS = {
     "accounts.OTPCooldown",
+    "accounts.SocialIdentity",
+    "locations.ShippingCompany",
+    "offers.HomeCampaign",
 }
 
 
@@ -32,14 +35,19 @@ class SeedDataCommandTests(TestCase):
             ).exists()
         )
         self.assertEqual(ProductImage.objects.count(), Product.objects.count())
-        self.assertFalse(
-            ProductImage.objects.filter(is_primary=False).exists()
-        )
+        self.assertFalse(ProductImage.objects.filter(is_primary=False).exists())
 
     def test_seed_data_populates_every_project_model(self):
         call_command("seed_data", verbosity=0)
 
-        project_apps = {"accounts", "locations", "markets", "catalog", "offers", "orders"}
+        project_apps = {
+            "accounts",
+            "locations",
+            "markets",
+            "catalog",
+            "offers",
+            "orders",
+        }
         empty_models = [
             model._meta.label
             for model in apps.get_models()

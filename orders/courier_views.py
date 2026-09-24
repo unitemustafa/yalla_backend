@@ -13,7 +13,11 @@ from notifications.order_services import (
 )
 
 from .models import Order, OrderEvent, OrderMarketSection
-from .selectors import courier_order_list_queryset, courier_orders_for_user, order_queryset
+from .selectors import (
+    courier_order_list_queryset,
+    courier_orders_for_user,
+    order_queryset,
+)
 from .serializers import (
     CourierOrderDetailSerializer,
     CourierOrderListSerializer,
@@ -122,4 +126,3 @@ class CourierOrderStatusView(APIView):
                 context={"request": request},
             ).data
         )
-

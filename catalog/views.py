@@ -8,7 +8,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import User
 from accounts.permissions import IsCatalogAdminRole, IsCatalogClientRole
 from config.pagination import paginated_list_response
 
@@ -50,25 +49,22 @@ IsClientRole = IsCatalogClientRole
 
 
 def product_queryset():
-    return (
-        Product.objects.select_related(
-            "market__classification",
-            "category__classification",
-            "subcategory",
-        )
-        .prefetch_related(
-            "subcategories",
-            "category__attributes__options",
-            "attributes__options",
-            "attribute_values__attribute__options",
-            "attribute_values__option",
-            "variants__attribute_values__attribute__options",
-            "variants__attribute_values__option",
-            "variants__attribute_values__product_attribute__options",
-            "variants__attribute_values__product_attribute_option",
-            "additions",
-            "images",
-        )
+    return Product.objects.select_related(
+        "market__classification",
+        "category__classification",
+        "subcategory",
+    ).prefetch_related(
+        "subcategories",
+        "category__attributes__options",
+        "attributes__options",
+        "attribute_values__attribute__options",
+        "attribute_values__option",
+        "variants__attribute_values__attribute__options",
+        "variants__attribute_values__option",
+        "variants__attribute_values__product_attribute__options",
+        "variants__attribute_values__product_attribute_option",
+        "additions",
+        "images",
     )
 
 
@@ -150,9 +146,13 @@ class StoreSubcategoryDetailView(APIView):
 
     def delete(self, request, subcategory_id):
         subcategory = self.get_subcategory(subcategory_id)
-        product_count = Product.objects.filter(
-            Q(subcategory=subcategory) | Q(subcategories=subcategory)
-        ).distinct().count()
+        product_count = (
+            Product.objects.filter(
+                Q(subcategory=subcategory) | Q(subcategories=subcategory)
+            )
+            .distinct()
+            .count()
+        )
         if product_count:
             subcategory.is_active = False
             subcategory.save(update_fields=("is_active", "updated_at"))
@@ -356,8 +356,7 @@ class ProductCategoryDetailView(APIView):
             return Response(
                 {
                     "detail": (
-                        "Cannot delete product category while products are "
-                        "using it."
+                        "Cannot delete product category while products are using it."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -612,9 +611,7 @@ class ProductDetailView(APIView):
         product = self.get_product(product_id)
         product.is_available = False
         product.archived_at = timezone.now()
-        product.save(
-            update_fields=("is_available", "archived_at", "updated_at")
-        )
+        product.save(update_fields=("is_available", "archived_at", "updated_at"))
         return Response(
             {
                 "action": "archived",
@@ -753,9 +750,7 @@ class ProductLikeListView(APIView):
 
     def get(self, request):
         products = (
-            product_queryset()
-            .filter(liked_by=request.user)
-            .order_by("name", "id")
+            product_queryset().filter(liked_by=request.user).order_by("name", "id")
         )
         return paginated_list_response(
             request,
@@ -851,6 +846,6 @@ class ProductAdditionDetailView(APIView):
     def delete(self, request, addition_id):
         addition = self.get_addition(addition_id)
         addition.delete()
-        return Response({
-            "details" : "Deleted Successfully"
-        },status=status.HTTP_204_NO_CONTENT)
+        return Response(
+            {"details": "Deleted Successfully"}, status=status.HTTP_204_NO_CONTENT
+        )

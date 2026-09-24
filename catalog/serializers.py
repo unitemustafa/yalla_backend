@@ -1,6 +1,3 @@
-import json
-
-from django.db import transaction
 from django.db.models import Q
 from rest_framework import serializers
 
@@ -22,12 +19,10 @@ from .models import (
     StoreSubcategory,
     VariantAttributeValue,
 )
-from markets.models import Market, MarketSubcategory
+from markets.models import Market
 from .admin_product_serializers import AdminProductWriteMixin
 from .product_images import (
     PRODUCT_IMAGE_MAX_COUNT,
-    add_product_images,
-    clear_primary_product_image,
     validate_product_image_upload,
 )
 from .serializer_utils import deduplicate_image_uploads
@@ -128,9 +123,13 @@ class StoreSubcategorySerializer(serializers.ModelSerializer):
         return self._validate_unique_name(value, "name_ar")
 
     def get_product_count(self, subcategory):
-        return Product.objects.filter(
-            Q(subcategory=subcategory) | Q(subcategories=subcategory)
-        ).distinct().count()
+        return (
+            Product.objects.filter(
+                Q(subcategory=subcategory) | Q(subcategories=subcategory)
+            )
+            .distinct()
+            .count()
+        )
 
     def validate_name_en(self, value):
         return self._validate_unique_name(value, "name_en")
@@ -139,9 +138,7 @@ class StoreSubcategorySerializer(serializers.ModelSerializer):
         name = value.strip()
         if not name:
             raise serializers.ValidationError("This field may not be blank.")
-        queryset = StoreSubcategory.objects.filter(
-            **{f"{field_name}__iexact": name}
-        )
+        queryset = StoreSubcategory.objects.filter(**{f"{field_name}__iexact": name})
         if self.instance is not None:
             queryset = queryset.exclude(pk=self.instance.pk)
         if queryset.exists():
@@ -444,9 +441,7 @@ class ProductImageReorderSerializer(serializers.Serializer):
 
 
 class AdminProductSerializer(AdminProductWriteMixin, serializers.ModelSerializer):
-    SALE_VARIANT_ERROR = (
-        "يجب إضافة سعر أو متغير صالح قبل إتاحة المنتج للبيع."
-    )
+    SALE_VARIANT_ERROR = "يجب إضافة سعر أو متغير صالح قبل إتاحة المنتج للبيع."
     market_id = serializers.PrimaryKeyRelatedField(
         queryset=Market.objects.all(),
         source="market",
@@ -548,6 +543,7 @@ class AdminProductSerializer(AdminProductWriteMixin, serializers.ModelSerializer
 
     def validate_name(self, value):
         return value.strip()
+
 
 class LikedProductSerializer(serializers.ModelSerializer):
     class LikedProductVariantSerializer(serializers.ModelSerializer):

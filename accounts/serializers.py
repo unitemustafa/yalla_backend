@@ -10,7 +10,6 @@ from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
 from django.db.models import Count, Max, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -32,7 +31,6 @@ from locations.models import ServiceCity
 from orders.models import Order
 
 from .admin_user_serializers import AdminUserWriteMixin
-from .courier_rules import active_assigned_orders_for_user
 from .client_sessions import (
     access_expires_in,
     apply_rotated_client_session,
@@ -53,7 +51,6 @@ from .services import (
 from .social_auth import SocialTokenError, verify_social_id_token
 from .validation import (
     RequiredFieldMessagesMixin,
-    contains_whitespace,
     no_whitespace_validator,
     normalize_egyptian_phone,
     phone_candidates,
@@ -108,9 +105,8 @@ class CourierProfileSerializer(RequiredFieldMessagesMixin, serializers.ModelSeri
                 {"service_city": "Service city is required for couriers."}
             )
         if (
-            (self.instance is None or "service_city" in attrs)
-            and not service_city.is_active
-        ):
+            self.instance is None or "service_city" in attrs
+        ) and not service_city.is_active:
             raise serializers.ValidationError(
                 {"service_city": "Service city must be active."}
             )
@@ -301,8 +297,6 @@ class RegisterSerializer(
     password_confirm = serializers.CharField(write_only=True, trim_whitespace=False)
     terms_accepted = serializers.BooleanField()
 
-   
-
     def validate_email(self, value):
         reject_whitespace(value)
         return normalize_email(value)
@@ -407,9 +401,7 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             if expected_role == User.Role.ADMIN:
                 raise PermissionDenied("تسجيل الدخول هذا مخصص لحسابات المدير فقط.")
             role_label = User.Role(expected_role).label.lower()
-            raise PermissionDenied(
-                f"This login is only for {role_label} accounts."
-            )
+            raise PermissionDenied(f"This login is only for {role_label} accounts.")
 
         attrs["user"] = user
         return attrs
@@ -597,9 +589,7 @@ class LogoutSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
     def validate(self, attrs):
         refresh = attrs.get("refresh") or attrs.get("refreshToken")
         if not refresh:
-            raise serializers.ValidationError(
-                {"refresh": "Refresh token is required."}
-            )
+            raise serializers.ValidationError({"refresh": "Refresh token is required."})
         attrs["refresh"] = refresh
         return attrs
 
@@ -724,9 +714,7 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
                 "Upload a valid profile photo: JPG, JPEG, PNG, or WEBP."
             )
         if value.size > AVATAR_MAX_SIZE:
-            raise serializers.ValidationError(
-                "Profile photo must be 5 MB or smaller."
-            )
+            raise serializers.ValidationError("Profile photo must be 5 MB or smaller.")
         return validate_safe_image(value)
 
     def validate_phone(self, value):
@@ -774,7 +762,9 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
     def update(self, instance, validated_data):
         avatar = validated_data.pop("avatar", None)
         remove_avatar = validated_data.pop("remove_avatar", False)
-        old_avatar = instance.avatar_image if avatar is not None or remove_avatar else None
+        old_avatar = (
+            instance.avatar_image if avatar is not None or remove_avatar else None
+        )
         update_fields = []
         if (
             "username" in validated_data
@@ -850,6 +840,7 @@ class AdminUserWriteSerializer(
         )
         read_only_fields = ("is_staff", "is_superuser")
 
+
 class EmailTokenRefreshSerializer(
     RequiredFieldMessagesMixin,
     TokenRefreshSerializer,
@@ -860,9 +851,7 @@ class EmailTokenRefreshSerializer(
     def validate(self, attrs):
         refresh = attrs.get("refresh") or attrs.get("refreshToken")
         if not refresh:
-            raise serializers.ValidationError(
-                {"refresh": "Refresh token is required."}
-            )
+            raise serializers.ValidationError({"refresh": "Refresh token is required."})
         try:
             token = RefreshToken(refresh)
         except TokenError:
@@ -870,9 +859,7 @@ class EmailTokenRefreshSerializer(
             if not user.is_verified:
                 raise EmailVerificationRequired()
             try:
-                is_expired = int(payload["exp"]) <= int(
-                    timezone.now().timestamp()
-                )
+                is_expired = int(payload["exp"]) <= int(timezone.now().timestamp())
             except (KeyError, TypeError, ValueError):
                 raise
             if user.role in {User.Role.CLIENT, User.Role.REPRESENTATIVE}:
@@ -912,9 +899,7 @@ class EmailTokenRefreshSerializer(
         data = super().validate({"refresh": refresh})
         now = timezone.now()
         if app_session_claims is not None:
-            rotated_refresh = RefreshToken(
-                data.get("refresh", refresh), verify=False
-            )
+            rotated_refresh = RefreshToken(data.get("refresh", refresh), verify=False)
             apply_rotated_client_session(
                 rotated_refresh,
                 app_session_claims,
@@ -934,9 +919,7 @@ class EmailTokenRefreshSerializer(
         if admin_session_exp is not None:
             # Simple JWT normally resets the rotated refresh expiry to the global
             # 30-day lifetime. Restore the dashboard's original absolute expiry.
-            rotated_refresh = RefreshToken(
-                data.get("refresh", refresh), verify=False
-            )
+            rotated_refresh = RefreshToken(data.get("refresh", refresh), verify=False)
             rotated_refresh["admin_session_exp"] = admin_session_exp
             rotated_refresh["admin_remember"] = bool(token.get("admin_remember"))
             rotated_refresh["exp"] = admin_session_exp

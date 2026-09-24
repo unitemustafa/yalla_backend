@@ -264,8 +264,7 @@ class DeliveryAreaDetailView(
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         area = generics.get_object_or_404(
-            self.get_queryset().select_for_update(),
-            pk=kwargs[self.lookup_url_kwarg]
+            self.get_queryset().select_for_update(), pk=kwargs[self.lookup_url_kwarg]
         )
 
         if CourierProfile.objects.filter(delivery_area=area).exists():
@@ -274,11 +273,14 @@ class DeliveryAreaDetailView(
                 "تمت أرشفة منطقة التوصيل لأنها مستخدمة بواسطة طيارين.",
             )
 
-        if Order.objects.filter(
-            delivery_area=area,
-        ).exists() or Order.objects.filter(
-            delivery_address__delivery_area=area,
-        ).exists():
+        if (
+            Order.objects.filter(
+                delivery_area=area,
+            ).exists()
+            or Order.objects.filter(
+                delivery_address__delivery_area=area,
+            ).exists()
+        ):
             return self.archive(
                 area,
                 "تمت أرشفة منطقة التوصيل لأنها مرتبطة بسجل طلبات سابق.",
@@ -400,14 +402,10 @@ class ShippingCompanyDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 def _send_delivery_area_status_change(area_id, is_active, *, reraise=False):
-    from notifications.push import send_delivery_area_status_changed_event
+    del reraise
+    from notifications.tasks import send_delivery_area_status_changed_event_task
 
-    try:
-        send_delivery_area_status_changed_event(area_id, is_active)
-    except Exception:
-        # A refresh when the user reopens the app remains the fallback.
-        if reraise:
-            raise
+    send_delivery_area_status_changed_event_task.delay(area_id, is_active)
 
 
 def _schedule_delivery_area_status_change(area_id, is_active):
@@ -541,7 +539,9 @@ class AddressDetailView(APIView):
     def patch(self, request, address_id):
         address = self.get_address(request, address_id)
         if address is None:
-            return Response({"detail": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Address not found."}, status=status.HTTP_404_NOT_FOUND
+            )
         serializer = AddressWriteSerializer(
             address,
             data=request.data,
@@ -558,7 +558,9 @@ class AddressDetailView(APIView):
     def delete(self, request, address_id):
         address = self.get_address(request, address_id, for_update=True)
         if address is None:
-            return Response({"detail": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Address not found."}, status=status.HTTP_404_NOT_FOUND
+            )
         user = address.user
         was_default = address.is_default
         if Order.objects.filter(delivery_address=address).exists():
@@ -596,7 +598,9 @@ class AddressSetDefaultView(APIView):
         try:
             address = queryset.get(pk=address_id)
         except Address.DoesNotExist:
-            return Response({"detail": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Address not found."}, status=status.HTTP_404_NOT_FOUND
+            )
         Address.objects.filter(user=address.user, is_active=True).update(
             is_default=False
         )

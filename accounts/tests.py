@@ -9,7 +9,6 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.apps import apps
-from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test import override_settings
@@ -146,13 +145,17 @@ class AuthenticationAPITests(APITestCase):
         order.refresh_from_db()
         return order
 
-    def test_registration_requires_otp_before_login(self):
-        response = self.client.post(f"{AUTH_BASE}/signup", self.registration_payload())
+    @patch("accounts.tasks.send_email_task.delay")
+    def test_registration_requires_otp_before_login(self, enqueue_email):
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"{AUTH_BASE}/signup", self.registration_payload()
+            )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["email"], self.email)
         self.assertEqual(len(response.data["dev_otp"]), 6)
-        self.assertEqual(len(mail.outbox), 1)
+        enqueue_email.assert_called_once()
 
         self.assertFalse(User.objects.filter(email=self.email).exists())
         pending = PendingRegistration.objects.get(email=self.email)
@@ -165,9 +168,7 @@ class AuthenticationAPITests(APITestCase):
             {"email": self.email, "password": self.password},
         )
         self.assertEqual(login_response.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertEqual(
-            login_response.data["code"], "email_verification_required"
-        )
+        self.assertEqual(login_response.data["code"], "email_verification_required")
         self.assertEqual(login_response.data["email"], self.email)
         self.assertIn("registration_expires_at", login_response.data)
 
@@ -448,9 +449,7 @@ class AuthenticationAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         rotated = RefreshToken(response.data["refreshToken"])
-        self.assertEqual(
-            rotated["admin_session_exp"], original["admin_session_exp"]
-        )
+        self.assertEqual(rotated["admin_session_exp"], original["admin_session_exp"])
         self.assertEqual(rotated["exp"], original["admin_session_exp"])
         self.assertTrue(rotated["admin_remember"])
 
@@ -506,9 +505,7 @@ class AuthenticationAPITests(APITestCase):
             "admin_session_exp",
             RefreshToken(representative_response.data["refreshToken"]),
         )
-        self.assertEqual(
-            representative_response.data["session"]["mode"], "temporary"
-        )
+        self.assertEqual(representative_response.data["session"]["mode"], "temporary")
 
     def test_admin_user_crud_requires_authentication(self):
         response = self.client.get(f"{AUTH_BASE}/users/")
@@ -584,12 +581,12 @@ class AuthenticationAPITests(APITestCase):
             city.id,
         )
         self.assertIsNone(
-            CourierProfile.objects.get(user_id=create_response.data["id"]).delivery_area_id
+            CourierProfile.objects.get(
+                user_id=create_response.data["id"]
+            ).delivery_area_id
         )
         self.assertTrue(
-            User.objects.get(email="managed@example.com").check_password(
-                self.password
-            )
+            User.objects.get(email="managed@example.com").check_password(self.password)
         )
 
         user_id = create_response.data["id"]
@@ -613,6 +610,7 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(update_response.status_code, status.HTTP_200_OK)
         self.assertEqual(update_response.data["first_name"], "Updated")
         self.assertEqual(update_response.data["role"], User.Role.CLIENT)
+
     def test_admin_detail_for_client_returns_customer_stats_and_recent_orders(self):
         admin = self.create_active_user(
             role=User.Role.ADMIN,
@@ -682,7 +680,9 @@ class AuthenticationAPITests(APITestCase):
             [item["id"] for item in response.data["recent_orders"]],
             [order.id for order in [newest, *reversed(orders[-9:])]],
         )
-        self.assertNotIn("customer_stats", self.client.get(f"{AUTH_BASE}/users/").data[0])
+        self.assertNotIn(
+            "customer_stats", self.client.get(f"{AUTH_BASE}/users/").data[0]
+        )
 
     def test_admin_detail_reflects_the_client_saved_market_region(self):
         admin = self.create_active_user(
@@ -704,9 +704,7 @@ class AuthenticationAPITests(APITestCase):
         no_selection_response = self.client.get(f"{AUTH_BASE}/users/{client.id}/")
         self.assertEqual(no_selection_response.status_code, status.HTTP_200_OK)
         self.assertIsNone(no_selection_response.data["market_region_mode"])
-        self.assertIsNone(
-            no_selection_response.data["market_region_service_city_name"]
-        )
+        self.assertIsNone(no_selection_response.data["market_region_service_city_name"])
 
         client.market_region_mode = User.MarketRegionMode.GENERAL
         client.market_region_service_city = None
@@ -740,9 +738,7 @@ class AuthenticationAPITests(APITestCase):
         )
 
         client.market_region_service_city = updated_city
-        client.save(
-            update_fields=["market_region_service_city", "updated_at"]
-        )
+        client.save(update_fields=["market_region_service_city", "updated_at"])
         updated_city_response = self.client.get(f"{AUTH_BASE}/users/{client.id}/")
         self.assertEqual(
             updated_city_response.data["market_region_service_city_name"],
@@ -784,7 +780,9 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(response.data["customer_stats"]["orders_count"], 1)
         self.assertEqual(response.data["customer_stats"]["completed_orders_count"], 1)
         self.assertEqual(response.data["customer_stats"]["total_spent"], "125.50")
-        self.assertEqual(response.data["customer_stats"]["last_order_at"], order.created_at)
+        self.assertEqual(
+            response.data["customer_stats"]["last_order_at"], order.created_at
+        )
         self.assertEqual(response.data["recent_orders"][0]["id"], order.id)
         self.assertIsInstance(response.data["recent_orders"][0]["id"], int)
         self.assertEqual(
@@ -1041,10 +1039,10 @@ class AuthenticationAPITests(APITestCase):
         )
         dispatch.assert_not_called()
 
-    @patch("notifications.push.send_account_restored_push")
+    @patch("notifications.tasks.send_account_restored_push_task.delay")
     def test_admin_reactivation_creates_and_dispatches_restored_notification(
         self,
-        send_restored_push,
+        enqueue_restored_push,
     ):
         admin = self.create_active_user(
             role=User.Role.ADMIN,
@@ -1089,15 +1087,15 @@ class AuthenticationAPITests(APITestCase):
             notification.data,
             {"event": "account_restored", "route": "login"},
         )
-        send_restored_push.assert_called_once_with(notification.id)
+        enqueue_restored_push.assert_called_once_with(notification.id)
 
     @patch(
-        "notifications.push.send_account_restored_push",
-        side_effect=RuntimeError("temporary Firebase failure"),
+        "notifications.tasks.send_account_restored_push_task.delay",
+        side_effect=RuntimeError("queue unavailable"),
     )
     def test_firebase_failure_does_not_fail_account_reactivation(
         self,
-        send_restored_push,
+        enqueue_restored_push,
     ):
         admin = self.create_active_user(
             role=User.Role.ADMIN,
@@ -1135,7 +1133,7 @@ class AuthenticationAPITests(APITestCase):
                 type=Notification.Type.ACCOUNT_RESTORED,
             ).exists()
         )
-        send_restored_push.assert_called_once()
+        enqueue_restored_push.assert_called_once()
 
     def test_admin_cannot_change_status_before_client_signs_in(self):
         admin = self.create_active_user(
@@ -1232,8 +1230,10 @@ class AuthenticationAPITests(APITestCase):
         FIREBASE_SERVICE_ACCOUNT_BASE64="",
         FIREBASE_SERVICE_ACCOUNT_JSON="",
     )
-    @patch("accounts.deactivation.logger")
-    def test_admin_deactivation_succeeds_when_firebase_configuration_fails(self, logger):
+    @patch("notifications.tasks.send_account_disabled_event_task.delay")
+    def test_admin_deactivation_succeeds_when_firebase_configuration_fails(
+        self, enqueue_disabled_event
+    ):
         admin = self.create_active_user(
             role=User.Role.ADMIN,
             username="firebase_failure_admin",
@@ -1280,14 +1280,12 @@ class AuthenticationAPITests(APITestCase):
                 type=Notification.Type.ACCOUNT_DISABLED,
             ).exists()
         )
-        logger.exception.assert_called_once()
+        enqueue_disabled_event.assert_called_once_with(client.id)
 
-    @patch("notifications.push._send_tokens", side_effect=RuntimeError("FCM failed"))
-    @patch("accounts.deactivation.logger")
+    @patch("notifications.tasks.send_account_disabled_event_task.delay")
     def test_admin_deactivation_succeeds_when_firebase_send_fails(
         self,
-        logger,
-        send_tokens,
+        enqueue_disabled_event,
     ):
         admin = self.create_active_user(
             role=User.Role.ADMIN,
@@ -1323,8 +1321,7 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(response["Content-Type"], "application/json")
         self.assertFalse(client.is_active)
         self.assertEqual(client.auth_token_version, 1)
-        self.assertTrue(send_tokens.called)
-        logger.exception.assert_called_once()
+        enqueue_disabled_event.assert_called_once_with(client.id)
 
     @override_settings(
         FIREBASE_SERVICE_ACCOUNT_BASE64="",
@@ -1909,7 +1906,9 @@ class AuthenticationAPITests(APITestCase):
         )
 
         self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(User.objects.get(pk=create_response.data["id"]).username, "trimmed_user")
+        self.assertEqual(
+            User.objects.get(pk=create_response.data["id"]).username, "trimmed_user"
+        )
         self.assertEqual(internal_response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("username", internal_response.data)
 
@@ -2081,7 +2080,9 @@ class AuthenticationAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["detail"], "Logout successful.")
-        self.assertTrue(BlacklistedToken.objects.filter(token__jti=refresh["jti"]).exists())
+        self.assertTrue(
+            BlacklistedToken.objects.filter(token__jti=refresh["jti"]).exists()
+        )
 
     def test_refresh_accepts_mobile_refresh_token_name(self):
         user = self.create_active_user()
@@ -2359,7 +2360,9 @@ class AuthenticationAPITests(APITestCase):
         user.refresh_from_db()
         self.assertFalse(os.path.exists(old_path))
         self.assertTrue(os.path.exists(user.avatar_image.path))
-        self.assertNotEqual(first_response.data["avatar_url"], second_response.data["avatar_url"])
+        self.assertNotEqual(
+            first_response.data["avatar_url"], second_response.data["avatar_url"]
+        )
 
     def test_client_avatar_upload_rejects_oversized_file(self):
         user = self.create_active_user()
@@ -2818,35 +2821,44 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["resend_after_seconds"], 30)
 
-    def test_email_send_failure_does_not_raise_cooldown_level(self):
+    @patch(
+        "accounts.tasks.send_email_task.delay",
+        side_effect=RuntimeError("queue unavailable"),
+    )
+    def test_email_enqueue_failure_keeps_committed_cooldown(self, enqueue_email):
         user = self.create_active_user()
 
-        with patch("accounts.services.send_mail", side_effect=RuntimeError("down")):
-            with self.assertRaises(RuntimeError):
-                issue_otp(user, OneTimePassword.Purpose.PASSWORD_RESET)
+        with (
+            self.assertLogs("accounts.services", level="ERROR"),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            issue_otp(user, OneTimePassword.Purpose.PASSWORD_RESET)
 
-        self.assertFalse(
+        enqueue_email.assert_called_once()
+        self.assertTrue(
             OTPCooldown.objects.filter(
                 identifier=user.email,
                 purpose=OneTimePassword.Purpose.PASSWORD_RESET,
             ).exists()
         )
 
-    def test_registration_otp_email_has_branded_html_and_plain_fallback(self):
+    @patch("accounts.tasks.send_email_task.delay")
+    def test_registration_otp_email_has_branded_html_and_plain_fallback(
+        self, enqueue_email
+    ):
         user = self.create_active_user()
         user.first_name = "Yalla"
         user.save(update_fields=["first_name"])
 
-        _, code, _ = issue_otp(user, OneTimePassword.Purpose.REGISTRATION)
+        with self.captureOnCommitCallbacks(execute=True):
+            _, code, _ = issue_otp(user, OneTimePassword.Purpose.REGISTRATION)
 
-        self.assertEqual(len(mail.outbox), 1)
-        email = mail.outbox[0]
-        self.assertEqual(email.subject, "Yalla Market | رمز تأكيد البريد الإلكتروني")
-        self.assertIn(code, email.body)
-        self.assertIn("أكد بريدك الإلكتروني", email.body)
-        self.assertEqual(len(email.alternatives), 1)
-        html, content_type = email.alternatives[0]
-        self.assertEqual(content_type, "text/html")
+        subject, message, recipients = enqueue_email.call_args.args
+        html = enqueue_email.call_args.kwargs["html_message"]
+        self.assertEqual(subject, "Yalla Market | رمز تأكيد البريد الإلكتروني")
+        self.assertEqual(recipients, [user.email])
+        self.assertIn(code, message)
+        self.assertIn("أكد بريدك الإلكتروني", message)
         self.assertIn(code, html)
         self.assertIn("يلا ماركت", html)
         self.assertIn("YALLA MARKET", html)
@@ -2855,16 +2867,17 @@ class AuthenticationAPITests(APITestCase):
         self.assertIn("#013c7e", html)
         self.assertIn("صالح لمدة 10 دقائق فقط", html)
 
-    def test_password_reset_otp_email_uses_reset_copy(self):
+    @patch("accounts.tasks.send_email_task.delay")
+    def test_password_reset_otp_email_uses_reset_copy(self, enqueue_email):
         user = self.create_active_user()
 
-        _, code, _ = issue_otp(user, OneTimePassword.Purpose.PASSWORD_RESET)
+        with self.captureOnCommitCallbacks(execute=True):
+            _, code, _ = issue_otp(user, OneTimePassword.Purpose.PASSWORD_RESET)
 
-        email = mail.outbox[0]
-        self.assertEqual(email.subject, "Yalla Market | رمز تغيير كلمة المرور")
-        self.assertIn(code, email.body)
-        html, content_type = email.alternatives[0]
-        self.assertEqual(content_type, "text/html")
+        subject, message, _ = enqueue_email.call_args.args
+        html = enqueue_email.call_args.kwargs["html_message"]
+        self.assertEqual(subject, "Yalla Market | رمز تغيير كلمة المرور")
+        self.assertIn(code, message)
         self.assertIn("غيّر كلمة المرور بأمان", html)
         self.assertIn("Reset your password securely", html)
 
@@ -2894,18 +2907,20 @@ class AuthenticationAPITests(APITestCase):
             ).exists()
         )
 
-    def test_forgot_and_reset_password_with_otp(self):
+    @patch("accounts.tasks.send_email_task.delay")
+    def test_forgot_and_reset_password_with_otp(self, enqueue_email):
         user = self.create_active_user()
         existing_refresh = RefreshToken.for_user(user)
 
-        forgot_response = self.client.post(
-            f"{AUTH_BASE}/forgot-password",
-            {"email": self.email},
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            forgot_response = self.client.post(
+                f"{AUTH_BASE}/forgot-password",
+                {"email": self.email},
+            )
         self.assertEqual(forgot_response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(forgot_response.data["dev_otp"]), 6)
         self.assertEqual(forgot_response.data["resend_after_seconds"], 30)
-        self.assertEqual(len(mail.outbox), 1)
+        enqueue_email.assert_called_once()
         self.assertTrue(
             OTPCooldown.objects.filter(
                 identifier=self.email,
@@ -2931,9 +2946,7 @@ class AuthenticationAPITests(APITestCase):
         )
         user.refresh_from_db()
         self.assertTrue(user.check_password(self.new_password))
-        self.assertTrue(
-            BlacklistedToken.objects.filter(token__user=user).exists()
-        )
+        self.assertTrue(BlacklistedToken.objects.filter(token__user=user).exists())
         with self.assertRaises(TokenError):
             RefreshToken(str(existing_refresh)).check_blacklist()
 

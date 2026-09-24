@@ -1,7 +1,6 @@
 from django.conf import settings
 from django.utils import timezone
 
-from catalog.models import Product
 from markets.models import Market
 from markets.region import (
     current_market_region_selection,

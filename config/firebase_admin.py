@@ -40,9 +40,7 @@ def load_service_account_data():
             f"{source_name} must contain a valid JSON object."
         ) from None
     if not isinstance(credentials_data, dict):
-        raise FirebaseConfigurationError(
-            f"{source_name} must contain a JSON object."
-        )
+        raise FirebaseConfigurationError(f"{source_name} must contain a JSON object.")
     return credentials_data
 
 

@@ -6,7 +6,7 @@ from urllib.parse import quote
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.http import FileResponse, HttpResponse
+from django.http import FileResponse, HttpResponse, HttpResponseRedirect
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.exceptions import NotFound, PermissionDenied
@@ -30,6 +30,8 @@ from .selectors import (
     courier_orders_for_user,
     courier_service_city_for_order,
     eligible_representatives_for_order,
+    order_detail_queryset,
+    order_list_queryset,
     order_queryset,
     same_city_representatives,
 )
@@ -111,11 +113,13 @@ class OrderPrivateMediaView(APIView):
         ):
             raise NotFound("This order image is not available.")
 
-        content_type = (
-            mimetypes.guess_type(field.name)[0]
-            or "application/octet-stream"
-        )
-        if settings.PRIVATE_MEDIA_X_ACCEL_REDIRECT:
+        content_type = mimetypes.guess_type(field.name)[0] or "application/octet-stream"
+        if getattr(settings, "STORAGE_BACKEND", "local") == "s3":
+            signed_url = field.storage.url(field.name)
+            response = HttpResponseRedirect(signed_url)
+            response["Cache-Control"] = "private, no-store"
+            return response
+        elif settings.PRIVATE_MEDIA_X_ACCEL_REDIRECT:
             response = HttpResponse(content_type=content_type)
             internal_prefix = settings.PRIVATE_MEDIA_INTERNAL_URL.rstrip("/")
             response["X-Accel-Redirect"] = (
@@ -128,6 +132,7 @@ class OrderPrivateMediaView(APIView):
                 as_attachment=False,
                 filename=field.name.rsplit("/", 1)[-1],
             )
+
         response["Cache-Control"] = "private, no-store"
         response["X-Content-Type-Options"] = "nosniff"
         return response
@@ -159,7 +164,7 @@ class OrderListCreateView(generics.ListCreateAPIView):
         return OrderListSerializer
 
     def get_queryset(self):
-        queryset = order_queryset()
+        queryset = order_list_queryset()
         order_status = self.request.query_params.get("status")
         if order_status:
             queryset = queryset.filter(status=order_status)
@@ -197,7 +202,7 @@ class ClientOrderListView(generics.ListAPIView):
     serializer_class = OrderSerializer
 
     def get_queryset(self):
-        queryset = order_queryset().filter(user=self.request.user)
+        queryset = order_detail_queryset().filter(user=self.request.user)
         order_status = self.request.query_params.get("status")
         if order_status:
             queryset = queryset.filter(status=order_status)

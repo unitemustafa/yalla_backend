@@ -1,7 +1,11 @@
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.settings import api_settings
 
-from .token_security import ensure_user_verified, token_user, validate_client_token_state
+from .token_security import (
+    ensure_user_verified,
+    token_user,
+    validate_client_token_state,
+)
 
 
 class DatabaseStateJWTAuthentication(JWTAuthentication):

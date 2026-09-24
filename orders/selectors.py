@@ -6,7 +6,30 @@ from accounts.models import User
 from .models import Order, OrderEvent, OrderItem, OrderMarketSection
 
 
-def order_queryset():
+def order_list_queryset():
+    return (
+        Order.objects.select_related(
+            "user",
+            "delivery_address",
+            "delivery_address__service_city",
+            "delivery_address__delivery_area",
+            "shipping_company",
+            "assigned_representative",
+            "assigned_representative__courier_profile",
+            "assigned_representative__courier_profile__service_city",
+            "market",
+            "service_city",
+            "delivery_area",
+        )
+        .prefetch_related(
+            "order_offers__offer",
+            "market_sections__market",
+        )
+        .order_by("-created_at", "-id")
+    )
+
+
+def order_detail_queryset():
     return (
         Order.objects.select_related(
             "user",
@@ -54,6 +77,9 @@ def order_queryset():
     )
 
 
+order_queryset = order_detail_queryset
+
+
 def active_available_representatives():
     return (
         User.objects.filter(
@@ -89,7 +115,7 @@ def eligible_representatives_for_order(order):
 
 
 def courier_orders_for_user(user):
-    return order_queryset().filter(assigned_representative=user)
+    return order_detail_queryset().filter(assigned_representative=user)
 
 
 def courier_order_list_queryset(user):

@@ -34,9 +34,7 @@ class MarketTypeAPITests(APITestCase):
             password="Password1!",
             role=User.Role.ADMIN,
         )
-        self.classification = MarketClassification.objects.create(
-            name="Restaurants"
-        )
+        self.classification = MarketClassification.objects.create(name="Restaurants")
         self.other_classification = MarketClassification.objects.create(
             name="Furniture"
         )
@@ -152,9 +150,7 @@ class MarketTypeAPITests(APITestCase):
 
     def test_admin_can_reorder_all_types_in_one_classification(self):
         burger = self.create_type(sort_order=1)
-        grills = self.create_type(
-            name_ar="مشويات", name_en="Grills", sort_order=2
-        )
+        grills = self.create_type(name_ar="مشويات", name_en="Grills", sort_order=2)
         sushi = self.create_type(name_ar="سوشي", name_en="Sushi", sort_order=3)
 
         response = self.client.post(

@@ -141,7 +141,7 @@ class HomeView(APIView):
                 Prefetch(
                     "variants",
                     queryset=ProductVariant.objects.order_by("price", "id"),
-                )
+                ),
             )
             .distinct()
             .order_by("-created_at", "-id")[:8]
@@ -270,7 +270,7 @@ class MarketClassificationSummaryView(APIView):
                         markets__status=Market.Status.ACTIVE,
                     ),
                     distinct=True,
-                )
+                ),
             )
             .distinct()
             .order_by("-product_count", "name")[:4]
@@ -293,7 +293,7 @@ class MarketClassificationSummaryView(APIView):
                         markets__status=Market.Status.ACTIVE,
                     ),
                     distinct=True,
-                )
+                ),
             )
             .prefetch_related(
                 Prefetch(
@@ -618,7 +618,7 @@ class ProductSearchView(APIView):
                 Prefetch(
                     "variants",
                     queryset=ProductVariant.objects.order_by("price", "id"),
-                )
+                ),
             )
             .distinct()
             .order_by("-created_at", "-id")

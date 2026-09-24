@@ -21,6 +21,7 @@ from catalog.models import (
 )
 from locations.models import ServiceCity
 from markets.models import Market, MarketClassification
+from config.tasks import delete_storage_file_task
 from .models import HomeCampaign
 
 
@@ -85,13 +86,17 @@ class HomeCampaignAPITests(APITestCase):
                 "market_region_updated_at",
             )
         )
-        market_classification = MarketClassification.objects.create(name="Campaign Shops")
+        market_classification = MarketClassification.objects.create(
+            name="Campaign Shops"
+        )
         self.market = Market.objects.create(
             classification=market_classification,
             name="Campaign Market",
         )
         self.market.service_cities.add(self.city)
-        category_classification = CategoryClassification.objects.create(name="Campaign Food")
+        category_classification = CategoryClassification.objects.create(
+            name="Campaign Food"
+        )
         self.category = ProductCategory.objects.create(
             classification=category_classification,
             name="Campaign Meals",
@@ -166,7 +171,11 @@ class HomeCampaignAPITests(APITestCase):
 
         listed = self.client.get(CAMPAIGNS_BASE)
         self.assertEqual(listed.status_code, status.HTTP_200_OK)
-        results = listed.data.get("results", []) if isinstance(listed.data, dict) else listed.data
+        results = (
+            listed.data.get("results", [])
+            if isinstance(listed.data, dict)
+            else listed.data
+        )
         self.assertEqual(results[0]["id"], campaign_id)
 
         updated = self.client.patch(
@@ -327,8 +336,13 @@ class HomeCampaignAPITests(APITestCase):
         campaign.refresh_from_db()
         video_name = campaign.video.name
         video_storage = campaign.video.storage
-        with self.captureOnCommitCallbacks(execute=True):
+        with (
+            patch("config.tasks.delete_storage_file_task.delay") as enqueue,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
             campaign.delete()
+        for call in enqueue.call_args_list:
+            delete_storage_file_task.apply(args=call.args).get()
         self.assertFalse(video_storage.exists(video_name))
 
     def test_switching_media_type_removes_replaced_file(self):
@@ -342,7 +356,10 @@ class HomeCampaignAPITests(APITestCase):
         self.assertTrue(storage.exists(old_name))
         self.authenticate(self.admin)
 
-        with self.captureOnCommitCallbacks(execute=True):
+        with (
+            patch("config.tasks.delete_storage_file_task.delay") as enqueue,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
             response = self.client.patch(
                 f"{CAMPAIGNS_BASE}{campaign.id}/",
                 {"media_type": HomeCampaign.MediaType.NONE},
@@ -350,4 +367,6 @@ class HomeCampaignAPITests(APITestCase):
             )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        enqueue.assert_called_once()
+        delete_storage_file_task.apply(args=enqueue.call_args.args).get()
         self.assertFalse(storage.exists(old_name))

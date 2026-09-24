@@ -9,7 +9,10 @@ DATABASES = {
     "default": dj_database_url.parse(
         os.environ.get(
             "CI_DATABASE_URL",
-            "postgresql://postgres:postgres@127.0.0.1:5432/yalla_test",
+            os.environ.get(
+                "DATABASE_URL",
+                "postgresql://postgres@127.0.0.1:5433/yalla_test",
+            ),
         ),
         conn_max_age=0,
     )

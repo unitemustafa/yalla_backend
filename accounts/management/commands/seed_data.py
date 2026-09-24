@@ -24,8 +24,7 @@ class Command(SeedDataMixin, BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                "Seed data ready. Test password: SeedPass1! "
-                "| pending OTP: 123456"
+                "Seed data ready. Test password: SeedPass1! | pending OTP: 123456"
             )
         )
         self.stdout.write(

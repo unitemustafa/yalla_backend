@@ -84,11 +84,41 @@ class CatalogSeederMixin:
                 ["الدقي"],
                 Market.Scope.SERVICE_CITY,
             ),
-            ("متجر الأهرام", "الهرم", "سوبرماركت", ["الدقي", "الهرم"], Market.Scope.SERVICE_CITY),
-            ("نكهة إسكندرية", "سموحة", "مطعم", ["سموحة", "سيدي جابر"], Market.Scope.SERVICE_CITY),
-            ("حلويات البحر", "سيدي جابر", "حلويات", ["سموحة", "سيدي جابر"], Market.Scope.SERVICE_CITY),
-            ("خيرات المنصورة", "حي الجامعة", "منتجات عضوية", ["حي الجامعة", "توريل"], Market.Scope.SERVICE_CITY),
-            ("مخبزة الدلتا", "توريل", "مخبزة", ["حي الجامعة", "توريل"], Market.Scope.SERVICE_CITY),
+            (
+                "متجر الأهرام",
+                "الهرم",
+                "سوبرماركت",
+                ["الدقي", "الهرم"],
+                Market.Scope.SERVICE_CITY,
+            ),
+            (
+                "نكهة إسكندرية",
+                "سموحة",
+                "مطعم",
+                ["سموحة", "سيدي جابر"],
+                Market.Scope.SERVICE_CITY,
+            ),
+            (
+                "حلويات البحر",
+                "سيدي جابر",
+                "حلويات",
+                ["سموحة", "سيدي جابر"],
+                Market.Scope.SERVICE_CITY,
+            ),
+            (
+                "خيرات المنصورة",
+                "حي الجامعة",
+                "منتجات عضوية",
+                ["حي الجامعة", "توريل"],
+                Market.Scope.SERVICE_CITY,
+            ),
+            (
+                "مخبزة الدلتا",
+                "توريل",
+                "مخبزة",
+                ["حي الجامعة", "توريل"],
+                Market.Scope.SERVICE_CITY,
+            ),
         ]
         markets = {}
         for name, branch, classification, area_names, scope in definitions:
@@ -335,4 +365,3 @@ class CatalogSeederMixin:
             addition.products.set([products[name] for name in product_names])
             additions[english] = addition
         return additions
-

@@ -104,10 +104,7 @@ class User(AbstractUser):
             models.CheckConstraint(
                 condition=(
                     models.Q(role="admin")
-                    | (
-                        models.Q(is_staff=False)
-                        & models.Q(is_superuser=False)
-                    )
+                    | (models.Q(is_staff=False) & models.Q(is_superuser=False))
                 ),
                 name="accounts_user_privileged_role_valid",
             ),

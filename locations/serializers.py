@@ -84,9 +84,7 @@ class ServiceCitySerializer(serializers.ModelSerializer):
         if value is None:
             return value
         if not Decimal("-180") <= value <= Decimal("180"):
-            raise serializers.ValidationError(
-                "Longitude must be between -180 and 180."
-            )
+            raise serializers.ValidationError("Longitude must be between -180 and 180.")
         return value
 
     def validate_radius_km(self, value):
@@ -289,8 +287,7 @@ class DeliveryAreaSerializer(ServiceCitySerializer):
                 {"service_city_id": "Service city is required."}
             )
         service_city_changed = (
-            self.instance is None
-            or self.instance.service_city_id != service_city.id
+            self.instance is None or self.instance.service_city_id != service_city.id
         )
         if service_city_changed and not service_city.is_active:
             raise serializers.ValidationError(
@@ -425,11 +422,7 @@ class AddressSerializer(serializers.ModelSerializer):
         )
 
     def get_phone(self, instance):
-        return (
-            instance.recipient_phone
-            or getattr(instance.user, "phone", "")
-            or ""
-        )
+        return instance.recipient_phone or getattr(instance.user, "phone", "") or ""
 
     def get_phoneNumber(self, instance):
         return self.get_phone(instance)
@@ -513,8 +506,12 @@ class AddressWriteSerializer(serializers.Serializer):
         allow_blank=True,
     )
     label = serializers.CharField(required=False, allow_blank=True)
-    manual_city = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    manual_area = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    manual_city = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    manual_area = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
     fullName = serializers.CharField(required=False, allow_blank=True)
     full_name = serializers.CharField(required=False, allow_blank=True)
     line1 = serializers.CharField(required=False, allow_blank=True)
@@ -584,9 +581,7 @@ class AddressWriteSerializer(serializers.Serializer):
         if not details:
             details = self._structured_details(attrs)
         if not name:
-            raise serializers.ValidationError(
-                {"name": "Address name is required."}
-            )
+            raise serializers.ValidationError({"name": "Address name is required."})
         if not details and self.instance is None:
             raise serializers.ValidationError(
                 {"line1": "Address details are required."}
@@ -630,11 +625,15 @@ class AddressWriteSerializer(serializers.Serializer):
         if is_general_region:
             if service_city is not None:
                 raise serializers.ValidationError(
-                    {"service_city_id": "Service city must be empty for General addresses."}
+                    {
+                        "service_city_id": "Service city must be empty for General addresses."
+                    }
                 )
             if delivery_area is not None:
                 raise serializers.ValidationError(
-                    {"delivery_area_id": "Delivery area must be empty for General addresses."}
+                    {
+                        "delivery_area_id": "Delivery area must be empty for General addresses."
+                    }
                 )
             if not manual_city:
                 raise serializers.ValidationError(
@@ -671,11 +670,15 @@ class AddressWriteSerializer(serializers.Serializer):
                 and service_city.id != region_service_city.id
             ):
                 raise serializers.ValidationError(
-                    {"service_city_id": "Service city must match the selected market region."}
+                    {
+                        "service_city_id": "Service city must match the selected market region."
+                    }
                 )
             if manual_city:
                 raise serializers.ValidationError(
-                    {"manual_city": "Manual city must be empty for ServiceCity addresses."}
+                    {
+                        "manual_city": "Manual city must be empty for ServiceCity addresses."
+                    }
                 )
 
             if (
@@ -689,11 +692,7 @@ class AddressWriteSerializer(serializers.Serializer):
                 )
             ):
                 raise serializers.ValidationError(
-                    {
-                        "latitude": (
-                            "Outside the delivery area. Adjust the location."
-                        )
-                    }
+                    {"latitude": ("Outside the delivery area. Adjust the location.")}
                 )
 
             if latitude is not None and longitude is not None:
@@ -705,9 +704,8 @@ class AddressWriteSerializer(serializers.Serializer):
                 if coordinate_area is not None:
                     delivery_area = coordinate_area
                     manual_area = None
-                elif (
-                    delivery_area is not None
-                    and coverage_is_configured(delivery_area)
+                elif delivery_area is not None and coverage_is_configured(
+                    delivery_area
                 ):
                     # Never apply another area's fixed price to this point.
                     delivery_area = None
@@ -715,7 +713,9 @@ class AddressWriteSerializer(serializers.Serializer):
             if delivery_area is not None:
                 if manual_area:
                     raise serializers.ValidationError(
-                        {"manual_area": "Manual area must be empty for fixed delivery areas."}
+                        {
+                            "manual_area": "Manual area must be empty for fixed delivery areas."
+                        }
                     )
                 if not delivery_area.is_active:
                     raise serializers.ValidationError(
@@ -733,7 +733,9 @@ class AddressWriteSerializer(serializers.Serializer):
             else:
                 if latitude is None and longitude is None and not manual_area:
                     raise serializers.ValidationError(
-                        {"manual_area": "Manual area is required when delivery area is not selected."}
+                        {
+                            "manual_area": "Manual area is required when delivery area is not selected."
+                        }
                     )
                 delivery_type = Address.DeliveryType.DELIVERY
 
@@ -742,8 +744,12 @@ class AddressWriteSerializer(serializers.Serializer):
         attrs["normalized_details"] = details
         attrs["normalized_manual_city"] = manual_city
         attrs["normalized_manual_area"] = manual_area
-        attrs["normalized_latitude"] = Decimal(latitude) if latitude is not None else None
-        attrs["normalized_longitude"] = Decimal(longitude) if longitude is not None else None
+        attrs["normalized_latitude"] = (
+            Decimal(latitude) if latitude is not None else None
+        )
+        attrs["normalized_longitude"] = (
+            Decimal(longitude) if longitude is not None else None
+        )
         attrs["normalized_service_city"] = service_city
         attrs["normalized_delivery_area"] = delivery_area
         attrs["normalized_delivery_type"] = delivery_type
@@ -902,9 +908,7 @@ class AddressWriteSerializer(serializers.Serializer):
 
     def _normalized_name(self, attrs):
         explicit_name = (
-            attrs.get("name")
-            or attrs.get("fullName")
-            or attrs.get("full_name")
+            attrs.get("name") or attrs.get("fullName") or attrs.get("full_name")
         )
         if explicit_name is not None and str(explicit_name).strip():
             return str(explicit_name).strip()
@@ -935,17 +939,12 @@ class AddressWriteSerializer(serializers.Serializer):
 
     def _address_detail_text(self, attrs):
         line1 = str(
-            attrs.get("line1")
-            or attrs.get("street")
-            or attrs.get("address")
-            or ""
+            attrs.get("line1") or attrs.get("street") or attrs.get("address") or ""
         ).strip()
         city = (attrs.get("city") or "").strip()
         state = (attrs.get("state") or "").strip()
         country = (attrs.get("country") or "").strip()
-        return ", ".join(
-            part for part in (line1, city, state, country) if part
-        )
+        return ", ".join(part for part in (line1, city, state, country) if part)
 
     def _matching_service_city(self, attrs, name):
         candidates = [

@@ -139,9 +139,9 @@ class FirebaseMessagingInitializationTests(SimpleTestCase):
         self.assertNotIn("not-valid-base64!", str(error.exception))
 
     def test_base64_with_invalid_json_raises_a_sanitized_configuration_error(self):
-        encoded_invalid_json = base64.b64encode(
-            b"PRIVATE_KEY_MUST_NOT_APPEAR"
-        ).decode("ascii")
+        encoded_invalid_json = base64.b64encode(b"PRIVATE_KEY_MUST_NOT_APPEAR").decode(
+            "ascii"
+        )
 
         with override_settings(
             FIREBASE_SERVICE_ACCOUNT_BASE64=encoded_invalid_json,
@@ -172,21 +172,20 @@ class FCMTokenHandlingTests(TestCase):
     def test_multicast_delivery_is_split_at_five_hundred_devices(self):
         tokens = [f"batch-token-{index}" for index in range(501)]
         messaging = Mock()
-        messaging.MulticastMessage.side_effect = (
-            lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.MulticastMessage.side_effect = lambda **kwargs: SimpleNamespace(
+            **kwargs
         )
         messaging.Notification.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
         messaging.AndroidConfig.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
-        messaging.AndroidNotification.side_effect = (
-            lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.AndroidNotification.side_effect = lambda **kwargs: SimpleNamespace(
+            **kwargs
         )
         messaging.APNSConfig.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
         messaging.APNSPayload.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
         messaging.Aps.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
         messaging.send_each_for_multicast.side_effect = lambda message: SimpleNamespace(
             responses=[
-                SimpleNamespace(success=True, exception=None)
-                for _ in message.tokens
+                SimpleNamespace(success=True, exception=None) for _ in message.tokens
             ]
         )
 
@@ -252,13 +251,13 @@ class FCMTokenHandlingTests(TestCase):
             data={"event": "offer_created", "offer_id": 1},
         )
         messaging = Mock()
-        messaging.MulticastMessage.side_effect = (
-            lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.MulticastMessage.side_effect = lambda **kwargs: SimpleNamespace(
+            **kwargs
         )
         messaging.Notification.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
         messaging.AndroidConfig.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
-        messaging.AndroidNotification.side_effect = (
-            lambda **kwargs: SimpleNamespace(**kwargs)
+        messaging.AndroidNotification.side_effect = lambda **kwargs: SimpleNamespace(
+            **kwargs
         )
         messaging.APNSConfig.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)
         messaging.APNSPayload.side_effect = lambda **kwargs: SimpleNamespace(**kwargs)

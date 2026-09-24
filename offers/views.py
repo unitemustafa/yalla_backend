@@ -155,13 +155,13 @@ class OfferListCreateView(APIView):
 
     def get_queryset(self):
         protected_offers = Offer.objects.filter(pk=OuterRef("pk")).filter(
-            Q(order_offers__isnull=False)
-            | Q(notification_dispatches__isnull=False)
+            Q(order_offers__isnull=False) | Q(notification_dispatches__isnull=False)
         )
         return (
             Offer.objects.annotate(
                 deletion_mode_is_archive=Exists(protected_offers),
-            ).select_related(
+            )
+            .select_related(
                 "market__classification",
             )
             .prefetch_related(
@@ -258,26 +258,23 @@ class OfferDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return (
-            Offer.objects.select_related(
-                "market__classification",
-            )
-            .prefetch_related(
-                "market__delivery_areas",
-                "market__service_cities",
-                "service_cities",
-                "products__market",
-                "products__images",
-                "items__variant__product__market__classification",
-                "items__variant__product__market__service_cities",
-                "items__variant__product__market__delivery_areas",
-                "items__variant__product__attributes__options",
-                "items__variant__product__images",
-                "items__variant__attribute_values__attribute",
-                "items__variant__attribute_values__option",
-                "items__variant__attribute_values__product_attribute",
-                "items__variant__attribute_values__product_attribute_option",
-            )
+        return Offer.objects.select_related(
+            "market__classification",
+        ).prefetch_related(
+            "market__delivery_areas",
+            "market__service_cities",
+            "service_cities",
+            "products__market",
+            "products__images",
+            "items__variant__product__market__classification",
+            "items__variant__product__market__service_cities",
+            "items__variant__product__market__delivery_areas",
+            "items__variant__product__attributes__options",
+            "items__variant__product__images",
+            "items__variant__attribute_values__attribute",
+            "items__variant__attribute_values__option",
+            "items__variant__attribute_values__product_attribute",
+            "items__variant__attribute_values__product_attribute_option",
         )
 
     def get_offer(self, offer_id):
@@ -369,8 +366,7 @@ class OfferDetailView(APIView):
                 {
                     "action": "archived",
                     "detail": (
-                        "تمت أرشفة العرض بدلًا من حذفه لأنه مرتبط "
-                        "بسجل طلبات سابق."
+                        "تمت أرشفة العرض بدلًا من حذفه لأنه مرتبط بسجل طلبات سابق."
                     ),
                 },
                 status=status.HTTP_200_OK,
@@ -432,7 +428,9 @@ class OfferSendNotificationView(APIView):
     def post(self, request, offer_id):
         if request.user.role != User.Role.ADMIN:
             raise PermissionDenied("Only admin users can manage offers.")
-        request_id = serializers.UUIDField().run_validation(request.data.get("request_id"))
+        request_id = serializers.UUIDField().run_validation(
+            request.data.get("request_id")
+        )
         from notifications.offer_services import dispatch_offer_notifications
 
         try:
@@ -452,11 +450,13 @@ class OfferSendNotificationView(APIView):
                 request.user.id,
             )
             raise
-        return Response({
-            "dispatch_id": dispatch.id,
-            "request_id": str(dispatch.request_id),
-            "status": dispatch.status,
-            "recipient_count": dispatch.recipient_count,
-            "notification_count": dispatch.notification_count,
-            "sent_at": dispatch.completed_at,
-        })
+        return Response(
+            {
+                "dispatch_id": dispatch.id,
+                "request_id": str(dispatch.request_id),
+                "status": dispatch.status,
+                "recipient_count": dispatch.recipient_count,
+                "notification_count": dispatch.notification_count,
+                "sent_at": dispatch.completed_at,
+            }
+        )

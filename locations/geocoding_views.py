@@ -74,11 +74,7 @@ class GeocodingAutocompleteView(_GeoapifyView):
                 request=request,
             )
         )
-        return (
-            result
-            if isinstance(result, Response)
-            else Response({"items": result})
-        )
+        return result if isinstance(result, Response) else Response({"items": result})
 
 
 class GeocodingReverseView(_GeoapifyView):
@@ -95,9 +91,7 @@ class GeocodingReverseView(_GeoapifyView):
             )
         )
         return (
-            result
-            if isinstance(result, Response)
-            else Response({"location": result})
+            result if isinstance(result, Response) else Response({"location": result})
         )
 
 

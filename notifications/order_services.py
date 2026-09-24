@@ -5,7 +5,6 @@ from django.db import transaction
 from orders.models import Order, OrderEvent
 
 from .models import Notification
-from .push import send_notification_push
 
 
 def _content(event_type, order_id, status):
@@ -184,13 +183,15 @@ def create_order_lifecycle_notification(
         },
     )
     if created:
-        callback = partial(
-            send_notification_push,
-            notification.id,
-            high_priority=True,
-            android_channel_id="order_updates",
+        from .tasks import send_notification_push_task
+
+        transaction.on_commit(
+            lambda notif_id=notification.id: send_notification_push_task.delay(
+                notif_id,
+                high_priority=True,
+                android_channel_id="order_updates",
+            )
         )
-        transaction.on_commit(callback)
     return notification
 
 

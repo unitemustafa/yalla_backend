@@ -8,7 +8,6 @@ from accounts.exceptions import ACCOUNT_INACTIVE_MESSAGE
 from config.firebase_admin import (
     FirebaseConfigurationError,
     get_firebase_app,
-    load_service_account_data as _load_service_account_data,
 )
 
 from .models import ClientDevice, Notification
@@ -21,6 +20,7 @@ class PushDeliveryResult:
     successful_tokens: frozenset
     stale_tokens: frozenset
     failed_tokens: frozenset
+    dispatched_notification_ids: frozenset = frozenset()
 
 
 def _string_data(data):
@@ -174,6 +174,7 @@ def send_notifications_push(
     successful_tokens = set()
     stale_tokens = set()
     failed_tokens = set()
+    dispatched_notification_ids = set()
 
     payload_groups = {}
     for notification in notifications:
@@ -195,11 +196,11 @@ def send_notifications_push(
                 "message": notification.message,
                 "data": data,
                 "tokens": [],
+                "notifications": [],
             },
         )
-        group["tokens"].extend(
-            tokens_by_user.get(notification.recipient_id, ())
-        )
+        group["tokens"].extend(tokens_by_user.get(notification.recipient_id, ()))
+        group["notifications"].append(notification)
 
     for group in payload_groups.values():
         tokens = list(dict.fromkeys(group["tokens"]))
@@ -214,11 +215,16 @@ def send_notifications_push(
         successful_tokens.update(result.successful_tokens)
         stale_tokens.update(result.stale_tokens)
         failed_tokens.update(result.failed_tokens)
+        for notification in group["notifications"]:
+            recipient_tokens = tokens_by_user.get(notification.recipient_id, ())
+            if not any(token in result.failed_tokens for token in recipient_tokens):
+                dispatched_notification_ids.add(notification.id)
 
     return PushDeliveryResult(
         frozenset(successful_tokens),
         frozenset(stale_tokens),
         frozenset(failed_tokens),
+        frozenset(dispatched_notification_ids),
     )
 
 
@@ -256,7 +262,9 @@ def _send_notification_push_now(
     except FirebaseConfigurationError:
         raise
     except Exception:
-        logger.exception("Notification push failed for notification_id=%s", notification_id)
+        logger.exception(
+            "Notification push failed for notification_id=%s", notification_id
+        )
         raise
 
 
@@ -357,7 +365,8 @@ def _send_courier_notification_push_now(notification_id):
         "account_updates"
         if event in {"courier_account_disabled", "courier_account_restored"}
         else "courier_orders"
-        if event in {
+        if event
+        in {
             "courier_order_assigned",
             "courier_order_unassigned",
             "courier_order_cancelled",

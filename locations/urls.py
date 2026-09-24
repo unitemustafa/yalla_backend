@@ -66,7 +66,11 @@ urlpatterns = [
     ),
     path("addresses/", AddressListCreateView.as_view(), name="addresses"),
     path("addresses/default/", AddressDefaultView.as_view(), name="default-address"),
-    path("addresses/<int:address_id>/", AddressDetailView.as_view(), name="address-detail"),
+    path(
+        "addresses/<int:address_id>/",
+        AddressDetailView.as_view(),
+        name="address-detail",
+    ),
     path(
         "addresses/<int:address_id>/default/",
         AddressSetDefaultView.as_view(),

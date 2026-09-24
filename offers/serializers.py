@@ -55,7 +55,7 @@ class PrimaryKeyListField(serializers.Field):
         missing_ids = [item_id for item_id in ids if item_id not in objects_by_id]
         if missing_ids:
             raise serializers.ValidationError(
-                f"Invalid pk \"{missing_ids[0]}\" - object does not exist."
+                f'Invalid pk "{missing_ids[0]}" - object does not exist.'
             )
         return [objects_by_id[item_id] for item_id in ids]
 
@@ -93,7 +93,9 @@ class OfferProductSerializer(serializers.ModelSerializer):
 
 class OfferItemSerializer(serializers.ModelSerializer):
     variant_id = serializers.PrimaryKeyRelatedField(
-        queryset=ProductVariant.objects.select_related("product__market").prefetch_related(
+        queryset=ProductVariant.objects.select_related(
+            "product__market"
+        ).prefetch_related(
             "attribute_values__attribute",
             "attribute_values__option",
             "attribute_values__product_attribute",
@@ -255,7 +257,9 @@ class AdminOfferSerializer(serializers.ModelSerializer):
         return instance.notification_dispatches.filter(status="completed")
 
     def get_last_notification_sent_at(self, instance):
-        dispatch = self._completed_dispatches(instance).order_by("-completed_at").first()
+        dispatch = (
+            self._completed_dispatches(instance).order_by("-completed_at").first()
+        )
         return dispatch.completed_at if dispatch else None
 
     def get_notification_send_count(self, instance):
@@ -264,12 +268,19 @@ class AdminOfferSerializer(serializers.ModelSerializer):
     def _product_markets(self, instance):
         cache_name = "_offer_serializer_markets"
         if not hasattr(instance, cache_name):
-            markets = {product.market_id: product.market for product in instance.products.all() if product.market_id}
+            markets = {
+                product.market_id: product.market
+                for product in instance.products.all()
+                if product.market_id
+            }
             setattr(instance, cache_name, [markets[key] for key in sorted(markets)])
         return getattr(instance, cache_name)
 
     def get_markets(self, instance):
-        return [{"id": market.id, "name": market.name, "branch": market.branch} for market in self._product_markets(instance)]
+        return [
+            {"id": market.id, "name": market.name, "branch": market.branch}
+            for market in self._product_markets(instance)
+        ]
 
     def get_market_count(self, instance):
         return len(self._product_markets(instance))
@@ -373,14 +384,19 @@ class AdminOfferSerializer(serializers.ModelSerializer):
                 )
             products_to_check = [item["variant"].product for item in items]
             item_product_ids = {product.id for product in products_to_check}
-            if products is not None and item_product_ids != {product.id for product in products}:
+            if products is not None and item_product_ids != {
+                product.id for product in products
+            }:
                 raise serializers.ValidationError(
                     {"product_ids": "المنتجات لا تطابق التركيبات المختارة داخل العرض."}
                 )
         else:
             products_to_check = products
             if products_to_check is None and self.instance is not None:
-                products_to_check = [item.variant.product for item in self.instance.items.select_related("variant__product")]
+                products_to_check = [
+                    item.variant.product
+                    for item in self.instance.items.select_related("variant__product")
+                ]
                 if not products_to_check:
                     products_to_check = list(self.instance.products.all())
 
@@ -416,9 +432,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
             service_cities_to_check = list(service_cities)
 
         if not show_in_general and not service_cities_to_check:
-            message = (
-                "اختر الظهور في جاهز للشحن أو مدينة خدمة واحدة على الأقل."
-            )
+            message = "اختر الظهور في جاهز للشحن أو مدينة خدمة واحدة على الأقل."
             raise serializers.ValidationError(
                 {
                     "show_in_general": message,
@@ -443,11 +457,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
         if show_in_general:
             if market.scope != Market.Scope.GENERAL:
                 raise serializers.ValidationError(
-                    {
-                        "market_id": (
-                            "Offer market must support general visibility."
-                        )
-                    }
+                    {"market_id": ("Offer market must support general visibility.")}
                 )
 
         existing_city_ids = set()
@@ -476,24 +486,55 @@ class AdminOfferSerializer(serializers.ModelSerializer):
         }
         if is_service_city_package and products_to_check:
             if any(product.market_id is None for product in products_to_check):
-                raise serializers.ValidationError({"product_ids": "كل منتج في الباكج يجب أن يكون تابعًا لمحل."})
-            if any(item.status != Market.Status.ACTIVE for item in product_markets.values()):
-                raise serializers.ValidationError({"product_ids": "كل منتجات الباكج يجب أن تكون من محلات نشطة."})
-            if any(item.scope != Market.Scope.SERVICE_CITY for item in product_markets.values()):
-                raise serializers.ValidationError({"product_ids": "لا يمكن خلط منتجات جاهز للشحن مع منتجات مدينة خدمة."})
-            selected_city = service_cities_to_check[0] if len(service_cities_to_check) == 1 else None
-            if selected_city and any(not self._market_serves_service_city(item, selected_city) for item in product_markets.values()):
-                raise serializers.ValidationError({"product_ids": "هذا المنتج تابع لمحل لا يخدم مدينة العرض المحددة."})
+                raise serializers.ValidationError(
+                    {"product_ids": "كل منتج في الباكج يجب أن يكون تابعًا لمحل."}
+                )
+            if any(
+                item.status != Market.Status.ACTIVE for item in product_markets.values()
+            ):
+                raise serializers.ValidationError(
+                    {"product_ids": "كل منتجات الباكج يجب أن تكون من محلات نشطة."}
+                )
+            if any(
+                item.scope != Market.Scope.SERVICE_CITY
+                for item in product_markets.values()
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "product_ids": "لا يمكن خلط منتجات جاهز للشحن مع منتجات مدينة خدمة."
+                    }
+                )
+            selected_city = (
+                service_cities_to_check[0]
+                if len(service_cities_to_check) == 1
+                else None
+            )
+            if selected_city and any(
+                not self._market_serves_service_city(item, selected_city)
+                for item in product_markets.values()
+            ):
+                raise serializers.ValidationError(
+                    {"product_ids": "هذا المنتج تابع لمحل لا يخدم مدينة العرض المحددة."}
+                )
             if market.id not in product_markets:
                 if "market" in attrs:
-                    raise serializers.ValidationError({"market_id": "المحل الأساسي يجب أن يكون أحد محلات منتجات الباكج."})
+                    raise serializers.ValidationError(
+                        {
+                            "market_id": "المحل الأساسي يجب أن يكون أحد محلات منتجات الباكج."
+                        }
+                    )
                 attrs["market"] = products_to_check[0].market
                 market = attrs["market"]
 
-        unserved_city_ids = [] if is_service_city_package else [
-            service_city.id for service_city in service_cities_to_check
-            if not self._market_serves_service_city(market, service_city)
-        ]
+        unserved_city_ids = (
+            []
+            if is_service_city_package
+            else [
+                service_city.id
+                for service_city in service_cities_to_check
+                if not self._market_serves_service_city(market, service_city)
+            ]
+        )
         if unserved_city_ids:
             raise serializers.ValidationError(
                 {"service_city_ids": "Offer market does not serve every selected city."}
@@ -518,12 +559,10 @@ class AdminOfferSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _market_serves_service_city(market, service_city):
-        return (
-            market.service_cities.filter(
-                pk=service_city.pk,
-                is_active=True,
-            ).exists()
-        )
+        return market.service_cities.filter(
+            pk=service_city.pk,
+            is_active=True,
+        ).exists()
 
     @staticmethod
     def _legacy_items(products):
@@ -548,9 +587,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
                 for item in items
             ]
         )
-        offer.products.set(
-            {item["variant"].product_id for item in items}
-        )
+        offer.products.set({item["variant"].product_id for item in items})
 
     @transaction.atomic
     def create(self, validated_data):

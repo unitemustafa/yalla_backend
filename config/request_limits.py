@@ -47,9 +47,11 @@ class RequestBodyLimitMiddleware:
             return settings.API_MAX_REQUEST_BODY_SIZE
 
         path = request.path_info.rstrip("/") + "/"
-        if path.startswith((
-            "/api/v1/catalog/products/",
-            "/api/v2/catalog/products/",
-        )):
+        if path.startswith(
+            (
+                "/api/v1/catalog/products/",
+                "/api/v2/catalog/products/",
+            )
+        ):
             return settings.API_PRODUCT_UPLOAD_REQUEST_SIZE
         return settings.API_SINGLE_UPLOAD_REQUEST_SIZE

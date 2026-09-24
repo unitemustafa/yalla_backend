@@ -9,8 +9,8 @@ class Offer(models.Model):
         PACKAGE = "package", "Package"
         FLASH = "flash", "Flash"
         DISCOUNT = "discount", "Discount"
-        ANNOUNCEMENT = "announcement" , "Announcement"
-        DELIVERY = "delivery" , "Delivery"
+        ANNOUNCEMENT = "announcement", "Announcement"
+        DELIVERY = "delivery", "Delivery"
 
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
@@ -110,7 +110,10 @@ class Offer(models.Model):
         return not self.products.exclude(market__status=Market.Status.ACTIVE).exists()
 
     def is_currently_visible(self, now=None):
-        return self.get_effective_status(now) == self.Status.ACTIVE and self.has_valid_visibility_scope()
+        return (
+            self.get_effective_status(now) == self.Status.ACTIVE
+            and self.has_valid_visibility_scope()
+        )
 
     def can_send_notification(self, now=None):
         return self.is_currently_visible(now) and self.has_active_markets()

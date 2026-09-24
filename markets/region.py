@@ -58,9 +58,7 @@ def compact_market_region_selection(user):
         }
     return {
         "mode": User.MarketRegionMode.SERVICE_CITY,
-        "service_city": compact_service_city_payload(
-            user.market_region_service_city
-        ),
+        "service_city": compact_service_city_payload(user.market_region_service_city),
     }
 
 
@@ -146,9 +144,7 @@ def haversine_distance_km(latitude_1, longitude_1, latitude_2, longitude_2):
     longitude_delta = radians(lon_2 - lon_1)
     haversine = (
         sin(latitude_delta / 2) ** 2
-        + cos(radians(lat_1))
-        * cos(radians(lat_2))
-        * sin(longitude_delta / 2) ** 2
+        + cos(radians(lat_1)) * cos(radians(lat_2)) * sin(longitude_delta / 2) ** 2
     )
     return 2 * EARTH_RADIUS_KM * asin(sqrt(haversine))
 
@@ -212,21 +208,25 @@ def visible_offer_queryset(user):
         start_time__lte=now,
         end_time__gte=now,
     )
-    queryset = region_filtered_offer_queryset(queryset, user).annotate(
-        total_offer_uses=Count(
-            "order_offers__order",
-            filter=~Q(order_offers__order__status="cancelled"),
-            distinct=True,
-        ),
-        customer_offer_uses=Count(
-            "order_offers__order",
-            filter=Q(order_offers__order__user=user)
-            & ~Q(order_offers__order__status="cancelled"),
-            distinct=True,
-        ),
-    ).filter(
-        Q(use_limits__isnull=True) | Q(total_offer_uses__lt=F("use_limits")),
-        Q(user_limit__isnull=True) | Q(customer_offer_uses__lt=F("user_limit")),
+    queryset = (
+        region_filtered_offer_queryset(queryset, user)
+        .annotate(
+            total_offer_uses=Count(
+                "order_offers__order",
+                filter=~Q(order_offers__order__status="cancelled"),
+                distinct=True,
+            ),
+            customer_offer_uses=Count(
+                "order_offers__order",
+                filter=Q(order_offers__order__user=user)
+                & ~Q(order_offers__order__status="cancelled"),
+                distinct=True,
+            ),
+        )
+        .filter(
+            Q(use_limits__isnull=True) | Q(total_offer_uses__lt=F("use_limits")),
+            Q(user_limit__isnull=True) | Q(customer_offer_uses__lt=F("user_limit")),
+        )
     )
     return queryset.order_by("-announcement_priority", "-created_at", "-id")
 
@@ -281,8 +281,7 @@ def order_region_validation_error(user, variants, offers):
     errors = {}
     if selection["mode"] == User.MarketRegionMode.GENERAL:
         if any(
-            variant.product.market.scope != Market.Scope.GENERAL
-            for variant in variants
+            variant.product.market.scope != Market.Scope.GENERAL for variant in variants
         ):
             errors["items"] = MIXED_MARKET_SCOPE_MESSAGE
 
@@ -294,18 +293,17 @@ def order_region_validation_error(user, variants, offers):
             if not offer.show_in_general:
                 errors["offers"] = SERVICE_CITY_OFFER_IN_GENERAL_MESSAGE
                 break
-            if (
-                offer.market.scope != Market.Scope.GENERAL
-                or any(
-                    product.market.scope != Market.Scope.GENERAL
-                    for product in offer_products
-                )
+            if offer.market.scope != Market.Scope.GENERAL or any(
+                product.market.scope != Market.Scope.GENERAL
+                for product in offer_products
             ):
                 errors["offers"] = MIXED_MARKET_SCOPE_MESSAGE
                 break
         return errors or None
 
-    if any(not product_matches_region(variant.product, selection) for variant in variants):
+    if any(
+        not product_matches_region(variant.product, selection) for variant in variants
+    ):
         errors["items"] = MIXED_SERVICE_CITY_MARKETS_MESSAGE
 
     for offer in offers:
@@ -317,8 +315,7 @@ def order_region_validation_error(user, variants, offers):
             errors["offers"] = GENERAL_OFFER_IN_SERVICE_CITY_MESSAGE
             break
         if not offer_matches_region(offer, selection) or any(
-            not product_matches_region(product, selection)
-            for product in offer_products
+            not product_matches_region(product, selection) for product in offer_products
         ):
             errors["offers"] = MIXED_SERVICE_CITY_MARKETS_MESSAGE
             break

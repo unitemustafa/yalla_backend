@@ -39,9 +39,7 @@ def validate_offer_image_upload(value):
     if content_type not in OFFER_IMAGE_ALLOWED_CONTENT_TYPES:
         raise serializers.ValidationError("Unsupported offer image type.")
     if value.size > OFFER_IMAGE_MAX_SIZE:
-        raise serializers.ValidationError(
-            "Offer images must be 5 MB or smaller."
-        )
+        raise serializers.ValidationError("Offer images must be 5 MB or smaller.")
     return validate_safe_image(value)
 
 

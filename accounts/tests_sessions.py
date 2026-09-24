@@ -26,9 +26,12 @@ AUTH_BASE = "/api/v1/auth"
 
 @contextmanager
 def jwt_time(value):
-    with patch("django.utils.timezone.now", return_value=value), patch(
-        "rest_framework_simplejwt.tokens.aware_utcnow",
-        return_value=value,
+    with (
+        patch("django.utils.timezone.now", return_value=value),
+        patch(
+            "rest_framework_simplejwt.tokens.aware_utcnow",
+            return_value=value,
+        ),
     ):
         yield
 
@@ -75,40 +78,26 @@ class ClientSessionPolicyTests(APITestCase):
     def test_omitted_remember_defaults_to_temporary_with_metadata(self):
         response = self.login()
 
-        self.assertEqual(
-            response.status_code, status.HTTP_200_OK, response.data
-        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         refresh = RefreshToken(response.data["refreshToken"])
-        expected_deadline = int(
-            (self.started_at + timedelta(hours=8)).timestamp()
-        )
+        expected_deadline = int((self.started_at + timedelta(hours=8)).timestamp())
         self.assertEqual(refresh[CLIENT_SESSION_MODE_CLAIM], TEMPORARY_MODE)
         self.assertEqual(
             refresh[CLIENT_SESSION_STARTED_AT_CLAIM],
             int(self.started_at.timestamp()),
         )
-        self.assertEqual(
-            refresh[CLIENT_SESSION_EXPIRES_AT_CLAIM], expected_deadline
-        )
+        self.assertEqual(refresh[CLIENT_SESSION_EXPIRES_AT_CLAIM], expected_deadline)
         self.assertEqual(refresh["exp"], expected_deadline)
-        self.assertEqual(
-            response.data["session"]["mode"], TEMPORARY_MODE
-        )
+        self.assertEqual(response.data["session"]["mode"], TEMPORARY_MODE)
         self.assertFalse(response.data["session"]["remember"])
         self.assertEqual(response.data["expiresIn"], 900)
 
     def test_explicit_false_uses_temporary_policy(self):
         response = self.login(remember_marker=False)
 
-        self.assertEqual(
-            response.status_code, status.HTTP_200_OK, response.data
-        )
-        self.assertEqual(
-            response.data["session"]["mode"], TEMPORARY_MODE
-        )
-        self.assertIsNotNone(
-            response.data["session"]["absoluteExpiresAt"]
-        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["session"]["mode"], TEMPORARY_MODE)
+        self.assertIsNotNone(response.data["session"]["absoluteExpiresAt"])
 
     def test_inactive_login_has_stable_account_inactive_code(self):
         self.user.is_active = False
@@ -140,9 +129,7 @@ class ClientSessionPolicyTests(APITestCase):
 
         response = self.refresh(old_refresh, at=refreshed_at)
 
-        self.assertEqual(
-            response.status_code, status.HTTP_200_OK, response.data
-        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         rotated = RefreshToken(response.data["refreshToken"], verify=False)
         self.assertEqual(
             rotated["exp"] - int(refreshed_at.timestamp()),
@@ -189,9 +176,7 @@ class ClientSessionPolicyTests(APITestCase):
         self.assertEqual(response.data["code"], "session_expired")
 
     def test_temporary_refreshes_preserve_original_deadline(self):
-        expected_deadline = int(
-            (self.started_at + timedelta(hours=8)).timestamp()
-        )
+        expected_deadline = int((self.started_at + timedelta(hours=8)).timestamp())
 
         for hour in (2, 5, 7):
             login = self.login(remember_marker=False)
@@ -199,12 +184,8 @@ class ClientSessionPolicyTests(APITestCase):
                 login.data["refreshToken"],
                 at=self.started_at + timedelta(hours=hour),
             )
-            self.assertEqual(
-                response.status_code, status.HTTP_200_OK, response.data
-            )
-            rotated = RefreshToken(
-                response.data["refreshToken"], verify=False
-            )
+            self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+            rotated = RefreshToken(response.data["refreshToken"], verify=False)
             self.assertEqual(rotated["exp"], expected_deadline)
             self.assertEqual(
                 rotated[CLIENT_SESSION_EXPIRES_AT_CLAIM],
@@ -217,9 +198,7 @@ class ClientSessionPolicyTests(APITestCase):
 
         response = self.refresh(login.data["refreshToken"], at=refresh_at)
 
-        self.assertEqual(
-            response.status_code, status.HTTP_200_OK, response.data
-        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         refresh = RefreshToken(response.data["refreshToken"], verify=False)
         access = AccessToken(response.data["accessToken"], verify=False)
         deadline = int((self.started_at + timedelta(hours=8)).timestamp())
@@ -299,9 +278,7 @@ class ClientSessionPolicyTests(APITestCase):
             at=self.started_at + timedelta(hours=7),
         )
 
-        self.assertEqual(
-            response.status_code, status.HTTP_200_OK, response.data
-        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         rotated = RefreshToken(response.data["refreshToken"], verify=False)
         self.assertEqual(rotated[CLIENT_SESSION_MODE_CLAIM], TEMPORARY_MODE)
         self.assertEqual(

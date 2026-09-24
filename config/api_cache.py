@@ -79,9 +79,7 @@ def _cache_key(request, user):
         else "public"
     )
     user_version = (
-        _version(USER_VERSION_KEY.format(user_id=user_id))
-        if user is not None
-        else 1
+        _version(USER_VERSION_KEY.format(user_id=user_id)) if user is not None else 1
     )
     material = "|".join(
         (
@@ -106,10 +104,7 @@ class ApiResponseCacheMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        if (
-            not settings.API_CACHE_ENABLED
-            or not _is_cacheable_path(request.path_info)
-        ):
+        if not settings.API_CACHE_ENABLED or not _is_cacheable_path(request.path_info):
             return self.get_response(request)
 
         if request.method != "GET":
@@ -124,9 +119,7 @@ class ApiResponseCacheMiddleware:
         user = None
         if not _is_public_cacheable_path(request.path_info):
             try:
-                auth_result = DatabaseStateJWTAuthentication().authenticate(
-                    request
-                )
+                auth_result = DatabaseStateJWTAuthentication().authenticate(request)
             except APIException:
                 auth_result = None
             if auth_result is None:
@@ -214,11 +207,15 @@ def _invalidate_personalized_m2m(
 
 
 def _invalidate_user_region(sender, instance, created, update_fields, **kwargs):
-    if created or update_fields is None or {
-        "market_region_mode",
-        "market_region_service_city",
-        "market_region_service_city_id",
-    }.intersection(update_fields):
+    if (
+        created
+        or update_fields is None
+        or {
+            "market_region_mode",
+            "market_region_service_city",
+            "market_region_service_city_id",
+        }.intersection(update_fields)
+    ):
         bump_user_cache_version(instance.pk)
 
 

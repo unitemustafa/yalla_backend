@@ -36,6 +36,12 @@ PUBLIC_API_ROUTE_NAMES = {
     "reset-password",
     "reset-password-slash",
     "login-dashboard-snapshot",
+    "social-link",
+    "social-link-slash",
+    "social-session",
+    "social-session-slash",
+    "social-signup",
+    "social-signup-slash",
 }
 
 
@@ -116,7 +122,11 @@ class ApiRouteSecurityTests(SimpleTestCase):
                         f"{route} [{method}]",
                     )
                     self.assertTrue(
-                        any(value for label, value in matrix.items() if label != "anonymous"),
+                        any(
+                            value
+                            for label, value in matrix.items()
+                            if label != "anonymous"
+                        ),
                         f"{route} [{method}] denies every authenticated role",
                     )
                 if role_permissions:

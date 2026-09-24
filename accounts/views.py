@@ -68,7 +68,6 @@ from .services import (
     otp_response_data,
     registration_expires_at,
     verify_registration_otp,
-    verify_otp,
 )
 from .exceptions import EmailVerificationRequired
 
@@ -88,9 +87,7 @@ def token_payload(user, request=None, admin_session_lifetime=None, remember=Fals
     if is_mobile_app_session:
         apply_new_client_session(refresh, remember=remember, now=now)
     elif admin_session_lifetime is not None:
-        admin_session_exp = int(
-            (now + admin_session_lifetime).timestamp()
-        )
+        admin_session_exp = int((now + admin_session_lifetime).timestamp())
         refresh["admin_session_exp"] = admin_session_exp
         refresh["admin_remember"] = bool(remember)
         refresh.set_exp(lifetime=admin_session_lifetime)
@@ -106,7 +103,7 @@ def token_payload(user, request=None, admin_session_lifetime=None, remember=Fals
             lifetime=min(
                 admin_session_lifetime,
                 settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"],
-            )
+            ),
         )
     sync_outstanding_token(refresh, user=user)
     payload = {
@@ -225,8 +222,9 @@ class RegisterView(APIView):
         ]
         if stale_matches:
             stale_emails = list(
-                PendingRegistration.objects.filter(pk__in=stale_matches)
-                .values_list("email", flat=True)
+                PendingRegistration.objects.filter(pk__in=stale_matches).values_list(
+                    "email", flat=True
+                )
             )
             PendingRegistration.objects.filter(pk__in=stale_matches).delete()
             for email in stale_emails:
@@ -270,9 +268,7 @@ class RegisterView(APIView):
             is_retry = True
 
         try:
-            registration, code, cooldown_data = issue_registration_otp(
-                registration
-            )
+            registration, code, cooldown_data = issue_registration_otp(registration)
         except OTPCooldownError as exc:
             registration.refresh_from_db()
             return otp_cooldown_error_response(
@@ -344,9 +340,13 @@ class VerifyRegistrationOTPView(APIView):
         serializer = EmailOTPSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        registration = PendingRegistration.objects.select_for_update().filter(
-            email__iexact=serializer.validated_data["email"],
-        ).first()
+        registration = (
+            PendingRegistration.objects.select_for_update()
+            .filter(
+                email__iexact=serializer.validated_data["email"],
+            )
+            .first()
+        )
         if registration is None:
             return Response(
                 {"otp": ["Invalid verification code."]},
@@ -421,9 +421,7 @@ class ResendRegistrationOTPView(APIView):
             )
 
         try:
-            registration, code, cooldown_data = issue_registration_otp(
-                registration
-            )
+            registration, code, cooldown_data = issue_registration_otp(registration)
         except OTPCooldownError as exc:
             registration.refresh_from_db()
             return otp_cooldown_error_response(
@@ -459,9 +457,7 @@ class LoginView(APIView):
         user = serializer.validated_data["user"]
         remember = serializer.validated_data.get("remember", False)
         update_successful_login(user)
-        return Response(
-            token_payload(user, request=request, remember=remember)
-        )
+        return Response(token_payload(user, request=request, remember=remember))
 
 
 class ClientLoginView(LoginView):
@@ -499,9 +495,13 @@ class SocialSessionView(APIView):
         serializer = SocialTokenSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         identity = serializer.social_identity
-        linked = SocialIdentity.objects.select_related("user").filter(
-            firebase_uid=identity.firebase_uid,
-        ).first()
+        linked = (
+            SocialIdentity.objects.select_related("user")
+            .filter(
+                firebase_uid=identity.firebase_uid,
+            )
+            .first()
+        )
         if linked is not None:
             error = _social_client_error(linked.user)
             if error is not None:
@@ -576,9 +576,12 @@ class SocialSignupView(APIView):
         data = serializer.validated_data
         identity = serializer.social_identity
 
-        linked = SocialIdentity.objects.select_for_update().select_related(
-            "user"
-        ).filter(firebase_uid=identity.firebase_uid).first()
+        linked = (
+            SocialIdentity.objects.select_for_update()
+            .select_related("user")
+            .filter(firebase_uid=identity.firebase_uid)
+            .first()
+        )
         if linked is not None:
             error = _social_client_error(linked.user)
             if error is not None:
@@ -630,8 +633,7 @@ class SocialSignupView(APIView):
             )
 
         pending_conflicts = list(
-            PendingRegistration.objects.select_for_update()
-            .filter(
+            PendingRegistration.objects.select_for_update().filter(
                 Q(email__iexact=identity.email)
                 | Q(username__iexact=data["username"])
                 | Q(phone__in=phone_candidates(data["phone"]))
@@ -645,7 +647,9 @@ class SocialSignupView(APIView):
             ),
             None,
         )
-        if any(item.pk != getattr(registration, "pk", None) for item in pending_conflicts):
+        if any(
+            item.pk != getattr(registration, "pk", None) for item in pending_conflicts
+        ):
             raise ValidationError(
                 {"detail": "Another pending registration uses these details."}
             )
@@ -691,10 +695,14 @@ class SocialLinkView(APIView):
         serializer.is_valid(raise_exception=True)
         identity = serializer.social_identity
         data = serializer.validated_data
-        user = User.objects.select_for_update().filter(
-            email__iexact=identity.email,
-            deleted_at__isnull=True,
-        ).first()
+        user = (
+            User.objects.select_for_update()
+            .filter(
+                email__iexact=identity.email,
+                deleted_at__isnull=True,
+            )
+            .first()
+        )
         if user is None or not user.check_password(data["password"]):
             return Response(
                 {"detail": "Invalid email or password."},
@@ -703,9 +711,13 @@ class SocialLinkView(APIView):
         error = _social_client_error(user)
         if error is not None:
             return error
-        linked = SocialIdentity.objects.select_for_update().filter(
-            firebase_uid=identity.firebase_uid,
-        ).first()
+        linked = (
+            SocialIdentity.objects.select_for_update()
+            .filter(
+                firebase_uid=identity.firebase_uid,
+            )
+            .first()
+        )
         if linked is not None and linked.user_id != user.id:
             raise ValidationError(
                 {"detail": "This social account is linked to another account."}
@@ -850,6 +862,7 @@ class MeView(APIView):
         user = serializer.save()
         return Response(UserSerializer(user, context={"request": request}).data)
 
+
 class ClientProfileView(APIView):
     permission_classes = [IsAuthenticated, IsClientRole]
     parser_classes = [JSONParser, FormParser, MultiPartParser]
@@ -952,9 +965,7 @@ class AdminUserDetailView(APIView):
         if for_update:
             queryset = queryset.select_for_update()
         else:
-            queryset = queryset.select_related(
-                "market_region_service_city"
-            )
+            queryset = queryset.select_related("market_region_service_city")
         return get_object_or_404(
             queryset,
             id=user_id,
@@ -976,6 +987,7 @@ class AdminUserDetailView(APIView):
         user = serializer.save()
         return Response(AdminUserDetailSerializer(user).data)
 
+
 class CheckUsernameView(APIView):
     permission_classes = [AllowAny]
     rate_limit_scopes = ("availability_ip",)
@@ -991,9 +1003,10 @@ class CheckUsernameView(APIView):
             if exclude_user_id:
                 queryset = queryset.exclude(pk=exclude_user_id)
         registered = bool(username) and queryset.exists()
-        pending = bool(username) and PendingRegistration.objects.filter(
-            username__iexact=username
-        ).exists()
+        pending = (
+            bool(username)
+            and PendingRegistration.objects.filter(username__iexact=username).exists()
+        )
         return Response(
             {
                 "available": not registered,
@@ -1018,9 +1031,10 @@ class CheckEmailView(APIView):
             if exclude_user_id:
                 queryset = queryset.exclude(pk=exclude_user_id)
         registered = bool(email) and queryset.exists()
-        pending = bool(email) and PendingRegistration.objects.filter(
-            email__iexact=email
-        ).exists()
+        pending = (
+            bool(email)
+            and PendingRegistration.objects.filter(email__iexact=email).exists()
+        )
         return Response(
             {
                 "available": not registered,
@@ -1045,9 +1059,12 @@ class CheckPhoneView(APIView):
             if exclude_user_id:
                 queryset = queryset.exclude(pk=exclude_user_id)
         registered = bool(phone) and queryset.exists()
-        pending = bool(phone) and PendingRegistration.objects.filter(
-            phone__in=phone_candidates(phone)
-        ).exists()
+        pending = (
+            bool(phone)
+            and PendingRegistration.objects.filter(
+                phone__in=phone_candidates(phone)
+            ).exists()
+        )
         return Response(
             {
                 "available": not registered,

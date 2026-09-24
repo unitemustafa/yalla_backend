@@ -26,9 +26,7 @@ class AdminProductWriteMixin:
         if hasattr(data, "getlist"):
             uploads = data.getlist("images")
             normalized_data = {
-                key: data.get(key)
-                for key in data.keys()
-                if key != "images"
+                key: data.get(key) for key in data.keys() if key != "images"
             }
             if "additions" in data:
                 normalized_data["additions"] = data.getlist("additions")
@@ -97,7 +95,9 @@ class AdminProductWriteMixin:
         market = attrs.get("market") or getattr(self.instance, "market", None)
         selected_subcategories = attrs.get("subcategories")
         subcategory_error_field = (
-            "subcategory_ids" if selected_subcategories is not None else "subcategory_id"
+            "subcategory_ids"
+            if selected_subcategories is not None
+            else "subcategory_id"
         )
         legacy_subcategory = attrs.get("subcategory")
         if selected_subcategories is not None:
@@ -132,10 +132,13 @@ class AdminProductWriteMixin:
             if self.instance.subcategory_id:
                 existing_ids.add(self.instance.subcategory_id)
         for subcategory in selected_subcategories:
-            if market is not None and not MarketSubcategory.objects.filter(
-                market=market,
-                subcategory=subcategory,
-            ).exists():
+            if (
+                market is not None
+                and not MarketSubcategory.objects.filter(
+                    market=market,
+                    subcategory=subcategory,
+                ).exists()
+            ):
                 raise serializers.ValidationError(
                     {
                         subcategory_error_field: (
@@ -187,22 +190,15 @@ class AdminProductWriteMixin:
             has_valid_variant = False
 
         if is_available and not has_valid_variant:
-            raise serializers.ValidationError(
-                {"variants": self.SALE_VARIANT_ERROR}
-            )
+            raise serializers.ValidationError({"variants": self.SALE_VARIANT_ERROR})
 
         if is_available and "attributes" in attrs and variants is None:
-            raise serializers.ValidationError(
-                {"variants": self.SALE_VARIANT_ERROR}
-            )
+            raise serializers.ValidationError({"variants": self.SALE_VARIANT_ERROR})
 
         if variants is not None and any(
-            variant.get("price") is None or variant["price"] < 0
-            for variant in variants
+            variant.get("price") is None or variant["price"] < 0 for variant in variants
         ):
-            raise serializers.ValidationError(
-                {"variants": self.SALE_VARIANT_ERROR}
-            )
+            raise serializers.ValidationError({"variants": self.SALE_VARIANT_ERROR})
 
     def _validate_legacy_attribute_values(self, attribute_values, category):
         seen_attribute_ids = set()
@@ -296,8 +292,14 @@ class AdminProductWriteMixin:
             key = tuple(
                 sorted(
                     (
-                        str(selection.get("attribute_id") or selection.get("attribute_client_id")),
-                        str(selection.get("option_id") or selection.get("option_client_id")),
+                        str(
+                            selection.get("attribute_id")
+                            or selection.get("attribute_client_id")
+                        ),
+                        str(
+                            selection.get("option_id")
+                            or selection.get("option_client_id")
+                        ),
                     )
                     for selection in selections
                 )
@@ -390,7 +392,9 @@ class AdminProductWriteMixin:
 
     def _replace_variants(self, product, variants):
         product.variants.all().delete()
-        attributes_by_id = {attribute.id: attribute for attribute in product.attributes.all()}
+        attributes_by_id = {
+            attribute.id: attribute for attribute in product.attributes.all()
+        }
         attributes_by_client_id = getattr(self, "_attribute_client_map", {})
         options_by_id = {
             option.id: option
@@ -414,7 +418,9 @@ class AdminProductWriteMixin:
                 if legacy_attribute is not None and legacy_option is not None:
                     if legacy_option.attribute_id != legacy_attribute.id:
                         raise serializers.ValidationError(
-                            {"variants": "Option must belong to the selected attribute."}
+                            {
+                                "variants": "Option must belong to the selected attribute."
+                            }
                         )
                     values.append(
                         VariantAttributeValue(
@@ -440,7 +446,9 @@ class AdminProductWriteMixin:
                     option = options_by_client_id.get(str(option_client_id))
                 if attribute is None or option is None:
                     raise serializers.ValidationError(
-                        {"variants": "Every selection must include valid attribute and option."}
+                        {
+                            "variants": "Every selection must include valid attribute and option."
+                        }
                     )
                 if option.attribute_id != attribute.id:
                     raise serializers.ValidationError(
@@ -480,4 +488,3 @@ class AdminProductWriteMixin:
                 )
                 if option_client_id:
                     self._option_client_map[str(option_client_id)] = option
-

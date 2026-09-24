@@ -78,4 +78,3 @@ class PartnerApplication(models.Model):
 
     def __str__(self):
         return f"{self.business_name} ({self.get_status_display()})"
-

@@ -73,11 +73,7 @@ class PartnerApplicationSerializer(serializers.ModelSerializer):
             ).exists()
             if has_open_application:
                 raise serializers.ValidationError(
-                    {
-                        "detail": (
-                            "You already have a partner application under review."
-                        )
-                    }
+                    {"detail": ("You already have a partner application under review.")}
                 )
         return attrs
 
@@ -91,4 +87,3 @@ class PartnerApplicationAdminUpdateSerializer(serializers.ModelSerializer):
         if value not in PartnerApplication.Status.values:
             raise serializers.ValidationError("Invalid partner application status.")
         return value
-

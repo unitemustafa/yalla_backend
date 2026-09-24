@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -10,10 +11,10 @@ from catalog.models import Product
 from markets.models import Market
 
 from .models import Notification, ProductNotificationDispatch
-from .push import send_notification_push
 
 User = get_user_model()
 BATCH_SIZE = 500
+logger = logging.getLogger(__name__)
 
 
 def _trim_decimal(value):
@@ -67,9 +68,8 @@ def _dispatch_validation_message(product):
         return "أضف سعرًا واحدًا على الأقل للمنتج قبل إرسال الإشعار."
     if product.market.status != Market.Status.ACTIVE:
         return "لا يمكن إرسال الإشعار لأن المحل غير نشط."
-    if (
-        product.market.scope == Market.Scope.SERVICE_CITY
-        and not _active_market_cities(product.market)
+    if product.market.scope == Market.Scope.SERVICE_CITY and not _active_market_cities(
+        product.market
     ):
         return "لا يمكن إرسال الإشعار لأن المحل مش مرتبط بمدينة خدمة نشطة."
     return None
@@ -108,8 +108,7 @@ def _product_recipients(product):
         city_id = recipient["market_region_service_city_id"]
         recipient["region_name"] = (
             active_cities.get(city_id, "جاهز للشحن")
-            if recipient["market_region_mode"]
-            == User.MarketRegionMode.SERVICE_CITY
+            if recipient["market_region_mode"] == User.MarketRegionMode.SERVICE_CITY
             else "جاهز للشحن"
         )
     return recipients, list(active_cities.values())
@@ -199,7 +198,10 @@ def dispatch_product_notifications(product_id, request_id, requested_by_id=None)
             raise ValidationError(
                 {"request_id": "This request id belongs to another product."}
             )
-        if not created and dispatch.status == ProductNotificationDispatch.Status.COMPLETED:
+        if (
+            not created
+            and dispatch.status == ProductNotificationDispatch.Status.COMPLETED
+        ):
             return dispatch
 
         product = (
@@ -242,14 +244,21 @@ def dispatch_product_notifications(product_id, request_id, requested_by_id=None)
                 notification_ids = tuple(created_notification_ids)
 
                 def deliver(ids=notification_ids):
-                    return [
-                        send_notification_push(
-                            notification_id,
-                            high_priority=True,
-                            android_channel_id="product_updates",
-                        )
-                        for notification_id in ids
-                    ]
+                    from .tasks import send_notifications_multicast_batch_task
+
+                    for i in range(0, len(ids), 500):
+                        chunk = list(ids[i : i + 500])
+                        try:
+                            send_notifications_multicast_batch_task.delay(
+                                chunk,
+                                high_priority=True,
+                                android_channel_id="product_updates",
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Product push enqueue failed for notification_ids=%s",
+                                chunk,
+                            )
 
                 transaction.on_commit(deliver)
 

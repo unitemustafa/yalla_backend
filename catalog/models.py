@@ -104,8 +104,7 @@ class Product(models.Model):
     )
     is_popular = models.BooleanField(default=False)
     is_available = models.BooleanField(
-        default=True,
-        help_text="True if the product is available for sale."
+        default=True, help_text="True if the product is available for sale."
     )
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
@@ -133,9 +132,7 @@ class ProductImage(models.Model):
     image = models.ImageField(
         upload_to="products/",
         validators=[
-            FileExtensionValidator(
-                allowed_extensions=("jpg", "jpeg", "png", "webp")
-            )
+            FileExtensionValidator(allowed_extensions=("jpg", "jpeg", "png", "webp"))
         ],
     )
     is_primary = models.BooleanField(default=False)

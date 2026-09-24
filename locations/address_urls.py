@@ -1,6 +1,11 @@
 from django.urls import path
 
-from .views import AddressDefaultView, AddressDetailView, AddressListCreateView, AddressSetDefaultView
+from .views import (
+    AddressDefaultView,
+    AddressDetailView,
+    AddressListCreateView,
+    AddressSetDefaultView,
+)
 
 urlpatterns = [
     path("", AddressListCreateView.as_view(), name="addresses-root"),

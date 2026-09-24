@@ -15,8 +15,12 @@ def notify_courier_order_assigned(order, courier, *, order_event=None):
         message=f"تم تعيين الطلب #{number} لك. اضغط لعرض التفاصيل.",
         order=order,
         order_event=order_event,
-        data={"event": "courier_order_assigned", "order_id": str(order.pk),
-              "order_number": number, "route": "courier_order_details"},
+        data={
+            "event": "courier_order_assigned",
+            "order_id": str(order.pk),
+            "order_number": number,
+            "route": "courier_order_details",
+        },
     )
 
 
@@ -29,8 +33,12 @@ def notify_courier_order_unassigned(order, courier, *, order_event=None):
         message=f"تم سحب الطلب #{number} من قائمة مهامك.",
         order=order,
         order_event=order_event,
-        data={"event": "courier_order_unassigned", "order_id": str(order.pk),
-              "order_number": number, "route": "courier_orders"},
+        data={
+            "event": "courier_order_unassigned",
+            "order_id": str(order.pk),
+            "order_number": number,
+            "route": "courier_orders",
+        },
     )
 
 
@@ -43,6 +51,10 @@ def notify_courier_order_cancelled(order, courier, *, order_event=None):
         message=f"تم إلغاء الطلب #{number}.",
         order=order,
         order_event=order_event,
-        data={"event": "courier_order_cancelled", "order_id": str(order.pk),
-              "order_number": number, "route": "courier_orders"},
+        data={
+            "event": "courier_order_cancelled",
+            "order_id": str(order.pk),
+            "order_number": number,
+            "route": "courier_orders",
+        },
     )

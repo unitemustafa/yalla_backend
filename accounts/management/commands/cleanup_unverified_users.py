@@ -20,9 +20,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         now = timezone.now()
-        cutoff = now - timedelta(
-            hours=settings.AUTH_UNVERIFIED_USER_RETENTION_HOURS
-        )
+        cutoff = now - timedelta(hours=settings.AUTH_UNVERIFIED_USER_RETENTION_HOURS)
         registrations = PendingRegistration.objects.filter(updated_at__lt=cutoff)
         stale_emails = list(registrations.values_list("email", flat=True))
         expired_legacy_otps = OneTimePassword.objects.filter(

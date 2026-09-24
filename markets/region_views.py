@@ -44,9 +44,7 @@ class MarketRegionOptionsView(APIView):
         return Response(
             {
                 "options": options,
-                "current_selection": current_market_region_selection(
-                    request.user
-                ),
+                "current_selection": current_market_region_selection(request.user),
             }
         )
 
@@ -56,11 +54,7 @@ class MarketRegionMeView(APIView):
 
     def get(self, request):
         return Response(
-            {
-                "current_selection": current_market_region_selection(
-                    request.user
-                )
-            }
+            {"current_selection": current_market_region_selection(request.user)}
         )
 
     def patch(self, request):
@@ -70,9 +64,7 @@ class MarketRegionMeView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        return Response(
-            {"current_selection": current_market_region_selection(user)}
-        )
+        return Response({"current_selection": current_market_region_selection(user)})
 
 
 class MarketRegionDetectView(APIView):
@@ -96,9 +88,7 @@ class MarketRegionDetectView(APIView):
                         "action": "same_region",
                         "current_selection": current_selection,
                         "detected_region": general_region_selection(),
-                        "message": (
-                            "You are already in your selected market region."
-                        ),
+                        "message": ("You are already in your selected market region."),
                     }
                 )
 
@@ -137,9 +127,7 @@ class MarketRegionDetectView(APIView):
                     "action": "same_region",
                     "current_selection": current_selection,
                     "detected_region": detected_region,
-                    "message": (
-                        "You are already in your selected market region."
-                    ),
+                    "message": ("You are already in your selected market region."),
                 }
             )
 

@@ -1,9 +1,9 @@
+import logging
 import secrets
 from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
-from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -14,6 +14,7 @@ from .models import OTPCooldown, OneTimePassword, PendingRegistration
 OTP_LENGTH = 6
 OTP_MAX_ATTEMPTS = 5
 OTP_COOLDOWN_DURATIONS = [30, 60, 120, 300]
+logger = logging.getLogger(__name__)
 
 
 class OTPCooldownError(Exception):
@@ -24,6 +25,32 @@ class OTPCooldownError(Exception):
 
 def normalize_email(email):
     return email.strip().lower()
+
+
+def _dispatch_otp_email(subject, message, recipient_list, html_message=None):
+    from .tasks import send_email_task
+
+    transaction.on_commit(
+        lambda: _enqueue_otp_email(
+            send_email_task,
+            subject,
+            message,
+            recipient_list,
+            html_message,
+        )
+    )
+
+
+def _enqueue_otp_email(task, subject, message, recipient_list, html_message):
+    try:
+        task.delay(
+            subject,
+            message,
+            recipient_list,
+            html_message=html_message,
+        )
+    except Exception:
+        logger.exception("OTP email enqueue failed")
 
 
 def issue_otp(user, purpose):
@@ -46,20 +73,17 @@ def issue_otp(user, purpose):
             + timedelta(seconds=settings.AUTH_OTP_EXPIRY_SECONDS),
         )
         email_context = _otp_email_context(user, purpose, code)
-        send_mail(
-            subject=email_context["subject"],
-            message=render_to_string(
-                "accounts/emails/otp.txt",
-                email_context,
-            ).strip(),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=False,
-            html_message=render_to_string(
-                "accounts/emails/otp.html",
-                email_context,
-            ),
+        subject = email_context["subject"]
+        message = render_to_string(
+            "accounts/emails/otp.txt",
+            email_context,
+        ).strip()
+        html_message = render_to_string(
+            "accounts/emails/otp.html",
+            email_context,
         )
+        recipient_list = [user.email]
+        _dispatch_otp_email(subject, message, recipient_list, html_message)
         cooldown_data = _mark_cooldown_sent(cooldown)
         return otp, code, cooldown_data
 
@@ -97,20 +121,17 @@ def issue_registration_otp(registration):
             OneTimePassword.Purpose.REGISTRATION,
             code,
         )
-        send_mail(
-            subject=email_context["subject"],
-            message=render_to_string(
-                "accounts/emails/otp.txt",
-                email_context,
-            ).strip(),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[registration.email],
-            fail_silently=False,
-            html_message=render_to_string(
-                "accounts/emails/otp.html",
-                email_context,
-            ),
+        subject = email_context["subject"]
+        message = render_to_string(
+            "accounts/emails/otp.txt",
+            email_context,
+        ).strip()
+        html_message = render_to_string(
+            "accounts/emails/otp.html",
+            email_context,
         )
+        recipient_list = [registration.email]
+        _dispatch_otp_email(subject, message, recipient_list, html_message)
         cooldown_data = _mark_cooldown_sent(cooldown)
         return registration, code, cooldown_data
 
@@ -285,14 +306,10 @@ def _otp_email_context(user, purpose, code):
         "expiry_minutes": expiry_minutes,
         "first_name": user.first_name.strip(),
         "headline_ar": (
-            "أكد بريدك الإلكتروني"
-            if is_registration
-            else "غيّر كلمة المرور بأمان"
+            "أكد بريدك الإلكتروني" if is_registration else "غيّر كلمة المرور بأمان"
         ),
         "headline_en": (
-            "Verify your email"
-            if is_registration
-            else "Reset your password securely"
+            "Verify your email" if is_registration else "Reset your password securely"
         ),
         "intro_ar": (
             "استخدم رمز التأكيد التالي لإكمال إنشاء حسابك في يلا ماركت."

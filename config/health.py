@@ -4,6 +4,8 @@ from django.db import connection
 from django.http import JsonResponse
 from django.views.decorators.http import require_safe
 
+from .redis_client import check_redis_health
+
 
 @require_safe
 def liveness(request):
@@ -20,7 +22,7 @@ def liveness(request):
 
 @require_safe
 def readiness(request):
-    checks = {"database": False}
+    checks = {"database": False, "redis": False}
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
@@ -28,6 +30,9 @@ def readiness(request):
         checks["database"] = True
     except Exception:
         pass
+
+    redis_ok, _, _ = check_redis_health("cache")
+    checks["redis"] = redis_ok
 
     ready = all(checks.values())
     return JsonResponse(

@@ -119,5 +119,7 @@ def validate_campaign_video(value):
     if duration is None:
         raise serializers.ValidationError("Could not read the MP4 video duration.")
     if duration > CAMPAIGN_VIDEO_MAX_SECONDS:
-        raise serializers.ValidationError("Campaign videos must be 30 seconds or shorter.")
+        raise serializers.ValidationError(
+            "Campaign videos must be 30 seconds or shorter."
+        )
     return value

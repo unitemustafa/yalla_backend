@@ -29,11 +29,7 @@ def revoke_user_sessions(user):
 
 
 def handle_client_deactivation(user, *, was_active, notify_disabled=True):
-    if (
-        not was_active
-        or user.is_active
-        or user.role != user.Role.CLIENT
-    ):
+    if not was_active or user.is_active or user.role != user.Role.CLIENT:
         return False
 
     revoke_user_sessions(user)
@@ -45,12 +41,12 @@ def handle_client_deactivation(user, *, was_active, notify_disabled=True):
 
 
 def _dispatch_account_disabled(user_id):
-    from notifications.push import send_account_disabled_event
+    from notifications.tasks import send_account_disabled_event_task
 
     try:
-        send_account_disabled_event(user_id)
+        send_account_disabled_event_task.delay(user_id)
     except Exception:
         logger.exception(
-            "Account-disabled notification delivery failed for user_id=%s",
+            "Account-disabled notification enqueue failed for user_id=%s",
             user_id,
         )

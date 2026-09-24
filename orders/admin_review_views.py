@@ -13,9 +13,10 @@ from .models import Order, OrderEvent
 from .selectors import (
     courier_service_city_for_order,
     eligible_representatives_for_order,
-    order_queryset,
+    order_list_queryset,
 )
 from .serializers import (
+    OrderListSerializer,
     OrderReviewActionSerializer,
     OrderSerializer,
     RepresentativeSummarySerializer,
@@ -27,7 +28,7 @@ class AdminOrderReviewBlockerView(APIView):
     permission_classes = (IsAuthenticated, IsOrderAdminRole)
 
     def get(self, request):
-        orders = order_queryset().filter(
+        orders = order_list_queryset().filter(
             review_status=Order.ReviewStatus.PENDING_REVIEW,
         )
         pending_count = orders.count()
@@ -35,7 +36,7 @@ class AdminOrderReviewBlockerView(APIView):
             {
                 "blocked": pending_count > 0,
                 "pending_count": pending_count,
-                "orders": OrderSerializer(
+                "orders": OrderListSerializer(
                     orders,
                     many=True,
                     context={"request": request},
@@ -224,4 +225,3 @@ class AdminOrderServiceCityRepresentativesView(APIView):
                 ).data,
             }
         )
-

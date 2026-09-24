@@ -2,7 +2,7 @@ from django.apps import AppConfig
 
 
 class UsersConfig(AppConfig):
-    name = 'accounts'
+    name = "accounts"
 
     def ready(self):
         # Importing registers deployment checks during Django startup.

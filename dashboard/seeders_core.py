@@ -20,7 +20,7 @@ from catalog.models import (
     VariantAttributeValue,
 )
 from locations.models import Address, DeliveryArea, ServiceCity
-from markets.models import Market, MarketClassification, MarketSubcategory
+from markets.models import Market, MarketClassification
 from notifications.models import Notification
 from offers.models import Offer
 from orders.models import Order, OrderItem, OrderMarketSection, OrderOffer
@@ -64,6 +64,8 @@ class DemoSeedCoreMixin:
 
     def _delete_seed_media_files(self):
         media_root = Path(settings.MEDIA_ROOT)
+        if not media_root.exists():
+            return
         for folder in ("additions", "categories", "offers", "products"):
             directory = media_root / folder
             if not directory.exists():
@@ -139,4 +141,3 @@ class DemoSeedCoreMixin:
         self._seed_notifications(context, now)
         self._write("Created Egyptian demo data.")
         return context
-

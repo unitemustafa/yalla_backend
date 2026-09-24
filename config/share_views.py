@@ -68,7 +68,7 @@ def _share_landing_response(
 </head>
 <body>
   <main>
-    {f'<img src="{escaped_image_url}" alt="">' if escaped_image_url else ''}
+    {f'<img src="{escaped_image_url}" alt="">' if escaped_image_url else ""}
     <h1>{escaped_title}</h1>
     <p>افتح يلا ماركت لعرض التفاصيل حسب مدينتك الحالية.</p>
     <a href="{escaped_deep_link}">فتح في يلا ماركت</a>

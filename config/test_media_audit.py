@@ -1,5 +1,6 @@
 from io import BytesIO, StringIO
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
@@ -7,6 +8,7 @@ from django.test import TestCase, override_settings
 from PIL import Image
 
 from catalog.models import CategoryClassification, ProductCategory
+from config.tasks import delete_storage_file_task
 
 
 def png_upload(name):
@@ -17,8 +19,9 @@ def png_upload(name):
 
 class MediaAuditCommandTests(TestCase):
     def test_generic_cleanup_removes_replaced_model_images(self):
-        with TemporaryDirectory() as media_root, override_settings(
-            MEDIA_ROOT=media_root
+        with (
+            TemporaryDirectory() as media_root,
+            override_settings(MEDIA_ROOT=media_root),
         ):
             classification = CategoryClassification.objects.create(name="Cleanup")
             category = ProductCategory.objects.create(
@@ -30,15 +33,22 @@ class MediaAuditCommandTests(TestCase):
             old_name = category.image.name
 
             category.image = png_upload("second.png")
-            with self.captureOnCommitCallbacks(execute=True):
+            with (
+                patch("config.tasks.delete_storage_file_task.delay") as enqueue,
+                self.captureOnCommitCallbacks(execute=True),
+            ):
                 category.save(update_fields=["image"])
 
+            self.assertTrue(storage.exists(old_name))
+            enqueue.assert_called_once()
+            delete_storage_file_task.apply(args=enqueue.call_args.args).get()
             self.assertFalse(storage.exists(old_name))
             self.assertTrue(storage.exists(category.image.name))
 
     def test_reports_and_optionally_repairs_missing_and_orphan_files(self):
-        with TemporaryDirectory() as media_root, override_settings(
-            MEDIA_ROOT=media_root
+        with (
+            TemporaryDirectory() as media_root,
+            override_settings(MEDIA_ROOT=media_root),
         ):
             classification = CategoryClassification.objects.create(name="Audit")
             category = ProductCategory.objects.create(

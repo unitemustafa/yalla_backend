@@ -5,13 +5,11 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
-from markets.models import Market
 from offers.models import Offer
 
 from rest_framework.exceptions import ValidationError
 
 from .models import Notification, OfferNotificationDispatch
-from .push import send_notifications_push
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -28,17 +26,18 @@ def _locked_offer_queryset():
 
 
 def _deliver_offer_pushes(notification_ids):
-    try:
-        send_notifications_push(
-            notification_ids,
-            high_priority=True,
-            android_channel_id="offer_updates",
-        )
-    except Exception:
-        logger.exception(
-            "Offer push delivery failed for notification_ids=%s",
-            notification_ids,
-        )
+    from .tasks import send_notifications_multicast_batch_task
+
+    for i in range(0, len(notification_ids), 500):
+        chunk = list(notification_ids[i : i + 500])
+        try:
+            send_notifications_multicast_batch_task.delay(
+                chunk,
+                high_priority=True,
+                android_channel_id="offer_updates",
+            )
+        except Exception:
+            logger.exception("Offer push enqueue failed for notification_ids=%s", chunk)
 
 
 def _trim_decimal(value):
@@ -97,10 +96,17 @@ def dispatch_offer_notifications(offer_id, request_id, requested_by_id=None):
             request_id=request_id,
             defaults={"offer_id": offer_id, "requested_by_id": requested_by_id},
         )
-        dispatch = OfferNotificationDispatch.objects.select_for_update().get(pk=dispatch.pk)
+        dispatch = OfferNotificationDispatch.objects.select_for_update().get(
+            pk=dispatch.pk
+        )
         if dispatch.offer_id != offer_id:
-            raise ValidationError({"request_id": "This request id belongs to another offer."})
-        if not created and dispatch.status == OfferNotificationDispatch.Status.COMPLETED:
+            raise ValidationError(
+                {"request_id": "This request id belongs to another offer."}
+            )
+        if (
+            not created
+            and dispatch.status == OfferNotificationDispatch.Status.COMPLETED
+        ):
             return dispatch
 
         offer = _locked_offer_queryset().get(pk=offer_id)
@@ -123,9 +129,14 @@ def dispatch_offer_notifications(offer_id, request_id, requested_by_id=None):
             dispatch.notification_count = len(created_notification_ids)
             dispatch.status = OfferNotificationDispatch.Status.COMPLETED
             dispatch.completed_at = now
-            dispatch.save(update_fields=[
-                "recipient_count", "notification_count", "status", "completed_at"
-            ])
+            dispatch.save(
+                update_fields=[
+                    "recipient_count",
+                    "notification_count",
+                    "status",
+                    "completed_at",
+                ]
+            )
             Offer.objects.filter(pk=offer.pk).update(push_sent_at=now)
             if created_notification_ids:
                 notification_ids = tuple(created_notification_ids)
@@ -139,7 +150,6 @@ def dispatch_offer_notifications(offer_id, request_id, requested_by_id=None):
 
 
 def _offer_recipients(offer):
-
     clients = User.objects.filter(
         role=User.Role.CLIENT,
         is_active=True,
@@ -184,9 +194,11 @@ def _create_dispatch_notifications(offer, dispatch, recipients, region_names):
     created_notification_ids = []
     for batch in _chunks(recipients):
         recipient_ids = [item["id"] for item in batch]
-        existing_ids = set(Notification.objects.filter(
-            recipient_id__in=recipient_ids, offer_dispatch=dispatch
-        ).values_list("recipient_id", flat=True))
+        existing_ids = set(
+            Notification.objects.filter(
+                recipient_id__in=recipient_ids, offer_dispatch=dispatch
+            ).values_list("recipient_id", flat=True)
+        )
         objects = []
         for recipient in batch:
             if recipient["id"] in existing_ids:
@@ -237,17 +249,8 @@ def _create_dispatch_notifications(offer, dispatch, recipients, region_names):
         Notification.objects.bulk_create(objects, ignore_conflicts=True)
         created_notification_ids.extend(
             Notification.objects.filter(
-                recipient_id__in=[item.recipient_id for item in objects], offer_dispatch=dispatch
+                recipient_id__in=[item.recipient_id for item in objects],
+                offer_dispatch=dispatch,
             ).values_list("id", flat=True)
         )
     return created_notification_ids
-
-
-def create_offer_notifications(offer_id):
-    """Backward-compatible entry point for the existing offer notification flow."""
-    import uuid
-
-    return dispatch_offer_notifications(offer_id, uuid.uuid4())
-
-
-process_offer_notifications = create_offer_notifications

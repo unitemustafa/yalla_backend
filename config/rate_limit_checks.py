@@ -41,7 +41,11 @@ def check_rate_limit_configuration(app_configs, **kwargs):
                     id="rate_limit.E003",
                 )
             )
-    if mode != "off" and getattr(settings, "RATE_LIMIT_CLIENT_IP_HEADER", "") and not cidrs:
+    if (
+        mode != "off"
+        and getattr(settings, "RATE_LIMIT_CLIENT_IP_HEADER", "")
+        and not cidrs
+    ):
         messages.append(
             Warning(
                 "Client-IP header is configured but no trusted proxy CIDRs are set; the limiter will safely use REMOTE_ADDR.",
@@ -71,7 +75,5 @@ def check_rate_limit_configuration(app_configs, **kwargs):
             try:
                 parse_rate(rate)
             except ValueError as error:
-                messages.append(
-                    Error(str(error), id="rate_limit.E005")
-                )
+                messages.append(Error(str(error), id="rate_limit.E005"))
     return messages

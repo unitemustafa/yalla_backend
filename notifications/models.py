@@ -11,10 +11,20 @@ class OfferNotificationDispatch(models.Model):
         COMPLETED = "completed", "Completed"
         FAILED = "failed", "Failed"
 
-    offer = models.ForeignKey("offers.Offer", on_delete=models.PROTECT, related_name="notification_dispatches")
+    offer = models.ForeignKey(
+        "offers.Offer", on_delete=models.PROTECT, related_name="notification_dispatches"
+    )
     request_id = models.UUIDField(default=uuid.uuid4, unique=True)
-    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="offer_notification_dispatches", null=True, blank=True)
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="offer_notification_dispatches",
+        null=True,
+        blank=True,
+    )
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
     recipient_count = models.PositiveIntegerField(default=0)
     notification_count = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -46,8 +46,7 @@ def normalized_order_request_data(data, *, include_create_fields=False):
             for item in data.get("items", [])
         ],
         "offers": [
-            {"offer_id": item.get("offer_id")}
-            for item in data.get("offers", [])
+            {"offer_id": item.get("offer_id")} for item in data.get("offers", [])
         ],
     }
 

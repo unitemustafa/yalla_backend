@@ -6,7 +6,7 @@ from django.core.management.base import CommandError
 from django.db.models import Count
 from django.utils import timezone
 
-from accounts.models import CourierProfile, OneTimePassword, User
+from accounts.models import User
 from catalog.models import (
     CategoryAttribute,
     CategoryClassification,
@@ -16,11 +16,11 @@ from catalog.models import (
     ProductCategory,
     ProductVariant,
 )
-from locations.models import Address, DeliveryArea, ServiceCity
+from locations.models import DeliveryArea, ServiceCity
 from markets.models import Market, MarketClassification
 from notifications.models import Notification
 from offers.models import Offer
-from orders.models import Order, OrderItem, OrderMarketSection, OrderOffer
+from orders.models import Order, OrderMarketSection
 
 from .seed_constants import TINY_PNG
 
@@ -170,7 +170,9 @@ class DemoReportingMixin:
             "delivery_areas": DeliveryArea.objects.count(),
             "market_classifications": MarketClassification.objects.count(),
             "markets": Market.objects.count(),
-            "general_markets": Market.objects.filter(scope=Market.Scope.GENERAL).count(),
+            "general_markets": Market.objects.filter(
+                scope=Market.Scope.GENERAL
+            ).count(),
             "service_city_markets": Market.objects.filter(
                 scope=Market.Scope.SERVICE_CITY
             ).count(),
@@ -183,12 +185,14 @@ class DemoReportingMixin:
             "offers": Offer.objects.count(),
             "orders": Order.objects.count(),
             "order_sections": OrderMarketSection.objects.count(),
-            "orders_with_sections": Order.objects.filter(
-                market_sections__isnull=False
-            ).distinct().count(),
+            "orders_with_sections": Order.objects.filter(market_sections__isnull=False)
+            .distinct()
+            .count(),
             "multi_market_orders": Order.objects.annotate(
                 section_count=Count("market_sections")
-            ).filter(section_count__gt=1).count(),
+            )
+            .filter(section_count__gt=1)
+            .count(),
             "notifications": Notification.objects.count(),
             "pending_review_orders": Order.objects.filter(
                 review_status=Order.ReviewStatus.PENDING_REVIEW
@@ -300,9 +304,7 @@ class DemoReportingMixin:
             if not passed:
                 failures.append(label)
         if failures:
-            raise CommandError(
-                "Seed assertions failed: " + ", ".join(failures)
-            )
+            raise CommandError("Seed assertions failed: " + ", ".join(failures))
         return assertions
 
     def _print_summary(self, context, deleted, assertions):
@@ -342,8 +344,7 @@ class DemoReportingMixin:
 
         self.stdout.write("Coverage:")
         self.stdout.write(
-            f"  general_markets/offers: yes "
-            f"({assertions['general_markets']} markets)"
+            f"  general_markets/offers: yes ({assertions['general_markets']} markets)"
         )
         self.stdout.write(
             f"  service_city_markets/offers: yes "
@@ -385,7 +386,9 @@ class DemoReportingMixin:
             return
         field = getattr(instance, field_name)
         upload_to = instance._meta.get_field(field_name).upload_to
-        stored_name = f"{str(upload_to).strip('/')}/{filename}" if upload_to else filename
+        stored_name = (
+            f"{str(upload_to).strip('/')}/{filename}" if upload_to else filename
+        )
         field.storage.delete(stored_name)
         field.save(filename, ContentFile(TINY_PNG), save=True)
 

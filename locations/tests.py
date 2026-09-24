@@ -194,8 +194,6 @@ class ShippingCompanyAPITests(TestCase):
         self.assertTrue(ShippingCompany.objects.filter(pk=company.id).exists())
 
 
-
-
 class AddressAPITests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -280,7 +278,9 @@ class AddressAPITests(TestCase):
         )
         self.assertEqual(response.data[0]["place_id"], "geo-home")
         self.assertEqual(response.data[0]["delivery_area"]["id"], self.delivery_area.id)
-        self.assertEqual(response.data[0]["delivery_type"], Address.DeliveryType.FIXED_AREA)
+        self.assertEqual(
+            response.data[0]["delivery_type"], Address.DeliveryType.FIXED_AREA
+        )
         self.assertEqual(response.data[0]["delivery_price_preview"], "50.00")
         self.assertTrue(response.data[0]["is_default"])
 
@@ -530,7 +530,9 @@ class AddressAPITests(TestCase):
         self.assertEqual(address.delivery_type, Address.DeliveryType.DELIVERY)
         self.assertIsNone(response.data[0]["delivery_area"])
         self.assertEqual(response.data[0]["manual_area"], "New district")
-        self.assertEqual(response.data[0]["delivery_type"], Address.DeliveryType.DELIVERY)
+        self.assertEqual(
+            response.data[0]["delivery_type"], Address.DeliveryType.DELIVERY
+        )
         self.assertIsNone(response.data[0]["delivery_price_preview"])
 
     def test_general_user_can_create_manual_address_without_service_city(self):
@@ -935,7 +937,9 @@ class AddressAPITests(TestCase):
         response = self.client.delete(f"/api/v1/addresses/{address.id}/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertFalse(Address.objects.filter(user=self.user, is_default=True).exists())
+        self.assertFalse(
+            Address.objects.filter(user=self.user, is_default=True).exists()
+        )
 
     def test_cannot_patch_deleted_address(self):
         address = Address.objects.create(
@@ -1049,12 +1053,16 @@ class LocationManagementAPITests(TestCase):
         )
 
     def create_order_for_area(self, area, address=None):
-        user = address.user if address else User.objects.create_user(
-            username=f"order_user_{area.id}",
-            email=f"order-user-{area.id}@example.com",
-            phone=f"+2012{area.id:08d}",
-            password="Passw0rd!",
-            role=User.Role.CLIENT,
+        user = (
+            address.user
+            if address
+            else User.objects.create_user(
+                username=f"order_user_{area.id}",
+                email=f"order-user-{area.id}@example.com",
+                phone=f"+2012{area.id:08d}",
+                password="Passw0rd!",
+                role=User.Role.CLIENT,
+            )
         )
         return Order.objects.create(
             user=user,
@@ -1128,7 +1136,9 @@ class LocationManagementAPITests(TestCase):
         response = self.client.get("/api/v1/locations/service-cities/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        item = next(city_data for city_data in response.data if city_data["id"] == city.id)
+        item = next(
+            city_data for city_data in response.data if city_data["id"] == city.id
+        )
         self.assertEqual(item["delivery_area_count"], 2)
         self.assertEqual(item["market_count"], 2)
         self.assertEqual(item["offer_count"], 1)
@@ -1228,9 +1238,7 @@ class LocationManagementAPITests(TestCase):
 
         listed_city = next(
             item
-            for item in self.client.get(
-                "/api/v1/locations/service-cities/"
-            ).data
+            for item in self.client.get("/api/v1/locations/service-cities/").data
             if item["id"] == city.id
         )
         response = self.client.delete(f"/api/v1/locations/service-cities/{city.id}/")
@@ -1280,9 +1288,7 @@ class LocationManagementAPITests(TestCase):
         self.assert_service_city_delete_archived(city, "delivery_areas")
 
         current_after = self.client.get("/api/v1/locations/service-cities/")
-        archived = self.client.get(
-            "/api/v1/locations/service-cities/?archived=true"
-        )
+        archived = self.client.get("/api/v1/locations/service-cities/?archived=true")
         self.assertNotIn(city.id, [item["id"] for item in current_after.data])
         self.assertIn(city.id, [item["id"] for item in archived.data])
 
@@ -1347,14 +1353,10 @@ class LocationManagementAPITests(TestCase):
 
         listed_city = next(
             item
-            for item in self.client.get(
-                "/api/v1/locations/service-cities/"
-            ).data
+            for item in self.client.get("/api/v1/locations/service-cities/").data
             if item["id"] == city.id
         )
-        response = self.client.delete(
-            f"/api/v1/locations/service-cities/{city.id}/"
-        )
+        response = self.client.delete(f"/api/v1/locations/service-cities/{city.id}/")
 
         self.assertEqual(listed_city["deletion_mode"], "delete")
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
@@ -1384,14 +1386,10 @@ class LocationManagementAPITests(TestCase):
 
         listed_city = next(
             item
-            for item in self.client.get(
-                "/api/v1/locations/service-cities/"
-            ).data
+            for item in self.client.get("/api/v1/locations/service-cities/").data
             if item["id"] == city.id
         )
-        response = self.client.delete(
-            f"/api/v1/locations/service-cities/{city.id}/"
-        )
+        response = self.client.delete(f"/api/v1/locations/service-cities/{city.id}/")
 
         self.assertEqual(listed_city["deletion_mode"], "delete")
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
@@ -1490,9 +1488,7 @@ class LocationManagementAPITests(TestCase):
 
         listed_area = next(
             item
-            for item in self.client.get(
-                "/api/v1/locations/delivery-areas/"
-            ).data
+            for item in self.client.get("/api/v1/locations/delivery-areas/").data
             if item["id"] == area.id
         )
         response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
@@ -1532,9 +1528,7 @@ class LocationManagementAPITests(TestCase):
             area.id,
             [
                 item["id"]
-                for item in self.client.get(
-                    "/api/v1/locations/delivery-areas/"
-                ).data
+                for item in self.client.get("/api/v1/locations/delivery-areas/").data
             ],
         )
         archived_area = next(

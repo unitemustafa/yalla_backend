@@ -8,7 +8,6 @@ from catalog.models import Product
 from markets.models import Market
 
 from .models import MarketNotificationDispatch, Notification
-from .push import send_notification_push
 
 
 logger = logging.getLogger(__name__)
@@ -26,9 +25,7 @@ def create_market_notification_intent(market, requested_by_id=None):
 
 def schedule_pending_market_notification_for_product(product_id):
     transaction.on_commit(
-        lambda current_product_id=product_id: _dispatch_after_commit(
-            current_product_id
-        )
+        lambda current_product_id=product_id: _dispatch_after_commit(current_product_id)
     )
 
 
@@ -155,10 +152,7 @@ def dispatch_pending_market_notification_for_product(product_id):
             return None
 
         market = product.market
-        if (
-            market.status != Market.Status.ACTIVE
-            or not market.classification.is_active
-        ):
+        if market.status != Market.Status.ACTIVE or not market.classification.is_active:
             return None
 
         service_city = None
@@ -175,9 +169,7 @@ def dispatch_pending_market_notification_for_product(product_id):
         dispatch.status = MarketNotificationDispatch.Status.PROCESSING
         dispatch.trigger_product = product
         dispatch.error_message = ""
-        dispatch.save(
-            update_fields=["status", "trigger_product", "error_message"]
-        )
+        dispatch.save(update_fields=["status", "trigger_product", "error_message"])
 
         recipient_ids = _eligible_recipients(market, service_city)
         created_notification_ids = _create_notifications(
@@ -200,18 +192,21 @@ def dispatch_pending_market_notification_for_product(product_id):
             ]
         )
 
-    for notification_id in created_notification_ids:
-        try:
-            send_notification_push(
-                notification_id,
-                high_priority=True,
-                android_channel_id="store_updates",
-            )
-        except Exception:
-            logger.exception(
-                "Market-created push failed for notification_id=%s",
-                notification_id,
-            )
+    if created_notification_ids:
+        from .tasks import send_notifications_multicast_batch_task
+
+        for i in range(0, len(created_notification_ids), 500):
+            chunk = list(created_notification_ids[i : i + 500])
+            try:
+                send_notifications_multicast_batch_task.delay(
+                    chunk,
+                    high_priority=True,
+                    android_channel_id="store_updates",
+                )
+            except Exception:
+                logger.exception(
+                    "Market push enqueue failed for notification_ids=%s", chunk
+                )
     return dispatch
 
 

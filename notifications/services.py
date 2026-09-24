@@ -12,13 +12,13 @@ logger = logging.getLogger(__name__)
 
 
 def _dispatch_courier_notification(notification_id):
-    from .push import send_courier_notification_push
+    from .tasks import send_courier_notification_push_task
 
     try:
-        send_courier_notification_push(notification_id)
+        send_courier_notification_push_task.delay(notification_id)
     except Exception:
         logger.exception(
-            "Courier notification delivery failed for notification_id=%s",
+            "Courier notification enqueue failed for notification_id=%s",
             notification_id,
         )
 
@@ -48,6 +48,7 @@ def create_courier_notification(
     )
     transaction.on_commit(callback)
     return notification
+
 
 ACCOUNT_RESTORED_TITLE = "تم استعادة حسابك"
 ACCOUNT_RESTORED_MESSAGE = "تم استعادة حسابك بواسطة فريق دعم يلا ماركت."
@@ -91,14 +92,13 @@ def create_account_restored_notification(user):
 
 
 def _dispatch_account_restored(notification_id):
-    from .push import send_account_restored_push
+    from .tasks import send_account_restored_push_task
 
     try:
-        send_account_restored_push(notification_id)
+        send_account_restored_push_task.delay(notification_id)
     except Exception:
         logger.exception(
-            "Account-restored notification delivery failed for "
-            "notification_id=%s",
+            "Account-restored notification enqueue failed for notification_id=%s",
             notification_id,
         )
 

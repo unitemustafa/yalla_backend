@@ -62,9 +62,7 @@ class StoreSubcategoryAPITests(APITestCase):
 
     def authenticate(self, user=None):
         refresh = RefreshToken.for_user(user or self.admin)
-        self.client.credentials(
-            HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
-        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
     def create_market(self):
         market = Market.objects.create(
@@ -101,17 +99,12 @@ class StoreSubcategoryAPITests(APITestCase):
         self.assertEqual(create_response.data["market_count"], 0)
         self.assertEqual(create_response.data["product_count"], 0)
 
-        list_response = self.client.get(
-            f"{CATALOG_BASE}/store-subcategories/"
-        )
+        list_response = self.client.get(f"{CATALOG_BASE}/store-subcategories/")
         self.assertEqual(list_response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(list_response.data), 3)
 
         update_response = self.client.patch(
-            (
-                f"{CATALOG_BASE}/store-subcategories/"
-                f"{create_response.data['id']}/"
-            ),
+            (f"{CATALOG_BASE}/store-subcategories/{create_response.data['id']}/"),
             {"description_en": "Sweet picks", "is_active": False},
             format="json",
         )
@@ -121,9 +114,7 @@ class StoreSubcategoryAPITests(APITestCase):
 
     def test_subcategory_management_requires_admin(self):
         self.authenticate(self.client_user)
-        response = self.client.get(
-            f"{CATALOG_BASE}/store-subcategories/"
-        )
+        response = self.client.get(f"{CATALOG_BASE}/store-subcategories/")
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_market_accepts_optional_ordered_active_subcategories(self):
@@ -162,9 +153,7 @@ class StoreSubcategoryAPITests(APITestCase):
         )
         self.assertTrue(missing.is_valid(), missing.errors)
         market_without_categories = missing.save()
-        self.assertFalse(
-            market_without_categories.subcategory_assignments.exists()
-        )
+        self.assertFalse(market_without_categories.subcategory_assignments.exists())
 
         remove_all = AdminMarketSerializer(
             market,
@@ -221,7 +210,10 @@ class StoreSubcategoryAPITests(APITestCase):
             {self.meals.id, self.drinks.id},
         )
         self.assertEqual(
-            {item["id"] for item in AdminProductSerializer(product).data["subcategories"]},
+            {
+                item["id"]
+                for item in AdminProductSerializer(product).data["subcategories"]
+            },
             {self.meals.id, self.drinks.id},
         )
         storefront = MarketWithStoreProductsSerializer(
@@ -264,13 +256,9 @@ class StoreSubcategoryAPITests(APITestCase):
         self.assertIn("subcategory_ids", serializer.errors)
 
         self.authenticate()
-        list_response = self.client.get(
-            f"{CATALOG_BASE}/store-subcategories/"
-        )
+        list_response = self.client.get(f"{CATALOG_BASE}/store-subcategories/")
         drinks_payload = next(
-            item
-            for item in list_response.data
-            if item["id"] == self.drinks.id
+            item for item in list_response.data if item["id"] == self.drinks.id
         )
         self.assertEqual(drinks_payload["market_count"], 1)
         self.assertEqual(drinks_payload["product_count"], 1)

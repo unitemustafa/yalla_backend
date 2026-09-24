@@ -46,9 +46,7 @@ class PendingRegistrationAPITests(APITestCase):
             self.client.get(
                 f"{AUTH_BASE}/check-username", {"username": "pending_customer"}
             ),
-            self.client.get(
-                f"{AUTH_BASE}/check-phone", {"phone": "+213555000901"}
-            ),
+            self.client.get(f"{AUTH_BASE}/check-phone", {"phone": "+213555000901"}),
         )
         for response in checks:
             self.assertTrue(response.data["available"])

@@ -36,7 +36,9 @@ def allowed_statuses_for_order(order):
     ):
         return []
     if order.review_status != Order.ReviewStatus.APPROVED:
-        return [Order.Status.CANCELLED] if order.status != Order.Status.CANCELLED else []
+        return (
+            [Order.Status.CANCELLED] if order.status != Order.Status.CANCELLED else []
+        )
 
     return list(ADMIN_STATUS_TRANSITIONS.get(order.status, ()))
 
@@ -70,11 +72,7 @@ def resolve_order_target_user(request, *, action, lock=False):
     if user.role == User.Role.CLIENT:
         if user_id not in (None, "", user.id, str(user.id)):
             raise serializers.ValidationError(
-                {
-                    "user_id": (
-                        f"Client users cannot {action} another customer's order."
-                    )
-                }
+                {"user_id": (f"Client users cannot {action} another customer's order.")}
             )
         queryset = User.objects
         if lock:

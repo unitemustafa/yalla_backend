@@ -89,8 +89,7 @@ class AdminMarketClassificationDetailView(APIView):
                 {
                     "action": "archived",
                     "detail": (
-                        "تمت أرشفة فئة المحل وتعطيلها لأنها مستخدمة "
-                        "بواسطة محلات حالية."
+                        "تمت أرشفة فئة المحل وتعطيلها لأنها مستخدمة بواسطة محلات حالية."
                     ),
                 },
                 status=status.HTTP_200_OK,
@@ -102,16 +101,12 @@ class AdminMarketTypeListCreateView(APIView):
     permission_classes = [IsAuthenticated, IsMarketAdminRole]
 
     def get(self, request):
-        market_types = MarketType.objects.select_related(
-            "classification"
-        ).annotate(
+        market_types = MarketType.objects.select_related("classification").annotate(
             market_count=Count("markets", distinct=True)
         )
         classification_id = request.query_params.get("classification_id")
         if classification_id:
-            market_types = market_types.filter(
-                classification_id=classification_id
-            )
+            market_types = market_types.filter(classification_id=classification_id)
         return paginated_list_response(
             request,
             market_types.order_by(
@@ -170,9 +165,9 @@ class AdminMarketTypeReorderView(APIView):
 
         classification_id = classification_ids.pop()
         all_ids = set(
-            MarketType.objects.filter(
-                classification_id=classification_id
-            ).values_list("id", flat=True)
+            MarketType.objects.filter(classification_id=classification_id).values_list(
+                "id", flat=True
+            )
         )
         if set(ordered_ids) != all_ids:
             return Response(
@@ -339,11 +334,9 @@ class AdminMarketDetailView(APIView):
                 {
                     "action": "archived",
                     "detail": (
-                        "تمت أرشفة المحل بدلًا من حذفه لأنه مرتبط "
-                        "بسجل طلبات سابق."
+                        "تمت أرشفة المحل بدلًا من حذفه لأنه مرتبط بسجل طلبات سابق."
                     ),
                 },
                 status=status.HTTP_200_OK,
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
-

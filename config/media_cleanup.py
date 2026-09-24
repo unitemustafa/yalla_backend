@@ -18,6 +18,34 @@ def storage_name_is_referenced(name, *, storage=None):
     return False
 
 
+def get_identifier_by_storage(storage):
+    from config.media import raw_public_media_storage, private_media_storage
+
+    if storage is raw_public_media_storage or isinstance(
+        storage, type(raw_public_media_storage)
+    ):
+        return "raw_public"
+    if storage is private_media_storage or isinstance(
+        storage, type(private_media_storage)
+    ):
+        return "private"
+    return "default"
+
+
+def get_storage_by_identifier(storage_id: str):
+    if storage_id == "raw_public":
+        from config.media import raw_public_media_storage
+
+        return raw_public_media_storage
+    if storage_id == "private":
+        from config.media import private_media_storage
+
+        return private_media_storage
+    from django.core.files.storage import default_storage
+
+    return default_storage
+
+
 def delete_storage_file_if_unreferenced(storage: Storage, name):
     if name and not storage_name_is_referenced(name, storage=storage):
         storage.delete(name)
@@ -25,8 +53,11 @@ def delete_storage_file_if_unreferenced(storage: Storage, name):
 
 def schedule_storage_cleanup(storage, name):
     if name:
+        from config.tasks import delete_storage_file_task
+
+        storage_id = get_identifier_by_storage(storage)
         transaction.on_commit(
-            lambda: delete_storage_file_if_unreferenced(storage, name)
+            lambda s=storage_id, n=name: delete_storage_file_task.delay(s, n)
         )
 
 
@@ -40,15 +71,10 @@ def _old_file_values(instance):
     )
     if not file_fields:
         return {}
-    old_instance = (
-        instance.__class__._default_manager.filter(pk=instance.pk).first()
-    )
+    old_instance = instance.__class__._default_manager.filter(pk=instance.pk).first()
     if old_instance is None:
         return {}
-    return {
-        field.name: getattr(old_instance, field.name)
-        for field in file_fields
-    }
+    return {field.name: getattr(old_instance, field.name) for field in file_fields}
 
 
 def capture_replaced_files(sender, instance, raw=False, **kwargs):
@@ -86,8 +112,7 @@ def cleanup_deleted_files(sender, instance, **kwargs):
 def register_media_cleanup_signals():
     for model in apps.get_models():
         if not any(
-            isinstance(field, models.FileField)
-            for field in model._meta.concrete_fields
+            isinstance(field, models.FileField) for field in model._meta.concrete_fields
         ):
             continue
         label = model._meta.label_lower

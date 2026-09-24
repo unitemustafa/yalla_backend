@@ -38,9 +38,7 @@ def offer_image_upload(name="offer.png", image_format="PNG", color="blue"):
     content = BytesIO()
     Image.new("RGB", (2, 2), color=color).save(content, format=image_format)
     mime_type = (
-        "image/jpeg"
-        if image_format == "JPEG"
-        else f"image/{image_format.lower()}"
+        "image/jpeg" if image_format == "JPEG" else f"image/{image_format.lower()}"
     )
     return SimpleUploadedFile(name, content.getvalue(), content_type=mime_type)
 
@@ -214,7 +212,9 @@ class OfferAPITests(APITestCase):
         payload.update(overrides)
         return payload
 
-    def create_offer(self, *, show_in_general=False, cities=None, market=None, product=None):
+    def create_offer(
+        self, *, show_in_general=False, cities=None, market=None, product=None
+    ):
         offer = Offer.objects.create(
             market=market or self.market,
             show_in_general=show_in_general,
@@ -230,7 +230,7 @@ class OfferAPITests(APITestCase):
         offer.service_cities.set(cities or [])
         return offer
 
-    @patch("notifications.offer_services.send_notifications_push")
+    @patch("notifications.tasks.send_notifications_multicast_batch_task.delay")
     def test_city_offer_notifies_only_active_clients_in_selected_city(self, send_push):
         other_city_client = User.objects.create_user(
             username="other_offer_city",
@@ -264,26 +264,36 @@ class OfferAPITests(APITestCase):
         with self.captureOnCommitCallbacks(execute=True):
             dispatch_response = self.client.post(
                 f"{OFFERS_BASE}/{response.data['id']}/send-notification/",
-                {"request_id": str(uuid.uuid4())}, format="json",
+                {"request_id": str(uuid.uuid4())},
+                format="json",
             )
-        self.assertEqual(dispatch_response.status_code, status.HTTP_200_OK, dispatch_response.data)
+        self.assertEqual(
+            dispatch_response.status_code, status.HTTP_200_OK, dispatch_response.data
+        )
         notifications = Notification.objects.filter(
             offer_id=response.data["id"],
             type=Notification.Type.OFFER_CREATED,
         )
-        self.assertEqual(list(notifications.values_list("recipient_id", flat=True)), [self.client_user.id])
+        self.assertEqual(
+            list(notifications.values_list("recipient_id", flat=True)),
+            [self.client_user.id],
+        )
         notification = notifications.get()
         self.assertEqual(notification.data["region_name"], self.city.name)
         self.assertEqual(notification.data["price_text"], "خصم 50%")
-        self.assertNotIn(other_city_client.id, notifications.values_list("recipient_id", flat=True))
-        self.assertNotIn(inactive_client.id, notifications.values_list("recipient_id", flat=True))
+        self.assertNotIn(
+            other_city_client.id, notifications.values_list("recipient_id", flat=True)
+        )
+        self.assertNotIn(
+            inactive_client.id, notifications.values_list("recipient_id", flat=True)
+        )
         send_push.assert_called_once_with(
-            (notification.id,),
+            [notification.id],
             high_priority=True,
             android_channel_id="offer_updates",
         )
 
-    @patch("notifications.offer_services.send_notifications_push")
+    @patch("notifications.tasks.send_notifications_multicast_batch_task.delay")
     def test_general_offer_notifies_only_general_selected_clients(self, send_push):
         self.set_client_region(None)
         city_client = User.objects.create_user(
@@ -314,15 +324,23 @@ class OfferAPITests(APITestCase):
         with self.captureOnCommitCallbacks(execute=True):
             dispatch_response = self.client.post(
                 f"{OFFERS_BASE}/{response.data['id']}/send-notification/",
-                {"request_id": str(uuid.uuid4())}, format="json",
+                {"request_id": str(uuid.uuid4())},
+                format="json",
             )
-        self.assertEqual(dispatch_response.status_code, status.HTTP_200_OK, dispatch_response.data)
+        self.assertEqual(
+            dispatch_response.status_code, status.HTTP_200_OK, dispatch_response.data
+        )
         notifications = Notification.objects.filter(
             offer_id=response.data["id"],
             type=Notification.Type.OFFER_CREATED,
         )
-        self.assertEqual(list(notifications.values_list("recipient_id", flat=True)), [self.client_user.id])
-        self.assertNotIn(city_client.id, notifications.values_list("recipient_id", flat=True))
+        self.assertEqual(
+            list(notifications.values_list("recipient_id", flat=True)),
+            [self.client_user.id],
+        )
+        self.assertNotIn(
+            city_client.id, notifications.values_list("recipient_id", flat=True)
+        )
         self.assertEqual(notifications.get().data["region_name"], "جاهز للشحن")
         send_push.assert_called_once()
 
@@ -361,7 +379,9 @@ class OfferAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+        self.assertEqual(
+            create_response.status_code, status.HTTP_201_CREATED, create_response.data
+        )
         self.assertFalse(create_response.data["show_in_general"])
         self.assertEqual(
             create_response.data["service_city_ids"],
@@ -382,7 +402,9 @@ class OfferAPITests(APITestCase):
         )
         list_response = self.client.get(f"{OFFERS_BASE}/")
 
-        self.assertEqual(update_response.status_code, status.HTTP_200_OK, update_response.data)
+        self.assertEqual(
+            update_response.status_code, status.HTTP_200_OK, update_response.data
+        )
         self.assertTrue(update_response.data["show_in_general"])
         self.assertEqual(update_response.data["service_city_ids"], [])
         self.assertIn(offer_id, [item["id"] for item in list_response.data])
@@ -422,7 +444,9 @@ class OfferAPITests(APITestCase):
                 ),
                 format="json",
             )
-            self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+            self.assertEqual(
+                response.status_code, status.HTTP_201_CREATED, response.data
+            )
 
     def test_offer_create_rejects_general_and_city_targets_together(self):
         self.authenticate(self.admin)
@@ -526,7 +550,10 @@ class OfferAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
-        self.assertEqual(set(response.data["product_ids"]), {self.product.id, self.second_market_product.id})
+        self.assertEqual(
+            set(response.data["product_ids"]),
+            {self.product.id, self.second_market_product.id},
+        )
         self.assertEqual(response.data["market_count"], 2)
         self.assertTrue(response.data["is_multi_market"])
         self.assertEqual(response.data["market_id"], self.market.id)
@@ -547,9 +574,7 @@ class OfferAPITests(APITestCase):
         response = self.client.get(f"{OFFERS_BASE}/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
-        offer = next(
-            item for item in response.data if item["id"] == created.data["id"]
-        )
+        offer = next(item for item in response.data if item["id"] == created.data["id"])
         self.assertEqual(
             {market["id"] for market in offer["markets"]},
             {self.market.id, self.second_market.id},
@@ -593,7 +618,9 @@ class OfferAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
-        self.assertEqual(response.data["items"][0]["variant_id"], self.second_variant.id)
+        self.assertEqual(
+            response.data["items"][0]["variant_id"], self.second_variant.id
+        )
         self.assertEqual(response.data["items"][0]["product_id"], self.product.id)
         self.assertEqual(response.data["items"][0]["quantity"], 3)
         self.assertFalse(response.data["items"][0]["apply_product_discount"])
@@ -603,12 +630,20 @@ class OfferAPITests(APITestCase):
         self.authenticate(self.client_user)
         client_response = self.client.get(f"{OFFERS_BASE}/")
 
-        self.assertEqual(client_response.status_code, status.HTTP_200_OK, client_response.data)
-        client_offer = next(item for item in client_response.data if item["id"] == offer_id)
-        self.assertEqual(client_offer["products"][0]["offer_variant_id"], self.second_variant.id)
+        self.assertEqual(
+            client_response.status_code, status.HTTP_200_OK, client_response.data
+        )
+        client_offer = next(
+            item for item in client_response.data if item["id"] == offer_id
+        )
+        self.assertEqual(
+            client_offer["products"][0]["offer_variant_id"], self.second_variant.id
+        )
         self.assertEqual(client_offer["products"][0]["offer_quantity"], 3)
         self.assertFalse(client_offer["products"][0]["apply_product_discount"])
-        self.assertEqual(client_offer["products"][0]["variants"][0]["id"], self.second_variant.id)
+        self.assertEqual(
+            client_offer["products"][0]["variants"][0]["id"], self.second_variant.id
+        )
 
     def test_admin_can_create_all_supported_offer_types(self):
         self.authenticate(self.admin)
@@ -632,13 +667,18 @@ class OfferAPITests(APITestCase):
                 format="json",
             )
 
-            self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+            self.assertEqual(
+                response.status_code, status.HTTP_201_CREATED, response.data
+            )
             self.assertEqual(response.data["type"], offer_type)
 
     def test_admin_can_create_and_update_offer_image_with_multipart_arrays(self):
         self.authenticate(self.admin)
 
-        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+        with (
+            TemporaryDirectory() as media_root,
+            override_settings(MEDIA_ROOT=media_root),
+        ):
             image = offer_image_upload("offer.png")
             create_response = self.client.post(
                 f"{OFFERS_BASE}/",
@@ -655,13 +695,19 @@ class OfferAPITests(APITestCase):
                 format="multipart",
             )
 
-            self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+            self.assertEqual(
+                create_response.status_code,
+                status.HTTP_201_CREATED,
+                create_response.data,
+            )
             self.assertTrue(create_response.data["image"])
             self.assertEqual(
                 set(create_response.data["service_city_ids"]),
                 {self.city.id},
             )
-            self.assertEqual(create_response.data["items"][0]["variant_id"], self.second_variant.id)
+            self.assertEqual(
+                create_response.data["items"][0]["variant_id"], self.second_variant.id
+            )
             self.assertEqual(create_response.data["items"][0]["quantity"], 2)
             offer_id = create_response.data["id"]
 
@@ -678,12 +724,14 @@ class OfferAPITests(APITestCase):
                 format="multipart",
             )
 
-            self.assertEqual(update_response.status_code, status.HTTP_200_OK, update_response.data)
+            self.assertEqual(
+                update_response.status_code, status.HTTP_200_OK, update_response.data
+            )
             self.assertTrue(update_response.data["show_in_general"])
             self.assertEqual(update_response.data["service_city_ids"], [])
             self.assertTrue(update_response.data["image"])
 
-    @patch("notifications.offer_services.send_notifications_push")
+    @patch("notifications.tasks.send_notifications_multicast_batch_task.delay")
     def test_offer_create_image_upload_and_notification_complete_as_separate_steps(
         self,
         send_push,
@@ -727,7 +775,7 @@ class OfferAPITests(APITestCase):
         send_push.assert_called_once()
 
     @patch("offers.views.logger")
-    @patch("notifications.offer_services.send_notifications_push")
+    @patch("notifications.tasks.send_notifications_multicast_batch_task.delay")
     def test_image_storage_failure_does_not_prevent_offer_notification(
         self,
         send_push,
@@ -816,9 +864,7 @@ class OfferAPITests(APITestCase):
         )
         archived_offer = next(
             item
-            for item in self.client.get(
-                f"{OFFERS_BASE}/?archived=true"
-            ).data
+            for item in self.client.get(f"{OFFERS_BASE}/?archived=true").data
             if item["id"] == offer.id
         )
         self.assertEqual(archived_offer["deletion_mode"], "archive")
@@ -831,7 +877,7 @@ class OfferAPITests(APITestCase):
         self.assertEqual(restore_response.status_code, status.HTTP_200_OK)
         self.assertIsNone(restore_response.data["archived_at"])
 
-    @patch("notifications.offer_services.send_notifications_push")
+    @patch("notifications.tasks.send_notifications_multicast_batch_task.delay")
     def test_push_opt_out_creates_no_notification(self, send_push):
         self.authenticate(self.admin)
         with self.captureOnCommitCallbacks(execute=True):
@@ -841,11 +887,13 @@ class OfferAPITests(APITestCase):
                 format="json",
             )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertFalse(Notification.objects.filter(offer_id=response.data["id"]).exists())
+        self.assertFalse(
+            Notification.objects.filter(offer_id=response.data["id"]).exists()
+        )
         self.assertIsNone(response.data["push_sent_at"])
         send_push.assert_not_called()
 
-    @patch("notifications.offer_services.send_notifications_push")
+    @patch("notifications.tasks.send_notifications_multicast_batch_task.delay")
     def test_saving_never_sends_and_explicit_request_is_idempotent(self, send_push):
         self.authenticate(self.admin)
         with self.captureOnCommitCallbacks(execute=True):
@@ -859,16 +907,22 @@ class OfferAPITests(APITestCase):
             )
         with self.captureOnCommitCallbacks(execute=True):
             renamed = self.client.patch(offer_url, {"title": "Renamed"}, format="json")
-        self.assertEqual(Notification.objects.filter(offer_id=created.data["id"]).count(), 0)
+        self.assertEqual(
+            Notification.objects.filter(offer_id=created.data["id"]).count(), 0
+        )
         send_push.assert_not_called()
         request_id = str(uuid.uuid4())
         with self.captureOnCommitCallbacks(execute=True):
             first = self.client.post(
-                f"{offer_url}send-notification/", {"request_id": request_id}, format="json"
+                f"{offer_url}send-notification/",
+                {"request_id": request_id},
+                format="json",
             )
         with self.captureOnCommitCallbacks(execute=True):
             repeated = self.client.post(
-                f"{offer_url}send-notification/", {"request_id": request_id}, format="json"
+                f"{offer_url}send-notification/",
+                {"request_id": request_id},
+                format="json",
             )
         self.assertEqual(first.status_code, status.HTTP_200_OK, first.data)
         self.assertEqual(repeated.data["dispatch_id"], first.data["dispatch_id"])
@@ -877,12 +931,14 @@ class OfferAPITests(APITestCase):
         sent_at = offer.push_sent_at
         offer.refresh_from_db()
         self.assertEqual(offer.push_sent_at, sent_at)
-        self.assertEqual(Notification.objects.filter(offer_id=created.data["id"]).count(), 1)
+        self.assertEqual(
+            Notification.objects.filter(offer_id=created.data["id"]).count(), 1
+        )
         send_push.assert_called_once()
 
     @patch("notifications.offer_services.logger")
     @patch(
-        "notifications.offer_services.send_notifications_push",
+        "notifications.tasks.send_notifications_multicast_batch_task.delay",
         side_effect=RuntimeError("FCM unavailable"),
     )
     def test_push_failure_does_not_turn_successful_offer_dispatch_into_api_failure(
@@ -912,7 +968,7 @@ class OfferAPITests(APITestCase):
         send_push.assert_called_once()
         logger.exception.assert_called_once()
 
-    @patch("notifications.offer_services.send_notifications_push")
+    @patch("notifications.tasks.send_notifications_multicast_batch_task.delay")
     def test_expired_offer_can_send_again_after_extending_end_time(self, send_push):
         self.authenticate(self.admin)
         offer = self.create_offer(cities=[self.city])
@@ -963,9 +1019,24 @@ class OfferAPITests(APITestCase):
     def test_send_notification_rejects_non_active_effective_statuses(self):
         self.authenticate(self.admin)
         cases = (
-            ("scheduled", self.now + timedelta(hours=1), self.now + timedelta(hours=2), Offer.Status.ACTIVE),
-            ("expired", self.now - timedelta(hours=2), self.now - timedelta(hours=1), Offer.Status.ACTIVE),
-            ("inactive", self.now - timedelta(hours=1), self.now + timedelta(hours=1), Offer.Status.INACTIVE),
+            (
+                "scheduled",
+                self.now + timedelta(hours=1),
+                self.now + timedelta(hours=2),
+                Offer.Status.ACTIVE,
+            ),
+            (
+                "expired",
+                self.now - timedelta(hours=2),
+                self.now - timedelta(hours=1),
+                Offer.Status.ACTIVE,
+            ),
+            (
+                "inactive",
+                self.now - timedelta(hours=1),
+                self.now + timedelta(hours=1),
+                Offer.Status.INACTIVE,
+            ),
         )
         for label, start_time, end_time, stored_status in cases:
             offer = self.create_offer()
@@ -974,7 +1045,8 @@ class OfferAPITests(APITestCase):
             offer.save(update_fields=["start_time", "end_time", "status"])
             response = self.client.post(
                 f"{OFFERS_BASE}/{offer.id}/send-notification/",
-                {"request_id": str(uuid.uuid4())}, format="json",
+                {"request_id": str(uuid.uuid4())},
+                format="json",
             )
             self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, label)
             self.assertFalse(Notification.objects.filter(offer=offer).exists(), label)
@@ -993,7 +1065,9 @@ class OfferAPITests(APITestCase):
             )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertIsNone(response.data["push_sent_at"])
-        self.assertFalse(Notification.objects.filter(offer_id=response.data["id"]).exists())
+        self.assertFalse(
+            Notification.objects.filter(offer_id=response.data["id"]).exists()
+        )
 
     def test_client_visibility_for_general_and_selected_cities(self):
         city_offer = self.create_offer(cities=[self.city])
@@ -1009,7 +1083,11 @@ class OfferAPITests(APITestCase):
             market=self.general_market,
             product=self.general_product,
         )
-        self.create_offer(cities=[self.remote_city], market=self.remote_market, product=self.remote_product)
+        self.create_offer(
+            cities=[self.remote_city],
+            market=self.remote_market,
+            product=self.remote_product,
+        )
         self.authenticate(self.client_user)
 
         city_response = self.client.get(f"{OFFERS_BASE}/")
@@ -1028,7 +1106,9 @@ class OfferAPITests(APITestCase):
             {offer["id"] for offer in second_city_response.data},
             {multi_city_offer.id},
         )
-        self.assertNotIn(city_offer.id, {offer["id"] for offer in remote_city_response.data})
+        self.assertNotIn(
+            city_offer.id, {offer["id"] for offer in remote_city_response.data}
+        )
         self.assertEqual(
             {offer["id"] for offer in general_response.data},
             {general_offer.id, combined_offer.id},

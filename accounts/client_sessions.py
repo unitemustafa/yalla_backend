@@ -41,9 +41,7 @@ def client_session_claims(token):
         raise InvalidSession()
 
     try:
-        started_at = int(
-            token.get(CLIENT_SESSION_STARTED_AT_CLAIM, token.get("iat"))
-        )
+        started_at = int(token.get(CLIENT_SESSION_STARTED_AT_CLAIM, token.get("iat")))
     except (TypeError, ValueError) as exc:
         raise InvalidSession() from exc
 

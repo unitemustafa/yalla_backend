@@ -7,7 +7,6 @@ from django.utils import timezone
 from locations.models import DeliveryArea
 
 from .models import DeliveryAreaNotificationDispatch, Notification
-from .push import send_notification_push
 
 
 logger = logging.getLogger(__name__)
@@ -116,13 +115,20 @@ def dispatch_delivery_area_created_notifications(delivery_area_id):
             ]
         )
 
-    for notification_id in created_notification_ids:
-        try:
-            send_notification_push(notification_id)
-        except Exception:
-            logger.exception(
-                "Delivery-area-created push failed for notification_id=%s",
-                notification_id,
-            )
+    if created_notification_ids:
+        from .tasks import send_notifications_multicast_batch_task
+
+        for i in range(0, len(created_notification_ids), 500):
+            chunk = list(created_notification_ids[i : i + 500])
+            try:
+                send_notifications_multicast_batch_task.delay(
+                    chunk,
+                    high_priority=False,
+                )
+            except Exception:
+                logger.exception(
+                    "Delivery-area push enqueue failed for notification_ids=%s",
+                    chunk,
+                )
 
     return dispatch

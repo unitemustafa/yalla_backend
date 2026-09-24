@@ -46,4 +46,3 @@ class RequestContextMiddlewareTests(SimpleTestCase):
         self.assertNotIn("secret", payload["message"])
         self.assertNotIn("abc", payload["message"])
         self.assertNotIn("123456", payload["message"])
-

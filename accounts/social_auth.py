@@ -39,7 +39,9 @@ def verify_social_id_token(id_token):
     except auth.ExpiredIdTokenError:
         raise SocialTokenError("The social sign-in token has expired.") from None
     except auth.RevokedIdTokenError:
-        raise SocialTokenError("Social sign-in was revoked. Please try again.") from None
+        raise SocialTokenError(
+            "Social sign-in was revoked. Please try again."
+        ) from None
     except auth.UserDisabledError:
         raise SocialTokenError("This social account is disabled.") from None
     except (FirebaseConfigurationError, ValueError, auth.InvalidIdTokenError):
@@ -53,9 +55,7 @@ def verify_social_id_token(id_token):
     provider = SUPPORTED_PROVIDER_IDS.get(provider_id)
     email = normalize_email(str(claims.get("email") or ""))
     if not firebase_uid or provider is None or not email:
-        raise SocialTokenError(
-            "The social account must provide a valid email address."
-        )
+        raise SocialTokenError("The social account must provide a valid email address.")
 
     first_name, last_name = _names_from_claims(claims)
     picture = str(claims.get("picture") or "").strip() or None

@@ -146,10 +146,12 @@ class AdminMarketWriteMixin:
             removed_ids
             and Product.objects.filter(
                 market=self.instance,
-            ).filter(
-                Q(subcategory_id__in=removed_ids)
-                | Q(subcategories__id__in=removed_ids)
-            ).distinct().exists()
+            )
+            .filter(
+                Q(subcategory_id__in=removed_ids) | Q(subcategories__id__in=removed_ids)
+            )
+            .distinct()
+            .exists()
         ):
             raise serializers.ValidationError(
                 {

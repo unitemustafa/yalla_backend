@@ -56,19 +56,58 @@ class OrderSeederMixin:
                 "12.00",
                 ["عيش بلدي", "كرواسون بالشوكولاتة"],
             ),
-            ("أطباق إسكندرية", "نكهة إسكندرية", "service_city", Offer.OfferType.PACKAGE, "18.00", ["مكرونة إسكندراني", "طاجن خضار"]),
-            ("حلويات البحر", "حلويات البحر", "service_city", Offer.OfferType.DISCOUNT, "10.00", ["بقلاوة", "بسبوسة بالعسل"]),
-            ("أسبوع المنتجات العضوية", "خيرات المنصورة", "service_city", Offer.OfferType.ANNOUNCEMENT, "5.00", ["عسل مصري", "زيت زيتون"]),
-            ("توصيل مخبزة الدلتا", "مخبزة الدلتا", "service_city", Offer.OfferType.DELIVERY, "7.00", ["خبز كامل", "بريوش"]),
+            (
+                "أطباق إسكندرية",
+                "نكهة إسكندرية",
+                "service_city",
+                Offer.OfferType.PACKAGE,
+                "18.00",
+                ["مكرونة إسكندراني", "طاجن خضار"],
+            ),
+            (
+                "حلويات البحر",
+                "حلويات البحر",
+                "service_city",
+                Offer.OfferType.DISCOUNT,
+                "10.00",
+                ["بقلاوة", "بسبوسة بالعسل"],
+            ),
+            (
+                "أسبوع المنتجات العضوية",
+                "خيرات المنصورة",
+                "service_city",
+                Offer.OfferType.ANNOUNCEMENT,
+                "5.00",
+                ["عسل مصري", "زيت زيتون"],
+            ),
+            (
+                "توصيل مخبزة الدلتا",
+                "مخبزة الدلتا",
+                "service_city",
+                Offer.OfferType.DELIVERY,
+                "7.00",
+                ["خبز كامل", "بريوش"],
+            ),
         ]
         offers = {}
-        for title, market_name, scope, offer_type, discount, product_names in definitions:
+        for (
+            title,
+            market_name,
+            scope,
+            offer_type,
+            discount,
+            product_names,
+        ) in definitions:
             market = markets[market_name]
             service_city = None
             if scope == "service_city":
-                service_city = market.service_cities.filter(
-                    is_active=True,
-                ).order_by("id").first()
+                service_city = (
+                    market.service_cities.filter(
+                        is_active=True,
+                    )
+                    .order_by("id")
+                    .first()
+                )
             offer, _ = Offer.objects.update_or_create(
                 market=market,
                 title=title,
@@ -87,8 +126,7 @@ class OrderSeederMixin:
             )
             offer.products.set([products[name] for name in product_names])
             selected_variants = [
-                products[name].variants.order_by("id").first()
-                for name in product_names
+                products[name].variants.order_by("id").first() for name in product_names
             ]
             selected_variants = [
                 variant for variant in selected_variants if variant is not None
@@ -166,7 +204,10 @@ class OrderSeederMixin:
                 "market": markets["حلويات البحر"],
                 "status": Order.Status.ASSIGNED,
                 "payment_method": "card",
-                "items": [(variants["بقلاوة"][1], 2), (variants["بسبوسة بالعسل"][0], 1)],
+                "items": [
+                    (variants["بقلاوة"][1], 2),
+                    (variants["بسبوسة بالعسل"][0], 1),
+                ],
                 "offer": offers["حلويات البحر"],
                 "offer_discount": Decimal("150.00"),
             },
@@ -194,8 +235,7 @@ class OrderSeederMixin:
 
         for definition in definitions:
             subtotal = sum(
-                variant.price * quantity
-                for variant, quantity in definition["items"]
+                variant.price * quantity for variant, quantity in definition["items"]
             )
             discount = definition["offer_discount"]
             order_scope = (
@@ -436,4 +476,3 @@ class OrderSeederMixin:
             else "seed.courier@yalla.test"
         )
         return users[email]
-

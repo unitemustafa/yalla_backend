@@ -41,10 +41,7 @@ class YallaAutoSchema(AutoSchema):
 def remove_duplicate_optional_slash_routes(endpoints):
     """Document one canonical path when runtime supports both slash variants."""
 
-    actual = {
-        (path, method)
-        for path, _path_regex, method, _callback in endpoints
-    }
+    actual = {(path, method) for path, _path_regex, method, _callback in endpoints}
     filtered = []
     for endpoint in endpoints:
         path, _path_regex, method, _callback = endpoint

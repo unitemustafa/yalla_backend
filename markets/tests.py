@@ -107,7 +107,9 @@ class LoginDashboardSnapshotAPITests(APITestCase):
         today = timezone.localdate()
         self.create_order_at(self.local_datetime(today, time(0, 0)))
         self.create_order_at(self.local_datetime(today, time(12, 0)))
-        self.create_order_at(self.local_datetime(today - timedelta(days=1), time(23, 59)))
+        self.create_order_at(
+            self.local_datetime(today - timedelta(days=1), time(23, 59))
+        )
 
         response = self.client.get(self.snapshot_url)
 
@@ -291,9 +293,7 @@ class HomeAPITests(APITestCase):
         self.local_products = [
             self._create_product(
                 f"Local Product {index}",
-                self.local_market
-                if index % 2
-                else self.second_local_market,
+                self.local_market if index % 2 else self.second_local_market,
                 index,
             )
             for index in range(1, 11)
@@ -308,9 +308,7 @@ class HomeAPITests(APITestCase):
         self.local_offers = [
             self._create_offer(
                 f"Local Offer {index}",
-                self.local_market
-                if index % 2
-                else self.second_local_market,
+                self.local_market if index % 2 else self.second_local_market,
                 self.local_products[index - 1],
                 now,
             )
@@ -325,9 +323,7 @@ class HomeAPITests(APITestCase):
 
     def authenticate(self, user=None):
         refresh = RefreshToken.for_user(user or self.user)
-        self.client.credentials(
-            HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
-        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
     def select_general_region(self):
         self.user.market_region_mode = User.MarketRegionMode.GENERAL
@@ -419,9 +415,7 @@ class HomeAPITests(APITestCase):
             general_response.data["current_selection"]["mode"],
             User.MarketRegionMode.GENERAL,
         )
-        self.assertIsNone(
-            general_response.data["current_selection"]["service_city"]
-        )
+        self.assertIsNone(general_response.data["current_selection"]["service_city"])
         self.assertEqual(city_response.status_code, status.HTTP_200_OK)
         self.assertEqual(
             city_response.data["current_selection"]["service_city"]["id"],
@@ -873,13 +867,15 @@ class HomeAPITests(APITestCase):
             self.remote_classification.id,
             {
                 classification["id"]
-                for classification in response.data[
-                    "market_classifications"
-                ]
+                for classification in response.data["market_classifications"]
             },
         )
-        self.assertTrue(all(product["is_popular"] for product in response.data["products"]))
-        self.assertTrue(all("category" not in product for product in response.data["products"]))
+        self.assertTrue(
+            all(product["is_popular"] for product in response.data["products"])
+        )
+        self.assertTrue(
+            all("category" not in product for product in response.data["products"])
+        )
         self.assertNotIn(
             product_without_price.id,
             {product["id"] for product in response.data["products"]},
@@ -887,9 +883,7 @@ class HomeAPITests(APITestCase):
 
     @override_settings(MEDIA_ROOT="/tmp/yalla_home_classification_image_test")
     def test_home_returns_saved_market_classification_image(self):
-        self.local_classification.image = market_image_upload(
-            "home-classification.png"
-        )
+        self.local_classification.image = market_image_upload("home-classification.png")
         self.local_classification.save(update_fields=["image"])
         self.authenticate()
 
@@ -1134,9 +1128,7 @@ class HomeAPITests(APITestCase):
         )
         self.assertTrue(response.data["image"])
         classification = MarketClassification.objects.get(pk=response.data["id"])
-        self.assertTrue(
-            classification.image.name.startswith("market-classifications/")
-        )
+        self.assertTrue(classification.image.name.startswith("market-classifications/"))
 
     @override_settings(MEDIA_ROOT="/tmp/yalla_market_image_test")
     def test_admin_can_save_general_market_image_from_multipart(self):
@@ -1181,9 +1173,7 @@ class HomeAPITests(APITestCase):
                 "name": "محل جديد بلا منتجات",
                 "scope": Market.Scope.GENERAL,
                 "image": market_image_upload("no-categories-logo.png"),
-                "cover_image": market_image_upload(
-                    "no-categories-cover.png", "red"
-                ),
+                "cover_image": market_image_upload("no-categories-cover.png", "red"),
                 "delivery_time_min_minutes": "20",
                 "delivery_time_max_minutes": "35",
             },
@@ -1269,8 +1259,7 @@ class HomeAPITests(APITestCase):
         self.authenticate(self.admin)
 
         response = self.client.delete(
-            f"{HOME_BASE}/market-classifications/"
-            f"{self.local_classification.id}/"
+            f"{HOME_BASE}/market-classifications/{self.local_classification.id}/"
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -1389,9 +1378,7 @@ class HomeAPITests(APITestCase):
             total_price=Decimal("100.00"),
         )
 
-        response = self.client.delete(
-            f"{HOME_BASE}/markets/{self.local_market.id}/"
-        )
+        response = self.client.delete(f"{HOME_BASE}/markets/{self.local_market.id}/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["action"], "archived")
@@ -1401,16 +1388,11 @@ class HomeAPITests(APITestCase):
         self.assertTrue(Order.objects.filter(pk=order.id).exists())
         self.assertNotIn(
             self.local_market.id,
-            [
-                item["id"]
-                for item in self.client.get(f"{HOME_BASE}/markets/").data
-            ],
+            [item["id"] for item in self.client.get(f"{HOME_BASE}/markets/").data],
         )
         archived_market = next(
             item
-            for item in self.client.get(
-                f"{HOME_BASE}/markets/?archived=true"
-            ).data
+            for item in self.client.get(f"{HOME_BASE}/markets/?archived=true").data
             if item["id"] == self.local_market.id
         )
         self.assertEqual(archived_market["deletion_mode"], "archive")
@@ -1521,12 +1503,8 @@ class HomeAPITests(APITestCase):
         busiest_classification = MarketClassification.objects.create(
             name="Busiest local"
         )
-        medium_classification = MarketClassification.objects.create(
-            name="Medium local"
-        )
-        quiet_classification = MarketClassification.objects.create(
-            name="Quiet local"
-        )
+        medium_classification = MarketClassification.objects.create(name="Medium local")
+        quiet_classification = MarketClassification.objects.create(name="Quiet local")
         busiest_market = self._create_market(
             "Busiest Market",
             busiest_classification,
@@ -1775,8 +1753,7 @@ class HomeAPITests(APITestCase):
 
     def test_classification_markets_requires_authentication(self):
         response = self.client.get(
-            f"{HOME_BASE}/classifications/"
-            f"{self.local_classification.id}/markets/"
+            f"{HOME_BASE}/classifications/{self.local_classification.id}/markets/"
         )
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
@@ -1791,8 +1768,7 @@ class HomeAPITests(APITestCase):
 
         self.authenticate()
         response = self.client.get(
-            f"{HOME_BASE}/classifications/"
-            f"{self.local_classification.id}/markets/"
+            f"{HOME_BASE}/classifications/{self.local_classification.id}/markets/"
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -1867,9 +1843,7 @@ class HomeAPITests(APITestCase):
         self.assertTrue(list_response.data[0]["is_liked"])
         self.assertTrue(storefront_response.data["is_liked"])
         self.assertFalse(unlike_response.data["liked"])
-        self.assertFalse(
-            self.local_market.liked_by.filter(id=self.user.id).exists()
-        )
+        self.assertFalse(self.local_market.liked_by.filter(id=self.user.id).exists())
 
     def test_client_cannot_favorite_market_outside_current_region(self):
         self.authenticate()
@@ -1883,8 +1857,7 @@ class HomeAPITests(APITestCase):
     def test_classification_markets_excludes_remote_markets(self):
         self.authenticate()
         response = self.client.get(
-            f"{HOME_BASE}/classifications/"
-            f"{self.remote_classification.id}/markets/"
+            f"{HOME_BASE}/classifications/{self.remote_classification.id}/markets/"
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -2226,9 +2199,7 @@ class HomeAPITests(APITestCase):
             attribute=attribute,
             option=option,
         )
-        addition_classification = AdditionClassification.objects.create(
-            name="Extras"
-        )
+        addition_classification = AdditionClassification.objects.create(name="Extras")
         addition = ProductAddition.objects.create(
             classification=addition_classification,
             name_ar="جبن",

@@ -65,8 +65,7 @@ class AdminMarketClassificationSerializer(serializers.ModelSerializer):
         )
 
         if (
-            classification_type
-            == MarketClassification.ClassificationType.FEATURED
+            classification_type == MarketClassification.ClassificationType.FEATURED
             and is_active
         ):
             featured = MarketClassification.objects.filter(
@@ -319,9 +318,13 @@ class HomeMarketSerializer(serializers.ModelSerializer):
                 ),
             )
         else:
-            assignments = market.subcategory_assignments.filter(
-                subcategory__is_active=True,
-            ).select_related("subcategory").order_by("sort_order", "id")
+            assignments = (
+                market.subcategory_assignments.filter(
+                    subcategory__is_active=True,
+                )
+                .select_related("subcategory")
+                .order_by("sort_order", "id")
+            )
         return AssignedStoreSubcategorySerializer(
             assignments,
             many=True,
@@ -345,14 +348,19 @@ class HomeMarketClassificationSerializer(serializers.ModelSerializer):
 
     def get_markets(self, classification):
         eligible_market_ids = self.context["eligible_market_ids"]
-        markets = classification.markets.filter(
-            id__in=eligible_market_ids,
-            status=Market.Status.ACTIVE,
-        ).with_client_metrics(
-            self.context.get("request").user
-            if self.context.get("request") is not None
-            else None
-        ).prefetch_related("service_cities", "delivery_areas").order_by("name")
+        markets = (
+            classification.markets.filter(
+                id__in=eligible_market_ids,
+                status=Market.Status.ACTIVE,
+            )
+            .with_client_metrics(
+                self.context.get("request").user
+                if self.context.get("request") is not None
+                else None
+            )
+            .prefetch_related("service_cities", "delivery_areas")
+            .order_by("name")
+        )
         return HomeMarketSerializer(markets, many=True).data
 
 
@@ -475,6 +483,7 @@ class AdminMarketSerializer(AdminMarketWriteMixin, serializers.ModelSerializer):
             many=True,
             context=self.context,
         ).data
+
 
 class MarketClassificationCountSerializer(serializers.ModelSerializer):
     product_count = serializers.IntegerField(read_only=True)
@@ -675,9 +684,7 @@ class MarketClassificationProductSerializer(serializers.ModelSerializer):
         )
 
 
-class MarketClassificationWithProductsSerializer(
-    MarketClassificationCountSerializer
-):
+class MarketClassificationWithProductsSerializer(MarketClassificationCountSerializer):
     products = serializers.SerializerMethodField()
 
     class Meta(MarketClassificationCountSerializer.Meta):
@@ -816,7 +823,11 @@ class HomeOfferSerializer(serializers.ModelSerializer):
         )
 
     def _markets(self, instance):
-        values = {product.market_id: product.market for product in instance.products.all() if product.market_id}
+        values = {
+            product.market_id: product.market
+            for product in instance.products.all()
+            if product.market_id
+        }
         return [values[key] for key in sorted(values)]
 
     def get_products(self, instance):

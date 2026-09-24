@@ -39,9 +39,7 @@ class ShareLandingViewTests(TestCase):
         )
 
     def test_product_share_page_opens_the_product_deep_link(self):
-        response = self.client.get(
-            reverse("product-share", args=[self.product.id])
-        )
+        response = self.client.get(reverse("product-share", args=[self.product.id]))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(
@@ -72,16 +70,12 @@ class ShareLandingViewTests(TestCase):
             404,
         )
         self.assertEqual(
-            self.client.get(
-                reverse("market-share", args=[self.market.id])
-            ).status_code,
+            self.client.get(reverse("market-share", args=[self.market.id])).status_code,
             404,
         )
 
     def test_market_share_page_opens_the_market_deep_link(self):
-        response = self.client.get(
-            reverse("market-share", args=[self.market.id])
-        )
+        response = self.client.get(reverse("market-share", args=[self.market.id]))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(
@@ -94,9 +88,7 @@ class ShareLandingViewTests(TestCase):
         self.product.name = '<script>alert("unsafe")</script>'
         self.product.save(update_fields=["name"])
 
-        response = self.client.get(
-            reverse("product-share", args=[self.product.id])
-        )
+        response = self.client.get(reverse("product-share", args=[self.product.id]))
         body = response.content.decode()
 
         self.assertNotIn('<script>alert("unsafe")</script>', body)

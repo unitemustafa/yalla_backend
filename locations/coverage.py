@@ -46,22 +46,15 @@ def contains_point(scope, *, latitude, longitude):
     center_latitude = getattr(scope, "center_latitude", None)
     center_longitude = getattr(scope, "center_longitude", None)
     radius_km = getattr(scope, "radius_km", None)
-    if (
-        center_latitude is None
-        or center_longitude is None
-        or radius_km is None
-    ):
+    if center_latitude is None or center_longitude is None or radius_km is None:
         # Keep legacy rows usable until administrators configure coverage.
         return True
-    return (
-        _haversine_km(
-            latitude,
-            longitude,
-            float(center_latitude),
-            float(center_longitude),
-        )
-        <= float(radius_km)
-    )
+    return _haversine_km(
+        latitude,
+        longitude,
+        float(center_latitude),
+        float(center_longitude),
+    ) <= float(radius_km)
 
 
 def matching_delivery_area(service_city, *, latitude, longitude):
@@ -97,8 +90,7 @@ def _point_in_geojson(latitude, longitude, value):
         return _point_in_polygon(latitude, longitude, coordinates)
     if geojson_type == "MultiPolygon" and isinstance(coordinates, list):
         return any(
-            _point_in_polygon(latitude, longitude, polygon)
-            for polygon in coordinates
+            _point_in_polygon(latitude, longitude, polygon) for polygon in coordinates
         )
     return None
 
@@ -126,10 +118,7 @@ def _point_in_polygon(latitude, longitude, rings):
         return False
     if not _point_in_ring(latitude, longitude, rings[0]):
         return False
-    return not any(
-        _point_in_ring(latitude, longitude, hole)
-        for hole in rings[1:]
-    )
+    return not any(_point_in_ring(latitude, longitude, hole) for hole in rings[1:])
 
 
 def _point_in_ring(latitude, longitude, ring):
@@ -144,12 +133,9 @@ def _point_in_ring(latitude, longitude, ring):
         except (TypeError, ValueError, IndexError):
             return False
         if (current_lat > latitude) != (previous_lat > latitude):
-            crossing_lon = (
-                (previous_lon - current_lon)
-                * (latitude - current_lat)
-                / (previous_lat - current_lat)
-                + current_lon
-            )
+            crossing_lon = (previous_lon - current_lon) * (latitude - current_lat) / (
+                previous_lat - current_lat
+            ) + current_lon
             if longitude < crossing_lon:
                 inside = not inside
         previous = current

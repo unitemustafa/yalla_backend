@@ -131,9 +131,7 @@ class ProductNotificationAPITests(APITestCase):
 
     def authenticate(self, user):
         refresh = RefreshToken.for_user(user)
-        self.client.credentials(
-            HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
-        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
     def send_notification(self, product, request_id=None):
         return self.client.post(
@@ -142,7 +140,7 @@ class ProductNotificationAPITests(APITestCase):
             format="json",
         )
 
-    @patch("notifications.product_services.send_notification_push")
+    @patch("notifications.tasks.send_notifications_multicast_batch_task.delay")
     def test_service_city_product_notifies_only_clients_who_can_open_it(
         self,
         send_push,
@@ -168,8 +166,7 @@ class ProductNotificationAPITests(APITestCase):
         self.assertEqual(notification.title, "🛒 منتج جديد وصل يلا ماركت!")
         self.assertEqual(
             notification.message,
-            "«كشري مخصوص» متاح دلوقتي من محل المدينة. "
-            "دوس وشوف التفاصيل واطلبه بسهولة.",
+            "«كشري مخصوص» متاح دلوقتي من محل المدينة. دوس وشوف التفاصيل واطلبه بسهولة.",
         )
         self.assertEqual(notification.data["event"], "product_created")
         self.assertEqual(notification.data["action"], "open_product")
@@ -185,12 +182,12 @@ class ProductNotificationAPITests(APITestCase):
             Notification.objects.filter(recipient=self.inactive_client).exists()
         )
         send_push.assert_called_once_with(
-            notification.id,
+            [notification.id],
             high_priority=True,
             android_channel_id="product_updates",
         )
 
-    @patch("notifications.product_services.send_notification_push")
+    @patch("notifications.tasks.send_notifications_multicast_batch_task.delay")
     def test_general_product_notifies_general_clients_only(
         self,
         send_push,

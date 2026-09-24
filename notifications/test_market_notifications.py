@@ -40,9 +40,7 @@ class MarketNotificationTests(APITestCase):
             name="مدينة أخرى",
             delivery_price=Decimal("30.00"),
         )
-        self.classification = MarketClassification.objects.create(
-            name="محلات جديدة"
-        )
+        self.classification = MarketClassification.objects.create(name="محلات جديدة")
         self.subcategory = StoreSubcategory.objects.create(
             name_ar="إشعارات المحلات",
             name_en="Market Notifications",
@@ -81,9 +79,7 @@ class MarketNotificationTests(APITestCase):
 
     def authenticate(self):
         refresh = RefreshToken.for_user(self.admin)
-        self.client.credentials(
-            HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
-        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
     def make_market(self, scope=Market.Scope.SERVICE_CITY):
         market = Market.objects.create(
@@ -117,9 +113,7 @@ class MarketNotificationTests(APITestCase):
                 "subcategory_ids": [self.subcategory.id],
                 "send_notification": False,
                 "image": market_image_upload("without-notification-logo.png"),
-                "cover_image": market_image_upload(
-                    "without-notification-cover.png"
-                ),
+                "cover_image": market_image_upload("without-notification-cover.png"),
                 "delivery_time_min_minutes": 20,
                 "delivery_time_max_minutes": 40,
             },
@@ -154,7 +148,7 @@ class MarketNotificationTests(APITestCase):
         self.assertEqual(queued.status, MarketNotificationDispatch.Status.PENDING)
         self.assertEqual(queued.requested_by, self.admin)
 
-    @patch("notifications.market_services.send_notification_push")
+    @patch("notifications.tasks.send_notifications_multicast_batch_task.delay")
     def test_city_market_waits_for_first_available_product_and_targets_city(
         self,
         send_push,
@@ -196,7 +190,7 @@ class MarketNotificationTests(APITestCase):
             Notification.objects.filter(recipient=self.general_client).exists()
         )
         send_push.assert_called_once_with(
-            notification.id,
+            [notification.id],
             high_priority=True,
             android_channel_id="store_updates",
         )
@@ -228,9 +222,7 @@ class MarketNotificationTests(APITestCase):
         from .market_services import dispatch_pending_market_notification_for_product
 
         dispatch_pending_market_notification_for_product(first.id)
-        self.assertIsNone(
-            dispatch_pending_market_notification_for_product(second.id)
-        )
+        self.assertIsNone(dispatch_pending_market_notification_for_product(second.id))
         self.assertEqual(
             Notification.objects.filter(market_dispatch=dispatch).count(),
             1,
@@ -262,7 +254,7 @@ class MarketNotificationTests(APITestCase):
         )
 
     @patch(
-        "notifications.market_services.send_notification_push",
+        "notifications.tasks.send_notifications_multicast_batch_task.delay",
         side_effect=RuntimeError("firebase unavailable"),
     )
     def test_product_create_triggers_pending_announcement_without_failing_save(

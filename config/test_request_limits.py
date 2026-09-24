@@ -13,9 +13,7 @@ from .request_limits import RequestBodyLimitMiddleware
 class RequestBodyLimitMiddlewareTests(SimpleTestCase):
     def setUp(self):
         self.factory = RequestFactory()
-        self.middleware = RequestBodyLimitMiddleware(
-            lambda request: None
-        )
+        self.middleware = RequestBodyLimitMiddleware(lambda request: None)
 
     def test_rejects_oversized_json_before_body_parsing(self):
         request = self.factory.post(

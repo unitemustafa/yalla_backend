@@ -38,8 +38,7 @@ class MarketRegionUpdateSerializer(serializers.Serializer):
                 raise serializers.ValidationError(
                     {
                         "service_city_id": (
-                            "Service city must be empty for general market "
-                            "browsing."
+                            "Service city must be empty for general market browsing."
                         )
                     }
                 )
@@ -49,8 +48,7 @@ class MarketRegionUpdateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {
                     "service_city_id": (
-                        "Service city is required for service-city market "
-                        "browsing."
+                        "Service city is required for service-city market browsing."
                     )
                 }
             )
@@ -85,14 +83,10 @@ class MarketRegionDetectSerializer(serializers.Serializer):
 
     def validate_latitude(self, value):
         if value < -90 or value > 90:
-            raise serializers.ValidationError(
-                "Latitude must be between -90 and 90."
-            )
+            raise serializers.ValidationError("Latitude must be between -90 and 90.")
         return value
 
     def validate_longitude(self, value):
         if value < -180 or value > 180:
-            raise serializers.ValidationError(
-                "Longitude must be between -180 and 180."
-            )
+            raise serializers.ValidationError("Longitude must be between -180 and 180.")
         return value

@@ -9,4 +9,3 @@ class SeedDataMixin(
     OrderSeederMixin,
 ):
     """Composable seed operations used by the management command."""
-

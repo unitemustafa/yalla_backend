@@ -88,10 +88,14 @@ class NotificationListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        notifications = apply_notification_filters(
-            visible_notifications(request.user),
-            request.query_params,
-        ).select_related("offer__market").order_by("-created_at", "-id")
+        notifications = (
+            apply_notification_filters(
+                visible_notifications(request.user),
+                request.query_params,
+            )
+            .select_related("offer__market")
+            .order_by("-created_at", "-id")
+        )
         return paginated_list_response(
             request,
             notifications,
@@ -103,9 +107,13 @@ class NotificationReadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, notification_id):
-        notification = visible_notifications(request.user).filter(
-            pk=notification_id,
-        ).first()
+        notification = (
+            visible_notifications(request.user)
+            .filter(
+                pk=notification_id,
+            )
+            .first()
+        )
         if notification is None:
             return Response(
                 {"detail": "Notification not found."},
@@ -127,9 +135,13 @@ class NotificationDeleteView(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, notification_id):
-        notification = visible_notifications(request.user).filter(
-            pk=notification_id,
-        ).first()
+        notification = (
+            visible_notifications(request.user)
+            .filter(
+                pk=notification_id,
+            )
+            .first()
+        )
         if notification is None:
             return Response(
                 {"detail": "Notification not found."},
@@ -137,11 +149,7 @@ class NotificationDeleteView(APIView):
             )
         if notification.is_blocking and not notification.is_resolved:
             return Response(
-                {
-                    "detail": (
-                        "Unresolved blocking notifications cannot be deleted."
-                    )
-                },
+                {"detail": ("Unresolved blocking notifications cannot be deleted.")},
                 status=status.HTTP_409_CONFLICT,
             )
         notification.delete()
@@ -153,10 +161,14 @@ class NotificationMarkAllReadView(APIView):
 
     def post(self, request):
         now = timezone.now()
-        count = visible_notifications(request.user).filter(is_read=False).update(
-            is_read=True,
-            read_at=now,
-            updated_at=now,
+        count = (
+            visible_notifications(request.user)
+            .filter(is_read=False)
+            .update(
+                is_read=True,
+                read_at=now,
+                updated_at=now,
+            )
         )
         return Response({"marked_read": count})
 

@@ -169,9 +169,7 @@ class DashboardSettingsAPITests(APITestCase):
         self.assertEqual(patch_response.status_code, status.HTTP_200_OK)
 
         self.client.force_authenticate(user=None)
-        snapshot_response = self.client.get(
-            "/api/v1/home/login-dashboard-snapshot/"
-        )
+        snapshot_response = self.client.get("/api/v1/home/login-dashboard-snapshot/")
 
         self.assertEqual(snapshot_response.status_code, status.HTTP_200_OK)
         self.assertEqual(
@@ -180,9 +178,7 @@ class DashboardSettingsAPITests(APITestCase):
         self.assertEqual(
             snapshot_response.data["branding"]["brandTagline"], "Snapshot Tagline"
         )
-        self.assertEqual(
-            snapshot_response.data["branding"]["fontFamily"], "Alexandria"
-        )
+        self.assertEqual(snapshot_response.data["branding"]["fontFamily"], "Alexandria")
 
     def test_invalid_color_is_rejected(self):
         self.authenticate_admin()
@@ -272,7 +268,9 @@ class DashboardSettingsAPITests(APITestCase):
         self.assertEqual(second_response.status_code, status.HTTP_200_OK)
         settings.refresh_from_db()
         self.assertNotEqual(settings.logo.name, old_logo_name)
-        self.assertNotEqual(second_response.data["logo_url"], first_response.data["logo_url"])
+        self.assertNotEqual(
+            second_response.data["logo_url"], first_response.data["logo_url"]
+        )
         self.assertFalse(settings.logo.storage.exists(old_logo_name))
 
 
@@ -538,7 +536,9 @@ class DashboardOverviewAPITests(APITestCase):
             {"from": "2026-05-01", "to": "2026-05-22", "timezone": "UTC"},
         )
         self.assertEqual(response.data["currency"], "EGP")
-        self.assertEqual(response.data["revenue"], {"total": "500.00", "percentage": 71.4})
+        self.assertEqual(
+            response.data["revenue"], {"total": "500.00", "percentage": 71.4}
+        )
         self.assertEqual(
             response.data["orders"],
             {
@@ -568,12 +568,16 @@ class DashboardOverviewAPITests(APITestCase):
             last.id,
             [item["id"] for item in response.data["active_orders"]],
         )
-        self.assertEqual(response.data["top_shops"][0]["market_id"], self.main_market.id)
+        self.assertEqual(
+            response.data["top_shops"][0]["market_id"], self.main_market.id
+        )
         self.assertEqual(response.data["top_shops"][0]["revenue"], "300.00")
         self.assertEqual(response.data["top_shops"][0]["zone"], "Algiers")
         self.assertEqual(response.data["top_shops"][0]["average_items_per_order"], 3.0)
 
-    def test_active_orders_include_in_progress_statuses_and_exclude_terminal_statuses(self):
+    def test_active_orders_include_in_progress_statuses_and_exclude_terminal_statuses(
+        self,
+    ):
         picked_up = self.create_order(
             user=self.client_user,
             market=self.main_market,
@@ -637,7 +641,9 @@ class DashboardOverviewAPITests(APITestCase):
         self.assertEqual(active_order["id"], order.id)
         self.assertEqual(active_order["number"], f"YM-20260514-{order.id:06d}")
         self.assertEqual(active_order["market_count"], 2)
-        self.assertEqual(active_order["market_names_summary"], "Second Market, Yalla Market - Main")
+        self.assertEqual(
+            active_order["market_names_summary"], "Second Market, Yalla Market - Main"
+        )
         self.assertTrue(active_order["is_multi_market"])
 
     def test_active_orders_fall_back_to_legacy_market_without_sections(self):

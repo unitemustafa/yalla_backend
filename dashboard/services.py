@@ -120,7 +120,9 @@ def build_top_shops(start, end):
         .select_related("market")
         .prefetch_related(
             "market__service_cities",
-            Prefetch("items", queryset=OrderItem.objects.only("id", "section_id", "quantity")),
+            Prefetch(
+                "items", queryset=OrderItem.objects.only("id", "section_id", "quantity")
+            ),
         )
         .order_by("order_id", "sort_order", "id")
     )
@@ -145,7 +147,9 @@ def build_top_shops(start, end):
         .select_related("market")
         .prefetch_related(
             "market__service_cities",
-            Prefetch("items", queryset=OrderItem.objects.only("id", "order_id", "quantity")),
+            Prefetch(
+                "items", queryset=OrderItem.objects.only("id", "order_id", "quantity")
+            ),
         )
     )
     for order in legacy_orders:

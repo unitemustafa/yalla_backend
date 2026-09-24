@@ -24,4 +24,3 @@ urlpatterns = [
         name="admin-partner-application-detail",
     ),
 ]
-

@@ -28,3 +28,4 @@ additions/
 
 # Local tool state
 .serena/
+.pg_data/

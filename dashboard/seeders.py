@@ -15,4 +15,3 @@ class DemoSeedMixin(
     DemoReportingMixin,
 ):
     """Seed stages shared by the demo-data management command."""
-

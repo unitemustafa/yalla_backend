@@ -119,7 +119,9 @@ class Order(models.Model):
     payment_method = models.CharField(max_length=50)
     discount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     description = models.TextField(blank=True)
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
     review_status = models.CharField(
         max_length=20,
         choices=ReviewStatus.choices,
@@ -222,6 +224,15 @@ class Order(models.Model):
                 name="orders_order_scope_service_city_valid",
             ),
         ]
+        indexes = [
+            models.Index(fields=["status", "-created_at", "-id"]),
+            models.Index(fields=["review_status", "-created_at", "-id"]),
+            models.Index(fields=["user", "-created_at", "-id"]),
+            models.Index(
+                fields=["assigned_representative", "status", "-created_at", "-id"]
+            ),
+            models.Index(fields=["-created_at", "-id"]),
+        ]
 
 
 class OrderMarketSection(models.Model):
@@ -290,7 +301,6 @@ class OrderItem(models.Model):
     quantity = models.PositiveIntegerField()
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
 
-    
 
 class OrderOffer(models.Model):
     order = models.ForeignKey(

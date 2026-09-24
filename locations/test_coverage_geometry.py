@@ -129,4 +129,3 @@ class CoverageGeometryTests(TestCase):
             matching_delivery_area(city, latitude=30.01, longitude=31.01),
             expected,
         )
-

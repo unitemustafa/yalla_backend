@@ -39,7 +39,9 @@ CATALOG_BASE = "/api/v1/catalog"
 def product_image_upload(name="product.png", image_format="PNG", color="red"):
     content = BytesIO()
     Image.new("RGB", (2, 2), color=color).save(content, format=image_format)
-    mime_type = "image/jpeg" if image_format == "JPEG" else f"image/{image_format.lower()}"
+    mime_type = (
+        "image/jpeg" if image_format == "JPEG" else f"image/{image_format.lower()}"
+    )
     return SimpleUploadedFile(name, content.getvalue(), content_type=mime_type)
 
 
@@ -63,9 +65,7 @@ class AdditionClassificationAPITests(APITestCase):
             role=User.Role.CLIENT,
             is_active=True,
         )
-        market_classification = MarketClassification.objects.create(
-            name="مطعم"
-        )
+        market_classification = MarketClassification.objects.create(name="مطعم")
         self.market = Market.objects.create(
             classification=market_classification,
             name="مطعم الاختبار",
@@ -78,9 +78,7 @@ class AdditionClassificationAPITests(APITestCase):
             market=self.market,
             subcategory=self.subcategory,
         )
-        category_classification = CategoryClassification.objects.create(
-            name="وجبات"
-        )
+        category_classification = CategoryClassification.objects.create(name="وجبات")
         self.category = ProductCategory.objects.create(
             classification=category_classification,
             name="وجبات رئيسية",
@@ -107,9 +105,7 @@ class AdditionClassificationAPITests(APITestCase):
 
     def authenticate(self, user):
         refresh = RefreshToken.for_user(user)
-        self.client.credentials(
-            HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
-        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
     def test_addition_classification_create_requires_authentication(self):
         response = self.client.post(
@@ -139,9 +135,7 @@ class AdditionClassificationAPITests(APITestCase):
             unit_price=Decimal("100.00"),
         )
 
-        response = self.client.delete(
-            f"{CATALOG_BASE}/products/{self.product.id}/"
-        )
+        response = self.client.delete(f"{CATALOG_BASE}/products/{self.product.id}/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["action"], "archived")
@@ -150,17 +144,13 @@ class AdditionClassificationAPITests(APITestCase):
         self.assertIsNotNone(self.product.archived_at)
 
         current_response = self.client.get(f"{CATALOG_BASE}/products/")
-        archived_response = self.client.get(
-            f"{CATALOG_BASE}/products/?archived=true"
-        )
+        archived_response = self.client.get(f"{CATALOG_BASE}/products/?archived=true")
         self.assertNotIn(
             self.product.id,
             [item["id"] for item in current_response.data],
         )
         archived_product = next(
-            item
-            for item in archived_response.data
-            if item["id"] == self.product.id
+            item for item in archived_response.data if item["id"] == self.product.id
         )
         self.assertEqual(archived_product["deletion_mode"], "archive")
 
@@ -196,9 +186,7 @@ class AdditionClassificationAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["name"], "صلصات")
-        self.assertTrue(
-            AdditionClassification.objects.filter(name="صلصات").exists()
-        )
+        self.assertTrue(AdditionClassification.objects.filter(name="صلصات").exists())
 
     def test_admin_can_list_addition_classifications(self):
         sauce = AdditionClassification.objects.create(name="صلصات")
@@ -251,7 +239,9 @@ class AdditionClassificationAPITests(APITestCase):
         response = self.client.get(f"{CATALOG_BASE}/products/likes/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual([product["id"] for product in response.data], [self.product.id])
+        self.assertEqual(
+            [product["id"] for product in response.data], [self.product.id]
+        )
         product = response.data[0]
         self.assertIn("market", product)
         self.assertNotIn("category", product)
@@ -268,9 +258,7 @@ class AdditionClassificationAPITests(APITestCase):
     def test_product_like_requires_client_role(self):
         self.authenticate(self.admin)
 
-        response = self.client.post(
-            f"{CATALOG_BASE}/products/{self.product.id}/like/"
-        )
+        response = self.client.post(f"{CATALOG_BASE}/products/{self.product.id}/like/")
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
@@ -420,9 +408,7 @@ class AdditionClassificationAPITests(APITestCase):
 
     def test_admin_can_create_read_update_and_delete_product_category(self):
         classification = CategoryClassification.objects.create(name="مشروبات")
-        updated_classification = CategoryClassification.objects.create(
-            name="حلويات"
-        )
+        updated_classification = CategoryClassification.objects.create(name="حلويات")
         self.authenticate(self.admin)
 
         create_response = self.client.post(
@@ -768,10 +754,18 @@ class AdditionClassificationAPITests(APITestCase):
         self.assertEqual(product.variants.count(), 4)
         self.assertEqual(
             list(product.variants.order_by("price").values_list("price", flat=True)),
-            [Decimal("100.00"), Decimal("110.00"), Decimal("120.00"), Decimal("130.00")],
+            [
+                Decimal("100.00"),
+                Decimal("110.00"),
+                Decimal("120.00"),
+                Decimal("130.00"),
+            ],
         )
         self.assertTrue(
-            all(variant.attribute_values.count() == 2 for variant in product.variants.all())
+            all(
+                variant.attribute_values.count() == 2
+                for variant in product.variants.all()
+            )
         )
 
     def test_unavailable_draft_without_variants_is_created(self):
@@ -1036,9 +1030,7 @@ class AdditionClassificationAPITests(APITestCase):
 
     def test_admin_can_create_read_update_and_delete_product_addition(self):
         classification = AdditionClassification.objects.create(name="إضافات")
-        updated_classification = AdditionClassification.objects.create(
-            name="صلصات"
-        )
+        updated_classification = AdditionClassification.objects.create(name="صلصات")
         self.authenticate(self.admin)
 
         create_response = self.client.post(
@@ -1134,9 +1126,7 @@ class ProductImageAPITests(APITestCase):
             subcategory=self.subcategory,
         )
         refresh = RefreshToken.for_user(self.admin)
-        self.client.credentials(
-            HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
-        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
     def create_product(self, name="Image product"):
         return Product.objects.create(
@@ -1152,9 +1142,7 @@ class ProductImageAPITests(APITestCase):
             "name": extra.pop("name", "Image product"),
             "description": "",
             "discount": "0.00",
-            "variants": json.dumps(
-                [{"price": "100.00", "sku": "IMAGE-BASE"}]
-            ),
+            "variants": json.dumps([{"price": "100.00", "sku": "IMAGE-BASE"}]),
             **extra,
         }
         if images is not None:
@@ -1235,7 +1223,9 @@ class ProductImageAPITests(APITestCase):
         selected = ProductImage.objects.get(pk=target["id"])
         self.assertTrue(selected.is_primary)
         self.assertEqual(product.image.name, selected.image.name)
-        self.assertEqual(ProductImage.objects.filter(product=product, is_primary=True).count(), 1)
+        self.assertEqual(
+            ProductImage.objects.filter(product=product, is_primary=True).count(), 1
+        )
 
     def test_delete_non_primary_then_primary_promotes_first_remaining(self):
         response = self.create_product_response(

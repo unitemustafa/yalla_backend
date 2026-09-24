@@ -92,9 +92,9 @@ def _notify_partner_approval(application_id, *, reraise=False):
                 "business_name": application.business_name,
             },
         )
-        from notifications.push import send_notification_push
+        from notifications.tasks import send_notification_push_task
 
-        send_notification_push(
+        send_notification_push_task.delay(
             notification.id,
             high_priority=True,
             android_channel_id="partner_updates",
@@ -223,16 +223,12 @@ class AdminPartnerApplicationDetailView(APIView):
         )
 
         if next_status in final_statuses:
-            transaction.on_commit(
-                lambda: _resolve_partner_notification(application.id)
-            )
+            transaction.on_commit(lambda: _resolve_partner_notification(application.id))
         if (
             next_status == PartnerApplication.Status.APPROVED
             and previous_status != next_status
         ):
-            transaction.on_commit(
-                lambda: _notify_partner_approval(application.id)
-            )
+            transaction.on_commit(lambda: _notify_partner_approval(application.id))
 
         application.refresh_from_db()
         return Response(

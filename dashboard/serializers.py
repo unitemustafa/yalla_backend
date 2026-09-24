@@ -63,9 +63,7 @@ class DashboardSettingsSerializer(serializers.ModelSerializer):
 
     def validate_font_family(self, value):
         if value not in DASHBOARD_FONT_CHOICES:
-            raise serializers.ValidationError(
-                "Unsupported font family."
-            )
+            raise serializers.ValidationError("Unsupported font family.")
         return value
 
     def validate_brand_name(self, value):
@@ -87,9 +85,7 @@ class DashboardSettingsSerializer(serializers.ModelSerializer):
                 "Upload a valid dashboard logo: JPG, JPEG, PNG, or WEBP."
             )
         if value.size > DASHBOARD_LOGO_MAX_SIZE:
-            raise serializers.ValidationError(
-                "Dashboard logo must be 5 MB or smaller."
-            )
+            raise serializers.ValidationError("Dashboard logo must be 5 MB or smaller.")
         return validate_safe_image(value)
 
     def update(self, instance, validated_data):

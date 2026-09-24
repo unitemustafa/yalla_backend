@@ -6,7 +6,6 @@ from rest_framework import serializers
 from config.image_validation import validate_safe_image
 from config.media_cleanup import (
     delete_storage_file_if_unreferenced,
-    schedule_storage_cleanup,
 )
 
 from .models import Product, ProductImage
@@ -33,16 +32,14 @@ def validate_product_image_upload(value):
     if content_type not in PRODUCT_IMAGE_ALLOWED_CONTENT_TYPES:
         raise serializers.ValidationError("Unsupported product image type.")
     if value.size > PRODUCT_IMAGE_MAX_SIZE:
-        raise serializers.ValidationError(
-            "Product images must be 5 MB or smaller."
-        )
+        raise serializers.ValidationError("Product images must be 5 MB or smaller.")
     return validate_safe_image(value)
 
 
 def _sync_legacy_image(product):
-    primary = product.images.filter(is_primary=True).order_by(
-        "sort_order", "id"
-    ).first()
+    primary = (
+        product.images.filter(is_primary=True).order_by("sort_order", "id").first()
+    )
     if primary is None:
         primary = product.images.order_by("sort_order", "id").first()
         if primary is not None:
@@ -92,11 +89,9 @@ def add_product_images(product_id, uploads, primary_index=None):
                     is_primary=True,
                 ).update(is_primary=False)
 
-            max_order = (
-                ProductImage.objects.filter(product=product).aggregate(
-                    value=Max("sort_order")
-                )["value"]
-            )
+            max_order = ProductImage.objects.filter(product=product).aggregate(
+                value=Max("sort_order")
+            )["value"]
             next_order = 0 if max_order is None else max_order + 1
             created = []
             for index, upload in enumerate(uploads):
@@ -106,7 +101,9 @@ def add_product_images(product_id, uploads, primary_index=None):
                     is_primary=index == selected_index,
                     sort_order=next_order + index,
                 )
-                stored_files.append((product_image.image.storage, product_image.image.name))
+                stored_files.append(
+                    (product_image.image.storage, product_image.image.name)
+                )
                 created.append(product_image)
 
             _sync_legacy_image(product)
@@ -176,10 +173,14 @@ def reorder_product_images(product_id, image_ids):
 def clear_primary_product_image(product_id):
     with transaction.atomic():
         product = Product.objects.select_for_update().get(pk=product_id)
-        primary = ProductImage.objects.select_for_update().filter(
-            product=product,
-            is_primary=True,
-        ).first()
+        primary = (
+            ProductImage.objects.select_for_update()
+            .filter(
+                product=product,
+                is_primary=True,
+            )
+            .first()
+        )
         if primary is not None:
             primary.delete()
             _sync_legacy_image(product)

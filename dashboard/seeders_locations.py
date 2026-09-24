@@ -1,7 +1,4 @@
-from datetime import timedelta
-from decimal import Decimal
-
-from accounts.models import CourierProfile, OneTimePassword, User
+from accounts.models import CourierProfile, User
 from locations.models import Address, DeliveryArea, ServiceCity
 
 from .seed_constants import PASSWORD
@@ -351,4 +348,3 @@ class DemoLocationSeederMixin:
                 longitude="29.9700000",
             ),
         }
-

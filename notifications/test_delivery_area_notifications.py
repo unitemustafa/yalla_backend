@@ -62,7 +62,7 @@ class DeliveryAreaCreatedNotificationTests(APITestCase):
     def post_area(self, *, name="المعادي", fee="25.00", execute=True):
         with (
             patch(
-                "notifications.delivery_area_services.send_notification_push"
+                "notifications.tasks.send_notifications_multicast_batch_task.delay"
             ) as push,
             self.captureOnCommitCallbacks(execute=execute),
         ):
@@ -79,9 +79,7 @@ class DeliveryAreaCreatedNotificationTests(APITestCase):
         return response, push
 
     def area_notifications(self):
-        return Notification.objects.filter(
-            type=Notification.Type.DELIVERY_AREA_CREATED
-        )
+        return Notification.objects.filter(type=Notification.Type.DELIVERY_AREA_CREATED)
 
     def test_admin_endpoint_notifies_client_with_active_address_in_same_city(self):
         customer = self.create_user("eligible")
@@ -92,7 +90,7 @@ class DeliveryAreaCreatedNotificationTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         notification = self.area_notifications().get()
         self.assertEqual(notification.recipient, customer)
-        push.assert_called_once_with(notification.id)
+        push.assert_called_once_with([notification.id], high_priority=False)
 
     def test_client_with_address_in_another_city_is_not_notified(self):
         customer = self.create_user("other-city")
@@ -149,7 +147,9 @@ class DeliveryAreaCreatedNotificationTests(APITestCase):
         response, push = self.post_area()
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(self.area_notifications().filter(recipient=customer).count(), 1)
+        self.assertEqual(
+            self.area_notifications().filter(recipient=customer).count(), 1
+        )
         self.assertEqual(push.call_count, 1)
 
     def test_each_eligible_client_gets_one_notification(self):
@@ -165,7 +165,7 @@ class DeliveryAreaCreatedNotificationTests(APITestCase):
             set(self.area_notifications().values_list("recipient_id", flat=True)),
             {first.id, second.id},
         )
-        self.assertEqual(push.call_count, 2)
+        push.assert_called_once()
 
     def test_admin_and_courier_accounts_are_not_notified(self):
         courier = self.create_user("courier", User.Role.REPRESENTATIVE)
@@ -187,7 +187,7 @@ class DeliveryAreaCreatedNotificationTests(APITestCase):
         )
 
         with patch(
-            "notifications.delivery_area_services.send_notification_push"
+            "notifications.tasks.send_notifications_multicast_batch_task.delay"
         ) as push:
             response = self.client.patch(
                 f"{self.endpoint}{area.id}/",
@@ -278,7 +278,7 @@ class DeliveryAreaCreatedNotificationTests(APITestCase):
         initial_push.assert_called_once()
 
         with patch(
-            "notifications.delivery_area_services.send_notification_push"
+            "notifications.tasks.send_notifications_multicast_batch_task.delay"
         ) as retry_push:
             first = dispatch_delivery_area_created_notifications(area_id)
             second = dispatch_delivery_area_created_notifications(area_id)
@@ -290,7 +290,9 @@ class DeliveryAreaCreatedNotificationTests(APITestCase):
             ).count(),
             1,
         )
-        self.assertEqual(self.area_notifications().filter(recipient=customer).count(), 1)
+        self.assertEqual(
+            self.area_notifications().filter(recipient=customer).count(), 1
+        )
         retry_push.assert_not_called()
 
     def test_push_failure_does_not_fail_area_creation_or_in_app_notification(self):
@@ -299,7 +301,7 @@ class DeliveryAreaCreatedNotificationTests(APITestCase):
 
         with (
             patch(
-                "notifications.delivery_area_services.send_notification_push",
+                "notifications.tasks.send_notifications_multicast_batch_task.delay",
                 side_effect=RuntimeError("FCM unavailable"),
             ),
             self.captureOnCommitCallbacks(execute=True),
@@ -316,7 +318,9 @@ class DeliveryAreaCreatedNotificationTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(DeliveryArea.objects.filter(pk=response.data["id"]).exists())
-        self.assertEqual(self.area_notifications().filter(recipient=customer).count(), 1)
+        self.assertEqual(
+            self.area_notifications().filter(recipient=customer).count(), 1
+        )
 
     def test_notification_copy_and_payload_have_trimmed_fee_and_real_values(self):
         customer = self.create_user("payload")
@@ -355,10 +359,7 @@ class DeliveryAreaCreatedNotificationTests(APITestCase):
             last_seen_at=timezone.now(),
         )
 
-        with (
-            patch("notifications.push._send_tokens") as send_tokens,
-            self.captureOnCommitCallbacks(execute=True),
-        ):
+        with self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(
                 self.endpoint,
                 {
@@ -370,6 +371,12 @@ class DeliveryAreaCreatedNotificationTests(APITestCase):
             )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        from .push import send_notifications_push
+
+        with patch("notifications.push._send_tokens") as send_tokens:
+            send_notifications_push(
+                list(self.area_notifications().values_list("id", flat=True))
+            )
         send_tokens.assert_called_once()
         tokens, payload = send_tokens.call_args.args
         self.assertEqual(tokens, ["delivery-area-device-token"])

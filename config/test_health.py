@@ -12,16 +12,40 @@ class HealthEndpointTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
 
-    def test_readiness_checks_database(self):
-        response = self.client.get(reverse("readyz"))
+    def test_readiness_checks_database_and_redis(self):
+        with patch("config.health.check_redis_health", return_value=(True, 0.5, None)):
+            response = self.client.get(reverse("readyz"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["checks"], {"database": True})
+        self.assertEqual(
+            response.json()["checks"],
+            {"database": True, "redis": True},
+        )
 
     def test_readiness_returns_503_when_database_is_unavailable(self):
-        with patch("config.health.connection.cursor", side_effect=RuntimeError):
+        with (
+            patch("config.health.connection.cursor", side_effect=RuntimeError),
+            patch("config.health.check_redis_health", return_value=(True, 0.5, None)),
+        ):
             response = self.client.get(reverse("readyz"))
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["status"], "unavailable")
-        self.assertEqual(response.json()["checks"], {"database": False})
+        self.assertEqual(
+            response.json()["checks"],
+            {"database": False, "redis": True},
+        )
+
+    def test_readiness_returns_503_when_redis_is_unavailable(self):
+        with patch(
+            "config.health.check_redis_health",
+            return_value=(False, 1.0, "Connection error"),
+        ):
+            response = self.client.get(reverse("readyz"))
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["status"], "unavailable")
+        self.assertEqual(
+            response.json()["checks"],
+            {"database": True, "redis": False},
+        )

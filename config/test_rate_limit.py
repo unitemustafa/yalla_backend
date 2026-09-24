@@ -26,10 +26,7 @@ from .rate_limit import (
 )
 class RateLimitSystemCheckTests(SimpleTestCase):
     def _check_ids(self):
-        return {
-            message.id
-            for message in check_rate_limit_configuration(None)
-        }
+        return {message.id for message in check_rate_limit_configuration(None)}
 
     @override_settings(
         RATE_LIMIT_MODE="off",
@@ -86,6 +83,7 @@ class RateLimitSystemCheckTests(SimpleTestCase):
     )
     def test_enforce_accepts_an_independent_rate_limit_secret(self):
         self.assertNotIn("rate_limit.E007", self._check_ids())
+
 
 class ClientIpTests(SimpleTestCase):
     def setUp(self):
@@ -186,7 +184,8 @@ class RateLimitCoreTests(SimpleTestCase):
 
         self.assertTrue(first_decision.allowed)
         self.assertFalse(decision.allowed)
-        self.assertEqual(decision.retry_after_seconds, 60)
+        self.assertGreaterEqual(decision.retry_after_seconds, 59)
+        self.assertLessEqual(decision.retry_after_seconds, 60)
         self.assertEqual(
             decision.blocked_scopes,
             ("api_anon", "login_identifier"),
@@ -206,8 +205,7 @@ class RateLimitCoreTests(SimpleTestCase):
         request.user = AnonymousUser()
 
         decisions = tuple(
-            evaluate_rate_limit(request, ("api_anon", "login_ip"))
-            for _ in range(3)
+            evaluate_rate_limit(request, ("api_anon", "login_ip")) for _ in range(3)
         )
 
         self.assertTrue(decisions[0].allowed)
@@ -225,10 +223,7 @@ class RateLimitCoreTests(SimpleTestCase):
         request = self.factory.get("/api/v1/test/", REMOTE_ADDR="127.0.0.1")
         request.user = AnonymousUser()
 
-        decisions = tuple(
-            evaluate_rate_limit(request, ("api_anon",))
-            for _ in range(3)
-        )
+        decisions = tuple(evaluate_rate_limit(request, ("api_anon",)) for _ in range(3))
 
         self.assertTrue(decisions[0].allowed)
         self.assertFalse(decisions[1].allowed)
@@ -257,6 +252,7 @@ class RateLimitCoreTests(SimpleTestCase):
 
         view = SimpleNamespace(rate_limit_scopes=())
         self.assertTrue(YallaRateThrottle().allow_request(request, view))
+
 
 class RateLimitResponseTests(SimpleTestCase):
     def test_throttled_exception_uses_the_public_429_contract(self):

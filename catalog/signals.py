@@ -1,8 +1,8 @@
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
+from config.media_cleanup import schedule_storage_cleanup
 
 from .models import Product, ProductImage
-from .product_images import schedule_storage_cleanup
 
 
 @receiver(post_delete, sender=ProductImage)

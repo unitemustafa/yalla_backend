@@ -14,4 +14,5 @@ class HomeCampaignAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "media_type", "action_type")
     search_fields = ("internal_name", "teaser_text", "title")
 
+
 # Register your models here.

@@ -248,9 +248,7 @@ class SocialAuthenticationTests(APITestCase):
         pending = PendingRegistration.objects.get(email="social@example.com")
         self.assertEqual(pending.auth_provider, "facebook")
         self.assertEqual(pending.firebase_uid, "firebase-facebook-1")
-        self.assertFalse(
-            User.objects.filter(email="social@example.com").exists()
-        )
+        self.assertFalse(User.objects.filter(email="social@example.com").exists())
 
     def test_verifying_social_pending_registration_creates_identity(self):
         pending = PendingRegistration.objects.create(

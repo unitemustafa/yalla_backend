@@ -1,5 +1,4 @@
 from datetime import timedelta
-from decimal import Decimal
 
 from markets.models import Market
 from offers.models import Offer
@@ -44,7 +43,9 @@ class DemoOfferSeederMixin:
             created.products.set(
                 [context["products"][(market_name, name)] for name in product_names]
             )
-            created.service_cities.set([service_city] if service_city is not None else [])
+            created.service_cities.set(
+                [service_city] if service_city is not None else []
+            )
             if with_image:
                 self._attach_image(created, "image", f"seed_offer_{created.id}.png")
             context["offers"][title] = created

@@ -175,12 +175,8 @@ BODY_EXAMPLES: dict[tuple[str, str], dict[str, Any]] = {
         ("avatar", "{{sample_image_path}}", "file", True),
         ("remove_avatar", "false", "text", True),
     ),
-    ("DELETE", "/auth/client/profile/"): raw(
-        {"password": "{{client_password}}"}
-    ),
-    ("POST", "/auth/forgot-password/"): raw(
-        {"email": "{{client_email}}"}
-    ),
+    ("DELETE", "/auth/client/profile/"): raw({"password": "{{client_password}}"}),
+    ("POST", "/auth/forgot-password/"): raw({"email": "{{client_email}}"}),
     ("POST", "/auth/login/"): raw(
         {"identifier": "{{client_email}}", "password": "{{client_password}}"}
     ),
@@ -206,13 +202,9 @@ BODY_EXAMPLES: dict[tuple[str, str], dict[str, Any]] = {
         }
     ),
     ("POST", "/auth/logout/"): raw({"refreshToken": "{{refresh_token}}"}),
-    ("PATCH", "/auth/me/"): raw(
-        {"first_name": "Postman", "last_name": "Customer"}
-    ),
+    ("PATCH", "/auth/me/"): raw({"first_name": "Postman", "last_name": "Customer"}),
     ("POST", "/auth/refresh/"): raw({"refreshToken": "{{refresh_token}}"}),
-    ("POST", "/auth/resend-verification/"): raw(
-        {"email": "{{signup_email}}"}
-    ),
+    ("POST", "/auth/resend-verification/"): raw({"email": "{{signup_email}}"}),
     ("POST", "/auth/reset-password/"): raw(
         {
             "email": "{{client_email}}",
@@ -282,9 +274,7 @@ BODY_EXAMPLES: dict[tuple[str, str], dict[str, Any]] = {
     ("POST", "/catalog/category-options/"): raw(
         {"attribute_id": "{{attribute_id}}", "value": "Blue"}
     ),
-    ("PATCH", "/catalog/category-options/{option_id}/"): raw(
-        {"value": "Navy Blue"}
-    ),
+    ("PATCH", "/catalog/category-options/{option_id}/"): raw({"value": "Navy Blue"}),
     ("POST", "/catalog/product-additions/"): form(
         (
             "classification_id",
@@ -461,9 +451,7 @@ BODY_EXAMPLES: dict[tuple[str, str], dict[str, Any]] = {
         ("is_active", "true", "text", False),
         ("logo", "{{sample_image_path}}", "file", True),
     ),
-    ("PATCH", "/locations/shipping-companies/{company_id}/"): raw(
-        {"is_active": False}
-    ),
+    ("PATCH", "/locations/shipping-companies/{company_id}/"): raw({"is_active": False}),
     ("POST", "/locations/service-cities/"): raw(
         {
             "name": "Postman City {{run_suffix}}",
@@ -484,9 +472,7 @@ BODY_EXAMPLES: dict[tuple[str, str], dict[str, Any]] = {
             "is_active": True,
         }
     ),
-    ("PATCH", "/locations/service-cities/{city_id}/"): raw(
-        {"delivery_price": "40.00"}
-    ),
+    ("PATCH", "/locations/service-cities/{city_id}/"): raw({"delivery_price": "40.00"}),
     ("POST", "/market-region/detect/"): raw(
         {"latitude": "30.0444196", "longitude": "31.2357116"}
     ),
@@ -506,9 +492,7 @@ BODY_EXAMPLES: dict[tuple[str, str], dict[str, Any]] = {
     ("POST", "/offers/{offer_id}/image/"): form(
         ("image", "{{sample_image_path}}", "file", False),
     ),
-    ("POST", "/offers/{offer_id}/send-notification/"): raw(
-        {"request_id": "{{$guid}}"}
-    ),
+    ("POST", "/offers/{offer_id}/send-notification/"): raw({"request_id": "{{$guid}}"}),
     ("POST", "/orders/"): raw(
         {
             "user_id": "{{client_user_id}}",
@@ -589,12 +573,8 @@ QUERY_EXAMPLES: dict[tuple[str, str], list[dict[str, Any]]] = {
         {"key": "username", "value": "{{signup_username}}"},
         {"key": "exclude_user_id", "value": "{{user_id}}", "disabled": True},
     ],
-    ("GET", "/catalog/store-subcategories/"): [
-        {"key": "is_active", "value": "true"}
-    ],
-    ("GET", "/catalog/products/"): [
-        {"key": "archived", "value": "false"}
-    ],
+    ("GET", "/catalog/store-subcategories/"): [{"key": "is_active", "value": "true"}],
+    ("GET", "/catalog/products/"): [{"key": "archived", "value": "false"}],
     ("GET", "/home/market-types/"): [
         {"key": "classification_id", "value": "{{market_classification_id}}"}
     ],
@@ -624,9 +604,7 @@ QUERY_EXAMPLES: dict[tuple[str, str], list[dict[str, Any]]] = {
         {"key": "longitude", "value": "31.2357116"},
         {"key": "lang", "value": "en"},
     ],
-    ("GET", "/locations/service-cities/"): [
-        {"key": "archived", "value": "false"}
-    ],
+    ("GET", "/locations/service-cities/"): [{"key": "archived", "value": "false"}],
     ("GET", "/locations/shipping-companies/"): [
         {"key": "service_city_id", "value": "{{service_city_id}}"},
         {"key": "archived", "value": "false", "disabled": True},
@@ -643,12 +621,8 @@ QUERY_EXAMPLES: dict[tuple[str, str], list[dict[str, Any]]] = {
         {"key": "is_resolved", "value": "false", "disabled": True},
     ],
     ("GET", "/offers/"): [{"key": "archived", "value": "false"}],
-    ("GET", "/orders/"): [
-        {"key": "status", "value": "pending", "disabled": True}
-    ],
-    ("GET", "/orders/my/"): [
-        {"key": "status", "value": "pending", "disabled": True}
-    ],
+    ("GET", "/orders/"): [{"key": "status", "value": "pending", "disabled": True}],
+    ("GET", "/orders/my/"): [{"key": "status", "value": "pending", "disabled": True}],
     ("GET", "/courier/orders/"): [
         {"key": "status", "value": "assigned", "disabled": True}
     ],
@@ -1043,7 +1017,9 @@ def folder_for(method: str, path: str) -> tuple[str, str]:
     if path.startswith("/auth/users/") or path == "/auth/representatives/":
         return "02 Admin Users", "Users & Representatives"
     if path.startswith("/auth/"):
-        if path.startswith(("/auth/signup/", "/auth/verify-email/", "/auth/resend-verification/")):
+        if path.startswith(
+            ("/auth/signup/", "/auth/verify-email/", "/auth/resend-verification/")
+        ):
             return "01 Authentication", "Registration"
         if path.startswith(("/auth/forgot-password/", "/auth/reset-password/")):
             return "01 Authentication", "Password Recovery"
@@ -1103,21 +1079,25 @@ def human_request_name(method: str, path: str) -> str:
         return override
     segments = []
     for segment in path.strip("/").split("/"):
-        if segment in {
-            "auth",
-            "catalog",
-            "home",
-            "locations",
-            "orders",
-            "offers",
-            "notifications",
-            "partners",
-            "courier",
-            "dashboard",
-            "addresses",
-            "admin",
-            "market-region",
-        } and not segments:
+        if (
+            segment
+            in {
+                "auth",
+                "catalog",
+                "home",
+                "locations",
+                "orders",
+                "offers",
+                "notifications",
+                "partners",
+                "courier",
+                "dashboard",
+                "addresses",
+                "admin",
+                "market-region",
+            }
+            and not segments
+        ):
             continue
         match = re.fullmatch(r"\{(.+)}", segment)
         if match:
@@ -1270,7 +1250,9 @@ def capture_script(method: str, path: str) -> list[str]:
 
 def operation_description(method: str, path: str, operation: dict[str, Any]) -> str:
     role = role_for(method, path)
-    response_codes = ", ".join(operation.get("responses", {}).keys()) or "runtime-defined"
+    response_codes = (
+        ", ".join(operation.get("responses", {}).keys()) or "runtime-defined"
+    )
     parts = [
         f"Access: {role}.",
         f"Documented response codes: {response_codes}.",
@@ -1282,7 +1264,9 @@ def operation_description(method: str, path: str, operation: dict[str, Any]) -> 
             "Client account deletion also requires allow_account_deletion=true."
         )
     if path.endswith(("/{market_id}/", "/{product_id}/", "/{offer_id}/")):
-        parts.append('Archived resources can be restored with PATCH body {"restore": true}.')
+        parts.append(
+            'Archived resources can be restored with PATCH body {"restore": true}.'
+        )
     body = BODY_EXAMPLES.get((method, path))
     if body and body.get("mode") == "formdata":
         parts.append(
@@ -1405,7 +1389,9 @@ def system_items() -> list[dict[str, Any]]:
         system_request("GET · Privacy policy", "/privacy/", accept="text/html"),
         system_request("GET · Terms of use", "/terms/", accept="text/html"),
         system_request(
-            "GET · Account deletion instructions", "/account-deletion/", accept="text/html"
+            "GET · Account deletion instructions",
+            "/account-deletion/",
+            accept="text/html",
         ),
         system_request(
             "GET · Product share page",
@@ -1584,7 +1570,9 @@ def subgroup_sort_key(folder: str, subgroup: str) -> tuple[int, str]:
         return len(configured), subgroup
 
 
-def build_collection(schema: dict[str, Any]) -> tuple[dict[str, Any], set[tuple[str, str]]]:
+def build_collection(
+    schema: dict[str, Any],
+) -> tuple[dict[str, Any], set[tuple[str, str]]]:
     groups, discovered = api_groups(schema)
     groups["01 Authentication"]["Negative Security Scenarios"] = []
 
@@ -1666,9 +1654,7 @@ def validate_contract(discovered: set[tuple[str, str]]) -> None:
         for operation in discovered
         if operation[0] in {"POST", "PUT", "PATCH"}
     }
-    missing_bodies = sorted(
-        mutations - set(BODY_EXAMPLES) - EMPTY_BODY_OPERATIONS
-    )
+    missing_bodies = sorted(mutations - set(BODY_EXAMPLES) - EMPTY_BODY_OPERATIONS)
     if missing_bodies:
         formatted = "\n".join(f"{method} {path}" for method, path in missing_bodies)
         raise RuntimeError(f"Mutation examples are missing:\n{formatted}")
@@ -1691,8 +1677,7 @@ def validate_contract(discovered: set[tuple[str, str]]) -> None:
         only_v2 = sorted(discovered - v1_operations)
         only_v1 = sorted(v1_operations - discovered)
         raise RuntimeError(
-            "v1/v2 operation mismatch. "
-            f"Only v2: {only_v2}; only v1: {only_v1}"
+            f"v1/v2 operation mismatch. Only v2: {only_v2}; only v1: {only_v1}"
         )
 
 
@@ -1726,10 +1711,14 @@ def validate_collection(collection: dict[str, Any]) -> None:
         item["name"]
         for item in requests
         if item["request"]["method"] == "DELETE"
-        and not any(entry.get("listen") == "prerequest" for entry in item.get("event", []))
+        and not any(
+            entry.get("listen") == "prerequest" for entry in item.get("event", [])
+        )
     ]
     if unguarded_deletes:
-        raise RuntimeError(f"DELETE requests are missing safety guards: {unguarded_deletes}")
+        raise RuntimeError(
+            f"DELETE requests are missing safety guards: {unguarded_deletes}"
+        )
 
 
 def main() -> None:

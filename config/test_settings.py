@@ -8,8 +8,7 @@ os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["APP_ENV"] = "test"
 os.environ["DEBUG"] = "True"
 os.environ["SECRET_KEY"] = (
-    "yalla-test-only-secret-key-2026-"
-    "never-use-this-value-in-production"
+    "yalla-test-only-secret-key-2026-never-use-this-value-in-production"
 )
 
 from .settings import *  # noqa: F401,F403,E402
@@ -29,6 +28,17 @@ ALLOWED_HOSTS = [
 ]
 
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "yalla-test-default",
+    },
+    "geocoding": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "yalla-test-geocoding",
+    },
+}
 
 # Rate limiter behavior has focused unit tests. Keep unrelated endpoint suites
 # independent from process-local limiter state.
@@ -64,8 +74,14 @@ STORAGES = {
         "BACKEND": "config.media.OptimizedPublicMediaStorage",
     },
     "staticfiles": {
-        "BACKEND": (
-            "django.contrib.staticfiles.storage.StaticFilesStorage"
-        ),
+        "BACKEND": ("django.contrib.staticfiles.storage.StaticFilesStorage"),
     },
 }
+
+# Unit tests call task.apply() explicitly when task execution is under test.
+# Application tests enqueue to an in-memory broker so they exercise the real
+# asynchronous boundary without contacting Redis or external providers.
+CELERY_BROKER_URL = "memory://"
+CELERY_RESULT_BACKEND = "cache+memory://"
+CELERY_TASK_ALWAYS_EAGER = False
+CELERY_TASK_EAGER_PROPAGATES = True

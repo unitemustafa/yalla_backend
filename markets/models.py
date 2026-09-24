@@ -1,7 +1,17 @@
 from decimal import Decimal
 
 from django.db import models
-from django.db.models import Count, DecimalField, Exists, ExpressionWrapper, F, Min, OuterRef, Q, Value
+from django.db.models import (
+    Count,
+    DecimalField,
+    Exists,
+    ExpressionWrapper,
+    F,
+    Min,
+    OuterRef,
+    Q,
+    Value,
+)
 from django.db.models.functions import Lower
 
 
@@ -149,7 +159,9 @@ class Market(models.Model):
         choices=Scope.choices,
         default=Scope.SERVICE_CITY,
     )
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.ACTIVE
+    )
     is_popular = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

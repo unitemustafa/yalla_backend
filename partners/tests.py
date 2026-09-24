@@ -80,7 +80,7 @@ class PartnerApplicationApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(PartnerApplication.objects.count(), 1)
 
-    @patch("notifications.push.send_notification_push")
+    @patch("notifications.tasks.send_notification_push_task.delay")
     def test_admin_can_list_and_approve_application(self, send_push):
         create_response = self.create_application()
         application_id = create_response.data["id"]
@@ -165,7 +165,7 @@ class PartnerApplicationApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], PartnerApplication.Status.IN_REVIEW)
 
-    @patch("notifications.push.send_notification_push")
+    @patch("notifications.tasks.send_notification_push_task.delay")
     def test_rejection_does_not_notify_the_applicant(self, send_push):
         application_id = self.create_application().data["id"]
         self.client.force_authenticate(self.admin_user)

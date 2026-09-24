@@ -13,7 +13,10 @@ from functools import lru_cache, wraps
 
 from django.conf import settings
 from django.http import JsonResponse
+from redis.exceptions import ConnectionError, RedisError, TimeoutError
 from rest_framework.throttling import BaseThrottle
+
+from .redis_client import get_redis_client
 
 
 logger = logging.getLogger(__name__)
@@ -79,17 +82,11 @@ POLICIES = {
     "signup_email": PolicyDefinition("sliding", "identifier", ("email",)),
     "availability_ip": PolicyDefinition("fixed", "ip"),
     "otp_send_ip": PolicyDefinition("sliding", "ip"),
-    "otp_send_identifier": PolicyDefinition(
-        "sliding", "identifier", ("email",)
-    ),
+    "otp_send_identifier": PolicyDefinition("sliding", "identifier", ("email",)),
     "otp_verify_ip": PolicyDefinition("sliding", "ip"),
-    "otp_verify_identifier": PolicyDefinition(
-        "sliding", "identifier", ("email",)
-    ),
+    "otp_verify_identifier": PolicyDefinition("sliding", "identifier", ("email",)),
     "refresh_ip": PolicyDefinition("sliding", "ip"),
-    "refresh_token": PolicyDefinition(
-        "sliding", "token", ("refreshToken", "refresh")
-    ),
+    "refresh_token": PolicyDefinition("sliding", "token", ("refreshToken", "refresh")),
     "order_preview_user": PolicyDefinition("fixed", "user"),
     "order_create_user": PolicyDefinition("sliding", "user"),
     "upload_user": PolicyDefinition("sliding", "user"),
@@ -113,6 +110,11 @@ def _clear_rate_limit_state():
         _fixed_windows.clear()
         _sliding_windows.clear()
         _last_cleanup_ms = 0
+    try:
+        client = get_redis_client("rate_limit")
+        client.flushdb()
+    except Exception:
+        pass
 
 
 def _cleanup_rate_limit_state(now_ms):
@@ -260,9 +262,7 @@ def parse_rate(value):
     if not match:
         raise ValueError(f"Invalid rate limit value: {value!r}")
     count = int(match.group("count"))
-    window_ms = (
-        int(match.group("amount")) * WINDOW_UNITS_MS[match.group("unit")]
-    )
+    window_ms = int(match.group("amount")) * WINDOW_UNITS_MS[match.group("unit")]
     return count, window_ms
 
 
@@ -280,9 +280,7 @@ def scopes_for_request(request, view=None, explicit_scopes=()):
     if view is not None:
         configured = getattr(view, "rate_limit_scopes", ())
         if isinstance(configured, dict):
-            configured = configured.get(
-                request.method.upper(), configured.get("*", ())
-            )
+            configured = configured.get(request.method.upper(), configured.get("*", ()))
     scopes.extend(configured or ())
 
     content_type = str(getattr(request, "content_type", "") or "").lower()
@@ -323,8 +321,105 @@ def build_rules(request, scopes, mode):
     return tuple(rules)
 
 
-def _evaluate_rules(rules):
-    now_ms = int(time.monotonic() * 1000)
+RATE_LIMIT_LUA_SCRIPT = """
+local now_ms = tonumber(ARGV[1])
+local num_rules = tonumber(ARGV[2])
+
+local failed_scopes = {}
+local max_wait_ms = 0
+local arg_idx = 3
+
+for i = 1, num_rules do
+    local key = KEYS[i]
+    local algo = ARGV[arg_idx]
+    local limit = tonumber(ARGV[arg_idx + 1])
+    local window_ms = tonumber(ARGV[arg_idx + 2])
+    local scope = ARGV[arg_idx + 3]
+    arg_idx = arg_idx + 4
+
+    if algo == 'fixed' then
+        local data = redis.call('HMGET', key, 'count', 'reset_ms')
+        local count = tonumber(data[1]) or 0
+        local reset_ms = tonumber(data[2]) or 0
+        if reset_ms <= now_ms then
+            count = 0
+            reset_ms = now_ms + window_ms
+        end
+        if count >= limit then
+            table.insert(failed_scopes, scope)
+            local wait_ms = reset_ms - now_ms
+            if wait_ms > max_wait_ms then max_wait_ms = wait_ms end
+        end
+    else
+        local cutoff = now_ms - window_ms
+        redis.call('ZREMRANGEBYSCORE', key, '-inf', cutoff)
+        local count = redis.call('ZCARD', key)
+        if count >= limit then
+            table.insert(failed_scopes, scope)
+            local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+            local wait_ms = 1000
+            if oldest and #oldest >= 2 then
+                local oldest_ts = tonumber(oldest[2]) or (now_ms - window_ms)
+                wait_ms = oldest_ts + window_ms - now_ms
+            end
+            if wait_ms > max_wait_ms then max_wait_ms = wait_ms end
+        end
+    end
+end
+
+if #failed_scopes > 0 then
+    local retry_after = math.max(1, math.ceil(max_wait_ms / 1000))
+    return {0, retry_after, table.concat(failed_scopes, ',')}
+end
+
+arg_idx = 3
+for i = 1, num_rules do
+    local key = KEYS[i]
+    local algo = ARGV[arg_idx]
+    local limit = tonumber(ARGV[arg_idx + 1])
+    local window_ms = tonumber(ARGV[arg_idx + 2])
+    local scope = ARGV[arg_idx + 3]
+    arg_idx = arg_idx + 4
+
+    if algo == 'fixed' then
+        local data = redis.call('HMGET', key, 'count', 'reset_ms')
+        local count = tonumber(data[1]) or 0
+        local reset_ms = tonumber(data[2]) or 0
+        if reset_ms <= now_ms then
+            count = 0
+            reset_ms = now_ms + window_ms
+        end
+        redis.call('HMSET', key, 'count', count + 1, 'reset_ms', reset_ms)
+        local ttl = math.max(1, reset_ms - now_ms)
+        redis.call('PEXPIRE', key, ttl)
+    else
+        local seq = redis.call('INCR', key .. ':seq')
+        local member = tostring(now_ms) .. ':' .. tostring(seq)
+        redis.call('ZADD', key, now_ms, member)
+        redis.call('PEXPIRE', key, window_ms + 1000)
+        redis.call('PEXPIRE', key .. ':seq', window_ms + 1000)
+    end
+end
+
+return {1, 0, ''}
+"""
+
+_lua_script_obj = None
+_lua_script_client_id = None
+
+
+def _get_rate_limit_script(client):
+    global _lua_script_obj, _lua_script_client_id
+    client_pool_id = id(client.connection_pool)
+    if _lua_script_obj is None or _lua_script_client_id != client_pool_id:
+        _lua_script_obj = client.register_script(RATE_LIMIT_LUA_SCRIPT)
+        _lua_script_client_id = client_pool_id
+    return _lua_script_obj
+
+
+def _evaluate_rules_local(rules, now_ms=None):
+    if now_ms is None:
+        now_ms = int(time.monotonic() * 1000)
     with _state_lock:
         _cleanup_rate_limit_state(now_ms)
         fixed_snapshots = {}
@@ -377,6 +472,72 @@ def _evaluate_rules(rules):
         return RateLimitDecision(allowed=True)
 
 
+def _evaluate_rules_redis(rules, now_ms):
+    client = get_redis_client("rate_limit")
+    keys = [rule.key for rule in rules]
+    args = [now_ms, len(rules)]
+    for rule in rules:
+        args.extend([rule.algorithm, rule.limit, rule.window_ms, rule.scope])
+
+    script = _get_rate_limit_script(client)
+    res = script(keys=keys, args=args)
+    allowed = bool(res[0])
+    retry_after = int(res[1])
+    raw_scopes = res[2]
+    if isinstance(raw_scopes, bytes):
+        raw_scopes = raw_scopes.decode("utf-8")
+    blocked = tuple(dict.fromkeys(s for s in raw_scopes.split(",") if s))
+    return RateLimitDecision(
+        allowed=allowed,
+        retry_after_seconds=retry_after,
+        blocked_scopes=blocked,
+    )
+
+
+def _evaluate_rules(rules):
+    now_ms = int(time.monotonic() * 1000)
+    use_redis = getattr(settings, "REDIS_RATE_LIMIT_ENABLED", True)
+    if not use_redis:
+        return _evaluate_rules_local(rules, now_ms)
+
+    try:
+        return _evaluate_rules_redis(rules, now_ms)
+    except (RedisError, ConnectionError, TimeoutError, OSError, Exception) as exc:
+        fail_closed_scopes = set(
+            getattr(
+                settings,
+                "RATE_LIMIT_FAIL_CLOSED_SCOPES",
+                (
+                    "admin_login_ip",
+                    "admin_login_identifier",
+                    "otp_verify_ip",
+                    "otp_verify_identifier",
+                ),
+            )
+        )
+        blocked_fail_closed = [
+            rule.scope for rule in rules if rule.scope in fail_closed_scopes
+        ]
+        if blocked_fail_closed:
+            logger.error(
+                "redis_rate_limit_unavailable_fail_closed scopes=%s error=%s",
+                blocked_fail_closed,
+                exc,
+            )
+            return RateLimitDecision(
+                allowed=False,
+                retry_after_seconds=60,
+                blocked_scopes=tuple(dict.fromkeys(blocked_fail_closed)),
+            )
+
+        logger.warning(
+            "redis_rate_limit_unavailable_fail_open scopes=%s error=%s; fallback_to_local",
+            [r.scope for r in rules],
+            exc,
+        )
+        return _evaluate_rules_local(rules, now_ms)
+
+
 def _should_log():
     rate = float(getattr(settings, "RATE_LIMIT_LOG_SAMPLE_RATE", 0.1))
     return rate >= 1 or (rate > 0 and random.random() < rate)
@@ -387,9 +548,7 @@ def evaluate_rate_limit(request, scopes):
     if mode == "off" or is_rate_limit_exempt(request):
         return RateLimitDecision(allowed=True)
     if mode == "enforce":
-        enabled_scopes = tuple(
-            getattr(settings, "RATE_LIMIT_ENFORCE_SCOPES", ())
-        )
+        enabled_scopes = tuple(getattr(settings, "RATE_LIMIT_ENFORCE_SCOPES", ()))
         if enabled_scopes:
             scopes = tuple(scope for scope in scopes if scope in enabled_scopes)
     rules = build_rules(request, scopes, mode)
@@ -450,9 +609,7 @@ def rate_limit_view(*explicit_scopes):
                 },
                 status=429,
             )
-            response.headers["Retry-After"] = str(
-                decision.retry_after_seconds
-            )
+            response.headers["Retry-After"] = str(decision.retry_after_seconds)
             return response
 
         return wrapped

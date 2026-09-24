@@ -280,13 +280,61 @@ class UserLocationSeederMixin:
                 "وسط القاهرة",
                 True,
             ),
-            (users["seed.sara@yalla.test"], "المنزل", "31.2140000", "29.9540000", "الإسكندرية", "سموحة", True),
-            (users["seed.sara@yalla.test"], "الجامعة", "31.2188000", "29.9423000", "الإسكندرية", "سيدي جابر", False),
-            (users["seed.nadir@yalla.test"], "المنزل", "31.0379000", "31.3576000", "المنصورة", "حي الجامعة", True),
-            (users["seed.courier2@yalla.test"], "منطقة الطيار", "29.9888000", "31.1477000", "الجيزة", "الهرم", True),
-            (users["seed.courier3@yalla.test"], "منطقة الطيار", "31.2140000", "29.9540000", "الإسكندرية", "سموحة", True),
+            (
+                users["seed.sara@yalla.test"],
+                "المنزل",
+                "31.2140000",
+                "29.9540000",
+                "الإسكندرية",
+                "سموحة",
+                True,
+            ),
+            (
+                users["seed.sara@yalla.test"],
+                "الجامعة",
+                "31.2188000",
+                "29.9423000",
+                "الإسكندرية",
+                "سيدي جابر",
+                False,
+            ),
+            (
+                users["seed.nadir@yalla.test"],
+                "المنزل",
+                "31.0379000",
+                "31.3576000",
+                "المنصورة",
+                "حي الجامعة",
+                True,
+            ),
+            (
+                users["seed.courier2@yalla.test"],
+                "منطقة الطيار",
+                "29.9888000",
+                "31.1477000",
+                "الجيزة",
+                "الهرم",
+                True,
+            ),
+            (
+                users["seed.courier3@yalla.test"],
+                "منطقة الطيار",
+                "31.2140000",
+                "29.9540000",
+                "الإسكندرية",
+                "سموحة",
+                True,
+            ),
         ]
-        for user, name, latitude, longitude, city_name, area_name, is_default in addresses:
+        for (
+            user,
+            name,
+            latitude,
+            longitude,
+            city_name,
+            area_name,
+            is_default,
+        ) in addresses:
             delivery_area = areas[area_name]
             Address.objects.update_or_create(
                 user=user,
@@ -319,7 +367,14 @@ class UserLocationSeederMixin:
 
     def _seed_courier_profiles(self, users, areas):
         definitions = [
-            ("seed.courier@yalla.test", "Motorcycle", "YH-1004", "وسط القاهرة", 3, True),
+            (
+                "seed.courier@yalla.test",
+                "Motorcycle",
+                "YH-1004",
+                "وسط القاهرة",
+                3,
+                True,
+            ),
             ("seed.courier2@yalla.test", "Scooter", "YH-1008", "الهرم", 4, True),
             ("seed.courier3@yalla.test", "Car", "YH-1009", "سموحة", 5, False),
         ]
@@ -335,4 +390,3 @@ class UserLocationSeederMixin:
                     "is_available": available,
                 },
             )
-

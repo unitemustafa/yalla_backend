@@ -19,6 +19,8 @@ TARGET_FIELDS = {
     HomeCampaign.ActionType.MARKET: "target_market",
     HomeCampaign.ActionType.PRODUCT_CATEGORY: "target_product_category",
 }
+
+
 class AdminHomeCampaignSerializer(serializers.ModelSerializer):
     effective_status = serializers.SerializerMethodField()
     service_city_id = serializers.PrimaryKeyRelatedField(
@@ -213,15 +215,22 @@ class AdminHomeCampaignSerializer(serializers.ModelSerializer):
         sheet_image = attrs.get(
             "sheet_image", getattr(instance, "sheet_image", None) if instance else None
         )
-        video = attrs.get("video", getattr(instance, "video", None) if instance else None)
+        video = attrs.get(
+            "video", getattr(instance, "video", None) if instance else None
+        )
         poster = attrs.get(
-            "video_poster", getattr(instance, "video_poster", None) if instance else None
+            "video_poster",
+            getattr(instance, "video_poster", None) if instance else None,
         )
         if is_active and media_type == HomeCampaign.MediaType.IMAGE and not sheet_image:
             raise serializers.ValidationError(
                 {"media_type": "Upload the campaign image before activation."}
             )
-        if is_active and media_type == HomeCampaign.MediaType.VIDEO and not (video and poster):
+        if (
+            is_active
+            and media_type == HomeCampaign.MediaType.VIDEO
+            and not (video and poster)
+        ):
             raise serializers.ValidationError(
                 {"media_type": "Upload the MP4 video and poster before activation."}
             )

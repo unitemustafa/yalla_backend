@@ -222,9 +222,7 @@ class OrderAPITests(APITestCase):
         for user in (self.customer, self.representative, self.admin):
             self.client.force_authenticate(user)
             for endpoint, stored_name in endpoints:
-                response = self.client.get(
-                    f"{ORDERS_BASE}/{order.id}/{endpoint}/"
-                )
+                response = self.client.get(f"{ORDERS_BASE}/{order.id}/{endpoint}/")
                 self.assertEqual(response.status_code, status.HTTP_200_OK)
                 self.assertEqual(response["Cache-Control"], "private, no-store")
                 self.assertEqual(
@@ -233,9 +231,7 @@ class OrderAPITests(APITestCase):
                 )
 
         self.client.force_authenticate(self.other_customer)
-        forbidden = self.client.get(
-            f"{ORDERS_BASE}/{order.id}/delivery-proof/"
-        )
+        forbidden = self.client.get(f"{ORDERS_BASE}/{order.id}/delivery-proof/")
         self.assertEqual(forbidden.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_order_serializer_exposes_only_protected_media_endpoints(self):
@@ -402,8 +398,10 @@ class OrderAPITests(APITestCase):
         )
         self.assertEqual(valid_response.status_code, status.HTTP_201_CREATED)
 
-    @patch("notifications.order_services.send_notification_push")
-    def test_multi_market_creation_creates_one_parent_lifecycle_notification(self, send_push):
+    @patch("notifications.tasks.send_notification_push_task.delay")
+    def test_multi_market_creation_creates_one_parent_lifecycle_notification(
+        self, send_push
+    ):
         self.authenticate_customer()
         payload = {
             "address_id": self.address.id,
@@ -438,8 +436,10 @@ class OrderAPITests(APITestCase):
             android_channel_id="order_updates",
         )
 
-    @patch("notifications.order_services.send_notification_push")
-    def test_real_order_transitions_create_idempotent_client_notifications(self, send_push):
+    @patch("notifications.tasks.send_notification_push_task.delay")
+    def test_real_order_transitions_create_idempotent_client_notifications(
+        self, send_push
+    ):
         self.authenticate_customer()
         with self.captureOnCommitCallbacks(execute=True):
             created = self.client.post(
@@ -478,7 +478,9 @@ class OrderAPITests(APITestCase):
                 {"status": Order.Status.FAILED_DELIVERY, "delivery_note": "No answer"},
                 format="json",
             )
-        before_repeat = Notification.objects.filter(order=order, recipient=self.customer).count()
+        before_repeat = Notification.objects.filter(
+            order=order, recipient=self.customer
+        ).count()
         with self.captureOnCommitCallbacks(execute=True):
             repeated = self.client.patch(
                 f"/api/v1/courier/orders/{order.id}/status/",
@@ -496,8 +498,9 @@ class OrderAPITests(APITestCase):
             before_repeat,
         )
         events = set(
-            Notification.objects.filter(order=order, recipient=self.customer)
-            .values_list("data__event", flat=True)
+            Notification.objects.filter(
+                order=order, recipient=self.customer
+            ).values_list("data__event", flat=True)
         )
         self.assertTrue(
             {
@@ -620,19 +623,25 @@ class OrderAPITests(APITestCase):
         list_order = next(item for item in list_response.data if item["id"] == order_id)
         self.assertTrue(list_order["has_offer"])
         self.assertEqual(list_order["offer_titles"], ["Lunch"])
-        self.assertEqual(detail_response.data["service_city"]["id"], self.service_city.id)
+        self.assertEqual(
+            detail_response.data["service_city"]["id"], self.service_city.id
+        )
         self.assertEqual(detail_response.data["order_scope"], Order.Scope.SERVICE_CITY)
         self.assertFalse(detail_response.data["is_multi_market"])
         self.assertEqual(detail_response.data["market_count"], 1)
         self.assertEqual(len(detail_response.data["market_sections"]), 1)
-        self.assertEqual(detail_response.data["review_status"], Order.ReviewStatus.PENDING_REVIEW)
+        self.assertEqual(
+            detail_response.data["review_status"], Order.ReviewStatus.PENDING_REVIEW
+        )
         self.assertEqual(detail_response.data["status"], Order.Status.PENDING)
         self.assertEqual(detail_response.data["subtotal_price"], "1000.00")
         self.assertEqual(detail_response.data["discount"], "100.00")
         self.assertEqual(detail_response.data["delivery_price"], "120.00")
         self.assertEqual(detail_response.data["total_price"], "1020.00")
         self.assertEqual(detail_response.data["items"][0]["product_name"], "Burger")
-        self.assertEqual(detail_response.data["items"][0]["variant_name"], "Size: Large")
+        self.assertEqual(
+            detail_response.data["items"][0]["variant_name"], "Size: Large"
+        )
         self.assertEqual(
             detail_response.data["market_sections"][0]["items"][0]["product_name"],
             "Burger",
@@ -647,8 +656,12 @@ class OrderAPITests(APITestCase):
             detail_response.data["history"][0]["event_type"],
             OrderEvent.EventType.ORDER_CREATED,
         )
-        self.assertEqual(detail_response.data["history"][0]["actor"]["id"], self.admin.id)
-        self.assertEqual(detail_response.data["allowed_statuses"], [Order.Status.CANCELLED])
+        self.assertEqual(
+            detail_response.data["history"][0]["actor"]["id"], self.admin.id
+        )
+        self.assertEqual(
+            detail_response.data["allowed_statuses"], [Order.Status.CANCELLED]
+        )
         self.assertEqual(update_response.data["description"], "Updated description")
 
     def test_order_detail_serializes_product_scoped_variant_attributes(self):
@@ -672,7 +685,9 @@ class OrderAPITests(APITestCase):
         detail_response = self.client.get(f"{ORDERS_BASE}/{order_id}/")
 
         self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(detail_response.data["items"][0]["variant_name"], "Color: Green")
+        self.assertEqual(
+            detail_response.data["items"][0]["variant_name"], "Color: Green"
+        )
         self.assertEqual(
             detail_response.data["market_sections"][0]["items"][0]["variant_name"],
             "Color: Green",
@@ -831,7 +846,9 @@ class OrderAPITests(APITestCase):
         payload.pop("service_city_id")
         payload["offers"] = []
         create_response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
-        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+        self.assertEqual(
+            create_response.status_code, status.HTTP_201_CREATED, create_response.data
+        )
         self.assertIsNone(create_response.data["delivery_price"])
         self.assertEqual(create_response.data["total_price"], "1000.00")
 
@@ -866,9 +883,7 @@ class OrderAPITests(APITestCase):
         payload = self.payload()
         payload["delivery_address_id"] = other_address.id
         payload.pop("service_city_id")
-        payload["items"].append(
-            {"variant_id": self.second_variant.id, "quantity": 1}
-        )
+        payload["items"].append({"variant_id": self.second_variant.id, "quantity": 1})
         payload["offers"] = []
         create_response = self.client.post(f"{ORDERS_BASE}/", payload, format="json")
         self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
@@ -894,7 +909,7 @@ class OrderAPITests(APITestCase):
         self.assertEqual(order.multi_market_fee_rate, Decimal("0.00"))
         self.assertEqual(order.multi_market_fee, Decimal("0.00"))
 
-    @patch("notifications.order_services.send_notification_push")
+    @patch("notifications.tasks.send_notification_push_task.delay")
     def test_admin_can_send_delivery_quote_for_customer_approval(self, send_push):
         other_address = Address.objects.create(
             user=self.customer,
@@ -1135,13 +1150,26 @@ class OrderAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(preview_response.status_code, status.HTTP_200_OK, preview_response.data)
-        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+        self.assertEqual(
+            preview_response.status_code, status.HTTP_200_OK, preview_response.data
+        )
+        self.assertEqual(
+            create_response.status_code, status.HTTP_201_CREATED, create_response.data
+        )
         order = Order.objects.get(id=create_response.data["id"])
-        self.assertEqual(preview_response.data["summary"]["subtotal"], f"{order.subtotal_price:.2f}")
-        self.assertEqual(preview_response.data["summary"]["discount_total"], f"{order.discount:.2f}")
-        self.assertEqual(preview_response.data["summary"]["delivery_total"], f"{order.delivery_price:.2f}")
-        self.assertEqual(preview_response.data["summary"]["grand_total"], f"{order.total_price:.2f}")
+        self.assertEqual(
+            preview_response.data["summary"]["subtotal"], f"{order.subtotal_price:.2f}"
+        )
+        self.assertEqual(
+            preview_response.data["summary"]["discount_total"], f"{order.discount:.2f}"
+        )
+        self.assertEqual(
+            preview_response.data["summary"]["delivery_total"],
+            f"{order.delivery_price:.2f}",
+        )
+        self.assertEqual(
+            preview_response.data["summary"]["grand_total"], f"{order.total_price:.2f}"
+        )
 
     def test_admin_multi_market_offer_uses_each_market_net_total(self):
         OfferItem.objects.create(offer=self.offer, variant=self.second_variant)
@@ -1172,9 +1200,7 @@ class OrderAPITests(APITestCase):
         )
         self.assertEqual(
             list(
-                order.market_sections.values_list(
-                    "market_id", "discount", "sort_order"
-                )
+                order.market_sections.values_list("market_id", "discount", "sort_order")
             ),
             [
                 (self.second_market.id, Decimal("70.00"), 0),
@@ -1206,8 +1232,12 @@ class OrderAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(preview_response.status_code, status.HTTP_200_OK, preview_response.data)
-        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+        self.assertEqual(
+            preview_response.status_code, status.HTTP_200_OK, preview_response.data
+        )
+        self.assertEqual(
+            create_response.status_code, status.HTTP_201_CREATED, create_response.data
+        )
         order = Order.objects.get(id=create_response.data["id"])
         self.assertEqual(preview_response.data["summary"]["subtotal"], "157.50")
         self.assertEqual(preview_response.data["summary"]["delivery_total"], "40.00")
@@ -1468,10 +1498,16 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual([item["id"] for item in response.data], [own_order_id])
         self.assertNotIn(other_order.id, [item["id"] for item in response.data])
+        self.assertIn("items", response.data[0])
+        self.assertIn("market_sections", response.data[0])
+        self.assertIn("payment_method", response.data[0])
+        self.assertIn("shipping_company", response.data[0])
 
     def test_client_order_list_supports_status_filter(self):
         confirmed_order_id = self.create_order().data["id"]
-        Order.objects.filter(id=confirmed_order_id).update(status=Order.Status.CONFIRMED)
+        Order.objects.filter(id=confirmed_order_id).update(
+            status=Order.Status.CONFIRMED
+        )
         Order.objects.create(
             user=self.customer,
             market=self.market,
@@ -1559,7 +1595,9 @@ class OrderAPITests(APITestCase):
             "لا يمكن دمج منتجات من مدن مختلفة في نفس الطلب",
         )
 
-    def test_client_create_general_order_uses_default_delivery_address_without_scope_leakage(self):
+    def test_client_create_general_order_uses_default_delivery_address_without_scope_leakage(
+        self,
+    ):
         self.make_general_market_region()
         general_address = self.create_general_address(
             manual_city="القاهرة",
@@ -1643,7 +1681,9 @@ class OrderAPITests(APITestCase):
             first_market["selected_offers"][0]["offer_products_subtotal"],
             "1000.00",
         )
-        self.assertEqual(first_market["selected_offers"][0]["discount_amount"], "100.00")
+        self.assertEqual(
+            first_market["selected_offers"][0]["discount_amount"], "100.00"
+        )
         self.assertEqual(
             first_market["selected_offers"][0]["products"][0]["variant_id"],
             self.variant.id,
@@ -1923,7 +1963,9 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         self.assertEqual(response.data["selected_address"]["id"], other_address.id)
         self.assertEqual(response.data["addresses"][0]["id"], other_address.id)
-        self.assertNotIn(self.address.id, [item["id"] for item in response.data["addresses"]])
+        self.assertNotIn(
+            self.address.id, [item["id"] for item in response.data["addresses"]]
+        )
         self.assertEqual(response.data["service_city"]["id"], self.service_city.id)
 
     def test_preview_totals_match_normal_create_order_calculation(self):
@@ -1938,7 +1980,9 @@ class OrderAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(preview_response.status_code, status.HTTP_200_OK, preview_response.data)
+        self.assertEqual(
+            preview_response.status_code, status.HTTP_200_OK, preview_response.data
+        )
         self.assertFalse(Order.objects.exists())
 
         self.authenticate_customer()
@@ -1953,12 +1997,23 @@ class OrderAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+        self.assertEqual(
+            create_response.status_code, status.HTTP_201_CREATED, create_response.data
+        )
         order = Order.objects.get(id=create_response.data[0]["id"])
-        self.assertEqual(preview_response.data["summary"]["subtotal"], f"{order.subtotal_price:.2f}")
-        self.assertEqual(preview_response.data["summary"]["discount_total"], f"{order.discount:.2f}")
-        self.assertEqual(preview_response.data["summary"]["delivery_total"], f"{order.delivery_price:.2f}")
-        self.assertEqual(preview_response.data["summary"]["grand_total"], f"{order.total_price:.2f}")
+        self.assertEqual(
+            preview_response.data["summary"]["subtotal"], f"{order.subtotal_price:.2f}"
+        )
+        self.assertEqual(
+            preview_response.data["summary"]["discount_total"], f"{order.discount:.2f}"
+        )
+        self.assertEqual(
+            preview_response.data["summary"]["delivery_total"],
+            f"{order.delivery_price:.2f}",
+        )
+        self.assertEqual(
+            preview_response.data["summary"]["grand_total"], f"{order.total_price:.2f}"
+        )
 
     def test_client_preview_other_delivery_has_null_delivery_price(self):
         other_address = Address.objects.create(
@@ -1993,7 +2048,9 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.data["summary"]["delivery_total"], "0.00")
         self.assertEqual(response.data["summary"]["grand_total"], "500.00")
 
-    def test_preview_offer_uses_product_variant_price_when_product_is_not_selected(self):
+    def test_preview_offer_uses_product_variant_price_when_product_is_not_selected(
+        self,
+    ):
         token = RefreshToken.for_user(self.customer).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
@@ -2066,7 +2123,9 @@ class OrderAPITests(APITestCase):
         selected_offer = response.data["market_groups"][0]["selected_offers"][0]
         self.assertEqual(selected_offer["offer_products_subtotal"], "1800.00")
         self.assertEqual(selected_offer["discount_amount"], "180.00")
-        self.assertEqual(selected_offer["products"][0]["variant_id"], selected_variant.id)
+        self.assertEqual(
+            selected_offer["products"][0]["variant_id"], selected_variant.id
+        )
         self.assertEqual(selected_offer["products"][0]["quantity"], 2)
 
     def test_package_item_can_skip_product_discount_before_offer_discount(self):
@@ -2099,7 +2158,9 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.data["summary"]["subtotal"], "500.00")
         self.assertEqual(response.data["summary"]["discount_total"], "75.00")
 
-    def test_package_item_applies_product_discount_before_offer_discount_by_default(self):
+    def test_package_item_applies_product_discount_before_offer_discount_by_default(
+        self,
+    ):
         self.product.discount = Decimal("10.00")
         self.product.save(update_fields=["discount", "updated_at"])
         self.offer.discount = Decimal("15.00")
@@ -2151,7 +2212,9 @@ class OrderAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(preview_response.status_code, status.HTTP_200_OK, preview_response.data)
+        self.assertEqual(
+            preview_response.status_code, status.HTTP_200_OK, preview_response.data
+        )
         preview_market = preview_response.data["market_groups"][0]
         self.assertEqual(preview_market["delivery_price"], "0.00")
         self.assertEqual(preview_market["pricing"]["delivery_price"], "0.00")
@@ -2160,7 +2223,9 @@ class OrderAPITests(APITestCase):
         self.assertEqual(preview_response.data["summary"]["multi_market_fee"], "35.00")
         self.assertEqual(preview_response.data["summary"]["grand_total"], "1235.00")
 
-        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+        self.assertEqual(
+            create_response.status_code, status.HTTP_201_CREATED, create_response.data
+        )
         created_order = create_response.data[0]
         self.assertEqual(created_order["subtotal_price"], "1200.00")
         self.assertEqual(created_order["discount"], "0.00")
@@ -2234,7 +2299,9 @@ class OrderAPITests(APITestCase):
             self.variant.id,
         )
         self.assertEqual(
-            OrderOffer.objects.get(order=parent_order, section=sections[0]).discount_amount,
+            OrderOffer.objects.get(
+                order=parent_order, section=sections[0]
+            ).discount_amount,
             Decimal("100.00"),
         )
         self.assertTrue(response.data[0]["is_multi_market"])
