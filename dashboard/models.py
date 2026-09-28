@@ -1,4 +1,5 @@
 from django.db import models
+from config.media import raw_public_media_storage
 
 
 class DashboardSettings(models.Model):
@@ -25,3 +26,19 @@ class DashboardSettings(models.Model):
 
     def __str__(self):
         return self.brand_name
+
+
+class AppLaunchMedia(models.Model):
+    onboarding_one = models.ImageField(upload_to="app-launch/onboarding/", blank=True, null=True)
+    onboarding_two = models.ImageField(upload_to="app-launch/onboarding/", blank=True, null=True)
+    onboarding_three = models.ImageField(upload_to="app-launch/onboarding/", blank=True, null=True)
+    market_login = models.ImageField(upload_to="app-launch/login/", blank=True, null=True)
+    market_login_video = models.FileField(
+        upload_to="app-launch/login/", storage=raw_public_media_storage, blank=True, null=True
+    )
+    delivery_login = models.ImageField(upload_to="app-launch/login/", blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "App launch media"
+        verbose_name_plural = "App launch media"

@@ -1,17 +1,41 @@
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import IsAdminRole
 
-from .models import DashboardSettings
+from .models import AppLaunchMedia, DashboardSettings
 from .serializers import (
     DashboardOverviewSerializer,
     DashboardRangeQuerySerializer,
     DashboardSettingsSerializer,
+    AppLaunchMediaSerializer,
 )
 from .services import build_dashboard_overview
+
+
+class AppLaunchMediaView(APIView):
+    parser_classes = (JSONParser, FormParser, MultiPartParser)
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [AllowAny()]
+        return [IsAuthenticated(), IsAdminRole()]
+
+    def get_object(self):
+        media, _ = AppLaunchMedia.objects.get_or_create(pk=1)
+        return media
+
+    def get(self, request):
+        return Response(AppLaunchMediaSerializer(self.get_object(), context={"request": request}).data)
+
+    def patch(self, request):
+        serializer = AppLaunchMediaSerializer(
+            self.get_object(), data=request.data, partial=True, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        return Response(AppLaunchMediaSerializer(serializer.save(), context={"request": request}).data)
 
 
 class DashboardOverviewView(APIView):

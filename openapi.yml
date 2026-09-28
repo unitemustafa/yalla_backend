@@ -1187,6 +1187,26 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v1/dashboard/app-media/:
+    get:
+      operationId: v1_dashboard_app_media_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_dashboard_app_media_partial_update
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
   /api/v1/dashboard/overview/:
     get:
       operationId: v1_dashboard_overview_retrieve
@@ -2425,6 +2445,27 @@ paths:
       parameters:
       - in: path
         name: campaign_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/offers/home-campaigns/{campaign_id}/images/{image_id}/:
+    delete:
+      operationId: v1_offers_home_campaigns_images_destroy_by_campaign_id_and_image_id
+      parameters:
+      - in: path
+        name: campaign_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: image_id
         schema:
           type: integer
         required: true
@@ -3970,6 +4011,26 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v2/dashboard/app-media/:
+    get:
+      operationId: v2_dashboard_app_media_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v2_dashboard_app_media_partial_update
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
   /api/v2/dashboard/overview/:
     get:
       operationId: v2_dashboard_overview_retrieve
@@ -5208,6 +5269,27 @@ paths:
       parameters:
       - in: path
         name: campaign_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/offers/home-campaigns/{campaign_id}/images/{image_id}/:
+    delete:
+      operationId: v2_offers_home_campaigns_images_destroy_by_campaign_id_and_image_id
+      parameters:
+      - in: path
+        name: campaign_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: image_id
         schema:
           type: integer
         required: true

@@ -5,7 +5,7 @@ from rest_framework import serializers
 
 from config.image_validation import validate_safe_image
 
-from .models import DashboardSettings
+from .models import AppLaunchMedia, DashboardSettings
 
 
 DASHBOARD_LOGO_MAX_SIZE = 5 * 1024 * 1024
@@ -13,6 +13,86 @@ DASHBOARD_LOGO_ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 DASHBOARD_FONT_CHOICES = ("Cairo", "Tajawal", "Alexandria", "System")
 HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
+
+class AppLaunchMediaSerializer(serializers.ModelSerializer):
+    onboarding_one_url = serializers.SerializerMethodField()
+    onboarding_two_url = serializers.SerializerMethodField()
+    onboarding_three_url = serializers.SerializerMethodField()
+    market_login_url = serializers.SerializerMethodField()
+    delivery_login_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AppLaunchMedia
+        fields = (
+            "onboarding_one", "onboarding_two", "onboarding_three",
+            "market_login", "market_login_video", "delivery_login", "onboarding_one_url",
+            "onboarding_two_url", "onboarding_three_url", "market_login_url",
+            "delivery_login_url", "updated_at",
+        )
+        extra_kwargs = {
+            key: {"write_only": True, "required": False}
+            for key in ("onboarding_one", "onboarding_two", "onboarding_three", "market_login", "market_login_video", "delivery_login")
+        }
+        read_only_fields = ("updated_at",)
+
+    def _url(self, obj, field):
+        file = getattr(obj, field)
+        if not file:
+            return None
+        request = self.context.get("request")
+        return request.build_absolute_uri(file.url) if request else file.url
+
+    def get_onboarding_one_url(self, obj):
+        return self._url(obj, "onboarding_one")
+
+    def get_onboarding_two_url(self, obj):
+        return self._url(obj, "onboarding_two")
+
+    def get_onboarding_three_url(self, obj):
+        return self._url(obj, "onboarding_three")
+
+    def get_market_login_url(self, obj):
+        return self._url(obj, "market_login_video") or self._url(obj, "market_login")
+
+    def get_delivery_login_url(self, obj):
+        return self._url(obj, "delivery_login")
+
+    def validate(self, attrs):
+        image_fields = ("onboarding_one", "onboarding_two", "onboarding_three", "market_login", "delivery_login")
+        for field in image_fields:
+            file = attrs.get(field)
+            if file is not None:
+                self._validate_image(file)
+        file = attrs.get("market_login_video")
+        if file is not None:
+            extension = Path(file.name or "").suffix.lower().lstrip(".")
+            content_type = (getattr(file, "content_type", "") or "").lower()
+            if extension == "mp4" and content_type == "video/mp4":
+                if file.size > 30 * 1024 * 1024:
+                    raise serializers.ValidationError({"market_login_video": "Video must be 30 MB or smaller."})
+                header = file.read(12)
+                file.seek(0)
+                if len(header) < 12 or header[4:8] != b"ftyp":
+                    raise serializers.ValidationError({"market_login_video": "Upload a valid MP4 video."})
+            else:
+                raise serializers.ValidationError({"market_login_video": "Upload a valid MP4 video."})
+        return attrs
+
+    def update(self, instance, validated_data):
+        if validated_data.get("market_login") is not None:
+            validated_data["market_login_video"] = None
+        elif validated_data.get("market_login_video") is not None:
+            validated_data["market_login"] = None
+        elif "market_login" in validated_data and validated_data["market_login"] is None:
+            validated_data["market_login_video"] = None
+        return super().update(instance, validated_data)
+
+    @staticmethod
+    def _validate_image(file):
+        extension = Path(file.name or "").suffix.lower().lstrip(".")
+        if extension not in DASHBOARD_LOGO_ALLOWED_EXTENSIONS or file.size > 5 * 1024 * 1024:
+            raise serializers.ValidationError("Image must be JPG, PNG, or WEBP and 5 MB or smaller.")
+        validate_safe_image(file)
 
 class DashboardSettingsSerializer(serializers.ModelSerializer):
     logo = serializers.ImageField(write_only=True, required=False, allow_null=False)
