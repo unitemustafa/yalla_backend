@@ -29,9 +29,15 @@ from .serializer_utils import deduplicate_image_uploads
 
 
 class AdditionClassificationSerializer(serializers.ModelSerializer):
+    addition_count = serializers.SerializerMethodField()
+
     class Meta:
         model = AdditionClassification
-        fields = ("id", "name")
+        fields = ("id", "name", "addition_count")
+
+    def get_addition_count(self, instance):
+        count = getattr(instance, "addition_count", None)
+        return count if count is not None else instance.additions.count()
 
     def validate_name(self, value):
         name = value.strip()

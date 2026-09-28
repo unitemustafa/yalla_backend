@@ -24,6 +24,7 @@ from .write_serializers import AdminMarketWriteMixin
 
 class AdminMarketClassificationSerializer(serializers.ModelSerializer):
     max_active_featured_classifications = 4
+    deletion_mode = serializers.SerializerMethodField()
 
     class Meta:
         model = MarketClassification
@@ -34,7 +35,11 @@ class AdminMarketClassificationSerializer(serializers.ModelSerializer):
             "image",
             "classification_type",
             "is_active",
+            "deletion_mode",
         )
+
+    def get_deletion_mode(self, instance):
+        return instance.get_deletion_mode()
 
     def validate_name(self, value):
         name = value.strip()

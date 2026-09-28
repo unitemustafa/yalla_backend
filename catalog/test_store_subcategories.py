@@ -272,6 +272,20 @@ class StoreSubcategoryAPITests(APITestCase):
         self.drinks.refresh_from_db()
         self.assertFalse(self.drinks.is_active)
 
+    def test_subcategory_used_only_by_market_is_archived_on_delete(self):
+        market = self.create_market()
+        self.authenticate()
+
+        response = self.client.delete(
+            f"{CATALOG_BASE}/store-subcategories/{self.drinks.id}/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "archived")
+        self.drinks.refresh_from_db()
+        self.assertFalse(self.drinks.is_active)
+        self.assertTrue(market.subcategories.filter(pk=self.drinks.pk).exists())
+
     def test_inactive_subcategory_stays_on_existing_product_but_rejects_new_use(self):
         market = self.create_market()
         product = Product.objects.create(

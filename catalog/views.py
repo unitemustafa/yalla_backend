@@ -153,14 +153,14 @@ class StoreSubcategoryDetailView(APIView):
             .distinct()
             .count()
         )
-        if product_count:
+        if product_count or subcategory.market_count:
             subcategory.is_active = False
             subcategory.save(update_fields=("is_active", "updated_at"))
             return Response(
                 {
                     "detail": (
                         "تمت أرشفة الفئة الداخلية وتعطيلها لأنها مستخدمة "
-                        "بواسطة منتجات حالية."
+                        "بواسطة منتجات أو محلات حالية."
                     ),
                     "action": "archived",
                     "product_count": product_count,
@@ -175,7 +175,9 @@ class AdditionClassificationListCreateView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
-        classifications = AdditionClassification.objects.order_by("name", "id")
+        classifications = AdditionClassification.objects.annotate(
+            addition_count=Count("additions", distinct=True),
+        ).order_by("name", "id")
         return paginated_list_response(
             request,
             classifications,

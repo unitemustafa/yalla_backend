@@ -32,7 +32,7 @@ from offers.models import Offer
 from orders.models import Order
 from dashboard.models import DashboardSettings
 
-from .models import Market, MarketClassification
+from .models import Market, MarketClassification, MarketType
 from .region import visible_market_queryset
 
 User = get_user_model()
@@ -1266,6 +1266,52 @@ class HomeAPITests(APITestCase):
         self.assertEqual(response.data["action"], "archived")
         self.local_classification.refresh_from_db()
         self.assertFalse(self.local_classification.is_active)
+
+    def test_market_classification_deletion_mode_and_linked_types(self):
+        empty = MarketClassification.objects.create(name="Empty classification")
+        with_type = MarketClassification.objects.create(name="Category with subcategory")
+        MarketType.objects.create(
+            classification=with_type,
+            name_ar="فئة ثانوية",
+            name_en="Subcategory",
+            image=market_image_upload("subcategory.png"),
+        )
+        self.authenticate(self.admin)
+
+        response = self.client.get(f"{HOME_BASE}/market-classifications/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        rows = response.data["results"] if isinstance(response.data, dict) else response.data
+        modes = {row["id"]: row["deletion_mode"] for row in rows}
+        self.assertEqual(modes[empty.id], "delete")
+        self.assertEqual(modes[with_type.id], "archive")
+        self.assertEqual(modes[self.local_classification.id], "archive")
+
+        archived = self.client.delete(
+            f"{HOME_BASE}/market-classifications/{with_type.id}/"
+        )
+        self.assertEqual(archived.status_code, status.HTTP_200_OK)
+        self.assertEqual(archived.data["action"], "archived")
+        with_type.refresh_from_db()
+        self.assertFalse(with_type.is_active)
+        self.assertTrue(with_type.market_types.exists())
+
+    def test_used_market_type_is_archived_without_removing_market_link(self):
+        market_type = MarketType.objects.create(
+            classification=self.local_classification,
+            name_ar="الحيوانات",
+            name_en="Animals",
+            image=market_image_upload("animals.png"),
+        )
+        self.local_market.market_types.add(market_type)
+        self.authenticate(self.admin)
+
+        response = self.client.delete(f"{HOME_BASE}/market-types/{market_type.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["action"], "archived")
+        market_type.refresh_from_db()
+        self.assertFalse(market_type.is_active)
+        self.assertTrue(self.local_market.market_types.filter(pk=market_type.pk).exists())
 
     def test_market_crud_requires_admin_role(self):
         self.authenticate()

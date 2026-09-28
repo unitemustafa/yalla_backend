@@ -23,7 +23,12 @@ class AdminMarketClassificationListCreateView(APIView):
     permission_classes = [IsAuthenticated, IsMarketAdminRole]
 
     def get(self, request):
-        classifications = MarketClassification.objects.order_by("name", "id")
+        classifications = MarketClassification.objects.annotate(
+            deletion_mode_is_archive=(
+                Exists(Market.objects.filter(classification_id=OuterRef("pk")))
+                | Exists(MarketType.objects.filter(classification_id=OuterRef("pk")))
+            ),
+        ).order_by("name", "id")
         return paginated_list_response(
             request,
             classifications,
@@ -80,6 +85,16 @@ class AdminMarketClassificationDetailView(APIView):
 
     def delete(self, request, classification_id):
         classification = self.get_classification(classification_id)
+        if classification.get_deletion_mode() == "archive":
+            classification.is_active = False
+            classification.save(update_fields=("is_active",))
+            return Response(
+                {
+                    "action": "archived",
+                    "detail": "تمت أرشفة فئة المحل وتعطيلها لأنها مرتبطة بمحلات أو فئات ثانوية.",
+                },
+                status=status.HTTP_200_OK,
+            )
         try:
             classification.delete()
         except ProtectedError:
@@ -220,7 +235,15 @@ class AdminMarketTypeDetailView(APIView):
         )
 
     def delete(self, request, market_type_id):
-        self.get_market_type(market_type_id).delete()
+        market_type = self.get_market_type(market_type_id)
+        if market_type.market_count:
+            market_type.is_active = False
+            market_type.save(update_fields=("is_active", "updated_at"))
+            return Response(
+                {"action": "archived", "detail": "تمت أرشفة الفئة الثانوية لأنها مرتبطة بمحلات."},
+                status=status.HTTP_200_OK,
+            )
+        market_type.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

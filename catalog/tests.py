@@ -191,6 +191,12 @@ class AdditionClassificationAPITests(APITestCase):
     def test_admin_can_list_addition_classifications(self):
         sauce = AdditionClassification.objects.create(name="صلصات")
         extras = AdditionClassification.objects.create(name="إضافات")
+        ProductAddition.objects.create(
+            classification=sauce,
+            name_ar="صلصة",
+            name_en="Sauce",
+            price="1.00",
+        )
         self.authenticate(self.admin)
 
         response = self.client.get(f"{CATALOG_BASE}/addition-classifications/")
@@ -199,6 +205,10 @@ class AdditionClassificationAPITests(APITestCase):
         self.assertEqual(
             [item["id"] for item in response.data],
             [extras.id, sauce.id],
+        )
+        self.assertEqual(
+            [item["addition_count"] for item in response.data],
+            [0, 1],
         )
 
     def test_client_can_toggle_product_like(self):

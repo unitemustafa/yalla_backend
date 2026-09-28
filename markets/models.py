@@ -89,6 +89,12 @@ class MarketClassification(models.Model):
     def __str__(self):
         return self.name
 
+    def get_deletion_mode(self):
+        annotated_mode = getattr(self, "deletion_mode_is_archive", None)
+        if annotated_mode is not None:
+            return "archive" if annotated_mode else "delete"
+        return "archive" if self.markets.exists() or self.market_types.exists() else "delete"
+
 
 class MarketType(models.Model):
     classification = models.ForeignKey(
