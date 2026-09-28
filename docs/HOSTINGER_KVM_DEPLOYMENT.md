@@ -33,7 +33,8 @@ key, or any other production credential to GitHub.
 ## Production configuration
 
 1. Generate independent values and paste them into `POSTGRES_PASSWORD` and
-   `SECRET_KEY` in `.env.production`:
+   `SECRET_KEY` and `RATE_LIMIT_KEY_SECRET` in `.env.production` using two
+   different random outputs:
 
    ```bash
    openssl rand -hex 32

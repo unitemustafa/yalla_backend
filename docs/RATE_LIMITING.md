@@ -1,37 +1,38 @@
 # Rate limiting
 
-Nginx is the authoritative production request limiter. It applies a shared
-per-client-IP limit before requests reach Gunicorn, so all Django workers see
-the same protection without another runtime service.
+Nginx applies a shared per-client-IP request limit before requests reach
+Gunicorn. Django uses Redis for shared, identity-aware limits on authentication
+and OTP endpoints across all workers.
 
 Cloudflare client IPs are accepted only when the socket peer belongs to an
 official Cloudflare network. Direct callers cannot spoof `CF-Connecting-IP`.
 
 ## Production
 
-1. Keep `RATE_LIMIT_MODE=off` in `.env.production`.
+1. Set a separate, random `RATE_LIMIT_KEY_SECRET` in `.env.production`.
 2. Keep the Nginx shared-memory request and connection zones enabled.
-3. Run `nginx -t` after changing the proxy configuration.
-4. Run `python manage.py check --tag rate_limit` after changing policy values.
-5. Verify repeated public requests through Cloudflare and review Nginx logs.
+3. Keep the Redis-backed auth scope enforcement in `compose.yaml` enabled.
+4. Run `nginx -t` and `python manage.py check --tag rate_limit` after changing policy values.
+5. Verify repeated auth requests through Cloudflare and review 429 responses.
 
 The Nginx template currently permits normal API bursts while rejecting abusive
-traffic with HTTP 429. Adjust its rate and burst together after reviewing real
-traffic; do not enable the Django limiter as a replacement in a multi-worker
-deployment.
+traffic with HTTP 429. The Django limiter adds email, token, and IP limits for
+login, signup, OTP, and refresh requests. Redis stores those counters; if it is
+unavailable, admin login and OTP verification fail closed while other scopes
+fall back to process-local limits.
 
 ## Development and focused tests
 
-Django contains an optional process-local limiter with fixed and sliding
+Django supports Redis-backed counters or process-local fixed and sliding
 windows. Its modes are:
 
 - `off`: bypass application-level limiting.
 - `observe`: evaluate policies and log blocks without rejecting requests.
-- `enforce`: return HTTP 429 after a process-local policy is exceeded.
+- `enforce`: return HTTP 429 after a policy is exceeded.
 
-The application limiter is useful for policy tests and single-process local
-development. Its counters are intentionally not shared across Gunicorn
-workers, so production keeps it off and relies on Nginx.
+The process-local counters are useful for focused tests and as a fallback.
+Production uses Redis so authentication limits remain shared across Gunicorn
+workers.
 
 Identity values and tokens are converted into keyed HMAC fingerprints before
 being used as limiter keys. Proxy headers are ignored unless the direct peer is

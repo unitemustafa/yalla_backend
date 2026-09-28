@@ -31,4 +31,5 @@ class DatabaseStateJWTAuthentication(JWTAuthentication):
                 "User is inactive.",
                 code="user_inactive",
             )
+        validate_client_token_state(validated_token, user=user)
         return ensure_user_verified(user)

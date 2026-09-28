@@ -12,6 +12,7 @@ EPHEMERAL_MODEL_LABELS = {
     "accounts.SocialIdentity",
     "locations.ShippingCompany",
     "offers.HomeCampaign",
+    "offers.HomeCampaignImage",
 }
 
 

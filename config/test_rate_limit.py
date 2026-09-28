@@ -1,8 +1,9 @@
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from types import SimpleNamespace
 
 from django.contrib.auth.models import AnonymousUser
 from django.test import RequestFactory, SimpleTestCase, override_settings
+from redis.exceptions import ConnectionError
 from rest_framework.exceptions import Throttled
 from rest_framework.parsers import JSONParser
 from rest_framework.request import Request
@@ -13,12 +14,43 @@ from . import rate_limit
 from .rate_limit_checks import check_rate_limit_configuration
 from .rate_limit import (
     RateLimitDecision,
+    RateRule,
     YallaRateThrottle,
     client_ip,
     evaluate_rate_limit,
     is_rate_limit_exempt,
     parse_rate,
 )
+
+
+class RedisRateLimitFailureTests(SimpleTestCase):
+    @override_settings(REDIS_RATE_LIMIT_ENABLED=True)
+    def test_admin_login_fails_closed_when_shared_redis_is_unavailable(self):
+        rule = RateRule("admin_login_ip", "sliding", 3, 60000, "admin-key")
+        with patch("config.rate_limit._evaluate_rules_redis", side_effect=ConnectionError("offline")):
+            decision = rate_limit._evaluate_rules((rule,))
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.retry_after_seconds, 60)
+        self.assertEqual(decision.blocked_scopes, ("admin_login_ip",))
+
+    @override_settings(REDIS_RATE_LIMIT_ENABLED=True)
+    def test_public_scope_falls_back_to_local_counter_on_redis_outage(self):
+        rule = RateRule("login_ip", "sliding", 2, 60000, "public-key")
+        expected = RateLimitDecision(allowed=True)
+        with patch("config.rate_limit._evaluate_rules_redis", side_effect=ConnectionError("offline")):
+            with patch("config.rate_limit._evaluate_rules_local", return_value=expected) as local:
+                self.assertEqual(rate_limit._evaluate_rules((rule,)), expected)
+        local.assert_called_once()
+
+    def test_redis_script_decodes_and_deduplicates_blocked_scopes(self):
+        rule = RateRule("login_ip", "sliding", 2, 60000, "public-key")
+        script = Mock(return_value=[0, 42, b"login_ip,login_ip"])
+        with patch("config.rate_limit.get_redis_client", return_value=object()):
+            with patch("config.rate_limit._get_rate_limit_script", return_value=script):
+                decision = rate_limit._evaluate_rules_redis((rule,), 1234)
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.retry_after_seconds, 42)
+        self.assertEqual(decision.blocked_scopes, ("login_ip",))
 
 
 @override_settings(
@@ -83,6 +115,14 @@ class RateLimitSystemCheckTests(SimpleTestCase):
     )
     def test_enforce_accepts_an_independent_rate_limit_secret(self):
         self.assertNotIn("rate_limit.E007", self._check_ids())
+
+    @override_settings(
+        IS_PRODUCTION=True,
+        RATE_LIMIT_MODE="enforce",
+        RATE_LIMIT_KEY_SECRET="replace-with-another-unique-random-value-of-at-least-50-characters",
+    )
+    def test_production_rejects_placeholder_rate_limit_secret(self):
+        self.assertIn("rate_limit.E008", self._check_ids())
 
 
 class ClientIpTests(SimpleTestCase):

@@ -418,6 +418,39 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v1/auth/social/link/:
+    post:
+      operationId: v1_auth_social_link_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/social/session/:
+    post:
+      operationId: v1_auth_social_session_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/social/signup/:
+    post:
+      operationId: v1_auth_social_signup_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
   /api/v1/auth/users/:
     get:
       operationId: v1_auth_users_retrieve
@@ -3234,6 +3267,39 @@ paths:
   /api/v2/auth/signup/:
     post:
       operationId: v2_auth_signup_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/social/link/:
+    post:
+      operationId: v2_auth_social_link_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/social/session/:
+    post:
+      operationId: v2_auth_social_session_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v2/auth/social/signup/:
+    post:
+      operationId: v2_auth_social_signup_create
       tags:
       - v2
       security:
@@ -6067,6 +6133,7 @@ components:
           maxLength: 150
         phone:
           type: string
+          nullable: true
           maxLength: 30
         avatar:
           type: string
@@ -6099,7 +6166,6 @@ components:
       - id
       - is_available
       - name
-      - phone
       - plate_number
       - service_city
       - service_city_id
@@ -6115,10 +6181,9 @@ components:
           maxLength: 150
         phone:
           type: string
+          nullable: true
           minLength: 1
           maxLength: 30
-      required:
-      - phone
     BlankEnum:
       enum:
       - ''

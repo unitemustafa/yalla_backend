@@ -429,6 +429,42 @@ class AuthenticationAPITests(APITestCase):
             delta=5,
         )
 
+    def test_admin_password_change_revokes_access_and_refresh_tokens(self):
+        admin = self.create_active_user(
+            role=User.Role.ADMIN,
+            username="revoked_admin",
+            email="revoked-admin@example.com",
+            phone="+213555000075",
+        )
+        login = self.client.post(
+            f"{AUTH_BASE}/login/admin/",
+            {"email": admin.email, "password": self.password},
+        )
+        self.assertEqual(login.status_code, status.HTTP_200_OK)
+        access = login.data["accessToken"]
+        refresh = login.data["refreshToken"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+        self.assertEqual(
+            self.client.get(f"{AUTH_BASE}/me/").status_code,
+            status.HTTP_200_OK,
+        )
+
+        admin.set_password(self.new_password)
+        admin.auth_token_version += 1
+        admin.save(update_fields=["password", "auth_token_version"])
+
+        self.assertEqual(
+            self.client.get(f"{AUTH_BASE}/me/").status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+        self.client.credentials()
+        self.assertEqual(
+            self.client.post(
+                f"{AUTH_BASE}/refresh/", {"refreshToken": refresh}
+            ).status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
     def test_admin_refresh_preserves_original_admin_session_exp(self):
         admin = self.create_active_user(
             role=User.Role.ADMIN,
@@ -2910,7 +2946,13 @@ class AuthenticationAPITests(APITestCase):
     @patch("accounts.tasks.send_email_task.delay")
     def test_forgot_and_reset_password_with_otp(self, enqueue_email):
         user = self.create_active_user()
-        existing_refresh = RefreshToken.for_user(user)
+        login = self.client.post(
+            f"{AUTH_BASE}/login/client/",
+            {"email": user.email, "password": self.password},
+        )
+        self.assertEqual(login.status_code, status.HTTP_200_OK)
+        existing_refresh = RefreshToken(login.data["refreshToken"])
+        existing_access = login.data["accessToken"]
 
         with self.captureOnCommitCallbacks(execute=True):
             forgot_response = self.client.post(
@@ -2946,9 +2988,16 @@ class AuthenticationAPITests(APITestCase):
         )
         user.refresh_from_db()
         self.assertTrue(user.check_password(self.new_password))
+        self.assertEqual(user.auth_token_version, 1)
         self.assertTrue(BlacklistedToken.objects.filter(token__user=user).exists())
         with self.assertRaises(TokenError):
             RefreshToken(str(existing_refresh)).check_blacklist()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {existing_access}")
+        self.assertEqual(
+            self.client.get(f"{AUTH_BASE}/me/").status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+        self.client.credentials()
 
         reused_otp_response = self.client.post(
             f"{AUTH_BASE}/reset-password",

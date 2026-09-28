@@ -29,6 +29,20 @@ def check_rate_limit_configuration(app_configs, **kwargs):
                 id="rate_limit.E007",
             )
         )
+    if (
+        getattr(settings, "IS_PRODUCTION", False)
+        and mode == "enforce"
+        and (
+            len(str(rate_limit_secret)) < 50
+            or str(rate_limit_secret).startswith(("replace-", "dev-"))
+        )
+    ):
+        messages.append(
+            Error(
+                "RATE_LIMIT_KEY_SECRET must be a separate random value of at least 50 characters in production.",
+                id="rate_limit.E008",
+            )
+        )
 
     cidrs = getattr(settings, "RATE_LIMIT_TRUSTED_PROXY_CIDRS", ())
     for value in cidrs:

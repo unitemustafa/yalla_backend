@@ -234,9 +234,9 @@ Simple JWT provides signing, rotation, and blacklisting. The project adds strong
 - Temporary client/representative sessions have an absolute 8-hour deadline.
 - Admin remembered sessions last 7 days; temporary admin sessions last 8 hours.
 - Mobile tokens include session-mode and absolute-deadline claims.
-- Mobile tokens include `auth_token_version`.
+- Issued tokens include `auth_token_version`.
 
-`DatabaseStateJWTAuthentication` reloads the user for every authenticated request. For clients and representatives it rejects a token when the account is inactive/deleted, email is unverified, the session deadline passed, or the token's version differs from the database version.
+`DatabaseStateJWTAuthentication` reloads the user for every authenticated request. It rejects tokens whose version differs from the database version for all roles. For clients and representatives it also checks account state and the mobile session deadline.
 
 This means incrementing `auth_token_version` immediately invalidates already-issued access tokens, not only refresh tokens. `revoke_user_sessions()` increments the version and blacklists all outstanding refresh tokens.
 
@@ -632,15 +632,15 @@ Images are verified by decoding their metadata with Pillow. Supported formats ar
 
 ## 13. Rate Limiting and Abuse Protection
 
-Nginx provides the shared production request limit before traffic reaches Django. Django also includes an optional process-local limiter for focused development and tests. Policies can use fixed or sliding windows and identities such as IP, authenticated user, normalized email/phone identifier, refresh-token fingerprint, or a global provider key.
+Nginx provides the shared production request limit before traffic reaches Django. Django uses Redis-backed authentication limits in production and process-local counters for focused tests or fallback. Policies can use fixed or sliding windows and identities such as IP, authenticated user, normalized email/phone identifier, refresh-token fingerprint, or a global provider key.
 
 Modes are:
 
-- `off`: skip the application limiter; required for the multi-worker production deployment.
+- `off`: skip the application limiter.
 - `observe`: evaluate and report behavior without full enforcement.
 - `enforce`: reject requests that exceed policy.
 
-The application limiter is intentionally not shared between Gunicorn workers. Nginx is therefore authoritative in production. Identity values and tokens are converted into HMAC fingerprints before being used as limiter keys.
+Production Redis counters are shared between Gunicorn workers. Nginx still limits general API traffic. Identity values and tokens are converted into HMAC fingerprints before being used as limiter keys.
 
 Proxy headers are trusted only when the socket peer belongs to configured proxy CIDRs. This prevents arbitrary callers from spoofing their source IP.
 

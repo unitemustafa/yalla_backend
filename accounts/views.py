@@ -13,10 +13,6 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.token_blacklist.models import (
-    BlacklistedToken,
-    OutstandingToken,
-)
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
@@ -70,6 +66,7 @@ from .services import (
     verify_registration_otp,
 )
 from .exceptions import EmailVerificationRequired
+from .deactivation import revoke_user_sessions
 
 User = get_user_model()
 
@@ -1115,17 +1112,11 @@ class ResetPasswordView(APIView):
         user = serializer.validated_data["user"]
         user.set_password(serializer.validated_data["password"])
         user.save(update_fields=["password"])
+        revoke_user_sessions(user)
         otp = serializer.validated_data["otp_instance"]
         otp.used_at = timezone.now()
         otp.save(update_fields=["used_at"])
         clear_otp_cooldown(user.email, OneTimePassword.Purpose.PASSWORD_RESET)
-        BlacklistedToken.objects.bulk_create(
-            [
-                BlacklistedToken(token=token)
-                for token in OutstandingToken.objects.filter(user=user)
-            ],
-            ignore_conflicts=True,
-        )
         return Response({"detail": "Password reset successfully."})
 
 
