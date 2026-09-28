@@ -23,6 +23,7 @@ TARGET_FIELDS = {
 
 class AdminHomeCampaignSerializer(serializers.ModelSerializer):
     effective_status = serializers.SerializerMethodField()
+    additional_images = serializers.SerializerMethodField()
     service_city_id = serializers.PrimaryKeyRelatedField(
         source="service_city",
         queryset=ServiceCity.objects.filter(is_active=True),
@@ -84,6 +85,7 @@ class AdminHomeCampaignSerializer(serializers.ModelSerializer):
             "media_type",
             "teaser_image",
             "sheet_image",
+            "additional_images",
             "video",
             "video_poster",
             "open_mode",
@@ -105,6 +107,7 @@ class AdminHomeCampaignSerializer(serializers.ModelSerializer):
             "effective_status",
             "teaser_image",
             "sheet_image",
+            "additional_images",
             "video",
             "video_poster",
             "target_summary",
@@ -114,6 +117,13 @@ class AdminHomeCampaignSerializer(serializers.ModelSerializer):
 
     def get_effective_status(self, instance):
         return instance.get_effective_status()
+
+    def get_additional_images(self, instance):
+        request = self.context.get("request")
+        return [
+            {"id": image.id, "url": _file_url(request, image.image)}
+            for image in instance.additional_images.all()
+        ]
 
     def get_service_city(self, instance):
         city = instance.service_city
@@ -222,7 +232,8 @@ class AdminHomeCampaignSerializer(serializers.ModelSerializer):
             "video_poster",
             getattr(instance, "video_poster", None) if instance else None,
         )
-        if is_active and media_type == HomeCampaign.MediaType.IMAGE and not sheet_image:
+        has_additional_images = instance and instance.additional_images.exists()
+        if is_active and media_type == HomeCampaign.MediaType.IMAGE and not (sheet_image or has_additional_images):
             raise serializers.ValidationError(
                 {"media_type": "Upload the campaign image before activation."}
             )
@@ -307,9 +318,16 @@ class ClientHomeCampaignSerializer(serializers.ModelSerializer):
 
     def get_media(self, instance):
         request = self.context.get("request")
+        image_urls = [
+            _file_url(request, image.image)
+            for image in instance.additional_images.all()
+        ]
+        if instance.sheet_image:
+            image_urls.insert(0, _file_url(request, instance.sheet_image))
         return {
             "type": instance.media_type,
             "image_url": _file_url(request, instance.sheet_image),
+            "image_urls": image_urls,
             "video_url": _file_url(request, instance.video),
             "poster_url": _file_url(request, instance.video_poster),
         }

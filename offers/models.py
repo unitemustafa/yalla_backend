@@ -323,3 +323,14 @@ class HomeCampaign(models.Model):
         if self.start_time > now:
             return "scheduled"
         return "active"
+
+
+class HomeCampaignImage(models.Model):
+    campaign = models.ForeignKey(
+        HomeCampaign, on_delete=models.CASCADE, related_name="additional_images"
+    )
+    image = models.ImageField(upload_to="home-campaigns/images/")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("id",)

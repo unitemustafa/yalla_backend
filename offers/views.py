@@ -21,7 +21,8 @@ from markets.region import (
 )
 from markets.serializers import HomeOfferSerializer
 
-from .models import HomeCampaign, Offer
+from .models import HomeCampaign, HomeCampaignImage, Offer
+from .campaign_media import validate_campaign_image
 from .images import OfferImageStorageError, replace_offer_image
 from .serializers import AdminOfferSerializer, OfferImageUploadSerializer
 from .campaign_serializers import (
@@ -49,7 +50,7 @@ class HomeCampaignListCreateView(APIView):
             "target_product",
             "target_market",
             "target_product_category",
-        ).order_by("-updated_at", "-id")
+        ).prefetch_related("additional_images").order_by("-updated_at", "-id")
         return paginated_list_response(
             request,
             queryset,
@@ -90,7 +91,7 @@ class HomeCampaignDetailView(APIView):
                 "target_product",
                 "target_market",
                 "target_product_category",
-            ),
+            ).prefetch_related("additional_images"),
             pk=campaign_id,
         )
 
@@ -135,6 +136,14 @@ class HomeCampaignMediaUploadView(APIView):
         if request.user.role != User.Role.ADMIN:
             raise PermissionDenied("Only admin users can manage home campaigns.")
         campaign = get_object_or_404(HomeCampaign, pk=campaign_id)
+        images = request.FILES.getlist("images")
+        if images and campaign.media_type != HomeCampaign.MediaType.IMAGE:
+            raise serializers.ValidationError({"images": "Select image media first."})
+        base_image_count = bool(campaign.sheet_image or request.FILES.get("sheet_image"))
+        if len(images) + campaign.additional_images.count() + base_image_count > 10:
+            raise serializers.ValidationError({"images": "A campaign supports up to 10 images."})
+        for image in images:
+            validate_campaign_image(image)
         serializer = HomeCampaignMediaSerializer(
             campaign,
             data=request.data,
@@ -142,12 +151,40 @@ class HomeCampaignMediaUploadView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         campaign = serializer.save()
+        for image in images:
+            HomeCampaignImage.objects.create(campaign=campaign, image=image)
+        if images:
+            campaign.save(update_fields=["updated_at"])
         return Response(
             AdminHomeCampaignSerializer(
                 campaign,
                 context={"request": request},
             ).data
         )
+
+
+class HomeCampaignImageDeleteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, campaign_id, image_id):
+        if request.user.role != User.Role.ADMIN:
+            raise PermissionDenied("Only admin users can manage home campaigns.")
+        image = get_object_or_404(
+            HomeCampaignImage, pk=image_id, campaign_id=campaign_id
+        )
+        campaign = image.campaign
+        if (
+            campaign.is_active
+            and campaign.media_type == HomeCampaign.MediaType.IMAGE
+            and not campaign.sheet_image
+            and campaign.additional_images.count() == 1
+        ):
+            raise serializers.ValidationError(
+                {"images": "Deactivate the campaign before removing its last image."}
+            )
+        image.delete()
+        campaign.save(update_fields=["updated_at"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class OfferListCreateView(APIView):

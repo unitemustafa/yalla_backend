@@ -22,7 +22,7 @@ from catalog.models import (
 from locations.models import ServiceCity
 from markets.models import Market, MarketClassification
 from config.tasks import delete_storage_file_task
-from .models import HomeCampaign
+from .models import HomeCampaign, HomeCampaignImage
 
 
 User = get_user_model()
@@ -370,3 +370,62 @@ class HomeCampaignAPITests(APITestCase):
         enqueue.assert_called_once()
         delete_storage_file_task.apply(args=enqueue.call_args.args).get()
         self.assertFalse(storage.exists(old_name))
+
+    def test_multiple_images_upload_display_and_delete(self):
+        campaign = self.create_campaign(
+            is_active=False,
+            media_type=HomeCampaign.MediaType.IMAGE,
+        )
+        self.authenticate(self.admin)
+        upload = self.client.post(
+            f"{CAMPAIGNS_BASE}{campaign.id}/media/",
+            {"images": [image_upload("first.png"), image_upload("second.png")]},
+            format="multipart",
+        )
+        self.assertEqual(upload.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(upload.data["additional_images"]), 2)
+        self.assertEqual(HomeCampaignImage.objects.filter(campaign=campaign).count(), 2)
+
+        activated = self.client.patch(
+            f"{CAMPAIGNS_BASE}{campaign.id}/",
+            {"is_active": True},
+            format="json",
+        )
+        self.assertEqual(activated.status_code, status.HTTP_200_OK)
+        self.authenticate(self.user)
+        home = self.client.get("/api/v1/home/")
+        self.assertEqual(home.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(home.data["home_campaign"]["media"]["image_urls"]), 2)
+
+        self.authenticate(self.admin)
+        image_id = upload.data["additional_images"][0]["id"]
+        deleted = self.client.delete(
+            f"{CAMPAIGNS_BASE}{campaign.id}/images/{image_id}/"
+        )
+        self.assertEqual(deleted.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(HomeCampaignImage.objects.filter(campaign=campaign).count(), 1)
+
+        last_image_id = upload.data["additional_images"][1]["id"]
+        rejected = self.client.delete(
+            f"{CAMPAIGNS_BASE}{campaign.id}/images/{last_image_id}/"
+        )
+        self.assertEqual(rejected.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_rejects_invalid_additional_image_without_partial_upload(self):
+        campaign = self.create_campaign(
+            is_active=False,
+            media_type=HomeCampaign.MediaType.IMAGE,
+        )
+        self.authenticate(self.admin)
+        response = self.client.post(
+            f"{CAMPAIGNS_BASE}{campaign.id}/media/",
+            {
+                "images": [
+                    image_upload("valid.png"),
+                    SimpleUploadedFile("bad.txt", b"bad", content_type="text/plain"),
+                ]
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(HomeCampaignImage.objects.filter(campaign=campaign).exists())

@@ -4,6 +4,7 @@ from .views import (
     HomeCampaignDetailView,
     HomeCampaignListCreateView,
     HomeCampaignMediaUploadView,
+    HomeCampaignImageDeleteView,
     OfferDetailView,
     OfferImageUploadView,
     OfferListCreateView,
@@ -11,6 +12,11 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        "home-campaigns/<int:campaign_id>/images/<int:image_id>/",
+        HomeCampaignImageDeleteView.as_view(),
+        name="home-campaign-image-delete",
+    ),
     path(
         "home-campaigns/",
         HomeCampaignListCreateView.as_view(),

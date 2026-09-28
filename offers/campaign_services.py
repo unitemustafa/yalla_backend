@@ -15,7 +15,7 @@ def _media_is_ready(campaign):
     if campaign.media_type == HomeCampaign.MediaType.NONE:
         return True
     if campaign.media_type == HomeCampaign.MediaType.IMAGE:
-        return bool(campaign.sheet_image)
+        return bool(campaign.sheet_image or campaign.additional_images.exists())
     return bool(campaign.video and campaign.video_poster)
 
 
@@ -92,7 +92,7 @@ def active_home_campaign_for(user):
         "target_product__market",
         "target_market__classification",
         "target_product_category",
-    ).order_by("created_at", "id")
+    ).prefetch_related("additional_images").order_by("created_at", "id")
     eligible = [
         campaign
         for campaign in queryset
