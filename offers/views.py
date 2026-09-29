@@ -2,7 +2,6 @@ import logging
 import uuid
 
 from django.db.models import Exists, OuterRef, ProtectedError, Q
-from django.utils import timezone
 
 from rest_framework import serializers, status
 from rest_framework.exceptions import PermissionDenied
@@ -196,7 +195,7 @@ class OfferListCreateView(APIView):
         )
         return (
             Offer.objects.annotate(
-                deletion_mode_is_archive=Exists(protected_offers),
+                deletion_mode_is_blocked=Exists(protected_offers),
             )
             .select_related(
                 "market__classification",
@@ -396,17 +395,9 @@ class OfferDetailView(APIView):
         try:
             offer.delete()
         except ProtectedError:
-            offer.status = Offer.Status.INACTIVE
-            offer.archived_at = timezone.now()
-            offer.save(update_fields=("status", "archived_at", "updated_at"))
             return Response(
-                {
-                    "action": "archived",
-                    "detail": (
-                        "تمت أرشفة العرض بدلًا من حذفه لأنه مرتبط بسجل طلبات سابق."
-                    ),
-                },
-                status=status.HTTP_200_OK,
+                {"detail": "لا يمكن حذف العرض لأنه مرتبط بطلبات أو إشعارات."},
+                status=status.HTTP_409_CONFLICT,
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
 

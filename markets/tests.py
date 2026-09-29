@@ -1255,17 +1255,16 @@ class HomeAPITests(APITestCase):
             MarketClassification.ClassificationType.NORMAL,
         )
 
-    def test_market_classification_delete_archives_used_classification(self):
+    def test_market_classification_delete_blocks_used_classification(self):
         self.authenticate(self.admin)
 
         response = self.client.delete(
             f"{HOME_BASE}/market-classifications/{self.local_classification.id}/"
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["action"], "archived")
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         self.local_classification.refresh_from_db()
-        self.assertFalse(self.local_classification.is_active)
+        self.assertTrue(self.local_classification.is_active)
 
     def test_market_classification_deletion_mode_and_linked_types(self):
         empty = MarketClassification.objects.create(name="Empty classification")
@@ -1283,19 +1282,15 @@ class HomeAPITests(APITestCase):
         rows = response.data["results"] if isinstance(response.data, dict) else response.data
         modes = {row["id"]: row["deletion_mode"] for row in rows}
         self.assertEqual(modes[empty.id], "delete")
-        self.assertEqual(modes[with_type.id], "archive")
-        self.assertEqual(modes[self.local_classification.id], "archive")
-
-        archived = self.client.delete(
-            f"{HOME_BASE}/market-classifications/{with_type.id}/"
-        )
-        self.assertEqual(archived.status_code, status.HTTP_200_OK)
-        self.assertEqual(archived.data["action"], "archived")
+        self.assertEqual(modes[with_type.id], "blocked")
+        self.assertEqual(modes[self.local_classification.id], "blocked")
+        response = self.client.delete(f"{HOME_BASE}/market-classifications/{with_type.id}/")
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         with_type.refresh_from_db()
-        self.assertFalse(with_type.is_active)
+        self.assertTrue(with_type.is_active)
         self.assertTrue(with_type.market_types.exists())
 
-    def test_used_market_type_is_archived_without_removing_market_link(self):
+    def test_used_market_type_cannot_be_deleted(self):
         market_type = MarketType.objects.create(
             classification=self.local_classification,
             name_ar="الحيوانات",
@@ -1307,10 +1302,9 @@ class HomeAPITests(APITestCase):
 
         response = self.client.delete(f"{HOME_BASE}/market-types/{market_type.id}/")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["action"], "archived")
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         market_type.refresh_from_db()
-        self.assertFalse(market_type.is_active)
+        self.assertTrue(market_type.is_active)
         self.assertTrue(self.local_market.market_types.filter(pk=market_type.pk).exists())
 
     def test_market_crud_requires_admin_role(self):
@@ -1412,7 +1406,7 @@ class HomeAPITests(APITestCase):
             status.HTTP_404_NOT_FOUND,
         )
 
-    def test_admin_delete_archives_market_used_by_order(self):
+    def test_admin_delete_blocks_market_used_by_order(self):
         self.authenticate(self.admin)
         order = Order.objects.create(
             user=self.user,
@@ -1426,30 +1420,11 @@ class HomeAPITests(APITestCase):
 
         response = self.client.delete(f"{HOME_BASE}/markets/{self.local_market.id}/")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["action"], "archived")
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         self.local_market.refresh_from_db()
-        self.assertEqual(self.local_market.status, Market.Status.INACTIVE)
-        self.assertIsNotNone(self.local_market.archived_at)
+        self.assertEqual(self.local_market.status, Market.Status.ACTIVE)
+        self.assertIsNone(self.local_market.archived_at)
         self.assertTrue(Order.objects.filter(pk=order.id).exists())
-        self.assertNotIn(
-            self.local_market.id,
-            [item["id"] for item in self.client.get(f"{HOME_BASE}/markets/").data],
-        )
-        archived_market = next(
-            item
-            for item in self.client.get(f"{HOME_BASE}/markets/?archived=true").data
-            if item["id"] == self.local_market.id
-        )
-        self.assertEqual(archived_market["deletion_mode"], "archive")
-
-        restore_response = self.client.patch(
-            f"{HOME_BASE}/markets/{self.local_market.id}/",
-            {"restore": True},
-            format="json",
-        )
-        self.assertEqual(restore_response.status_code, status.HTTP_200_OK)
-        self.assertIsNone(restore_response.data["archived_at"])
 
     def test_admin_market_rejects_general_scope_with_service_city(self):
         classification = MarketClassification.objects.create(name="General only")

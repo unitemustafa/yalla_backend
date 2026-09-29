@@ -115,7 +115,7 @@ class AdditionClassificationAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_admin_delete_archives_product_used_by_order(self):
+    def test_admin_delete_blocks_product_used_by_order(self):
         self.authenticate(self.admin)
         variant = ProductVariant.objects.create(
             product=self.product,
@@ -137,30 +137,14 @@ class AdditionClassificationAPITests(APITestCase):
 
         response = self.client.delete(f"{CATALOG_BASE}/products/{self.product.id}/")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["action"], "archived")
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         self.product.refresh_from_db()
-        self.assertFalse(self.product.is_available)
-        self.assertIsNotNone(self.product.archived_at)
-
-        current_response = self.client.get(f"{CATALOG_BASE}/products/")
-        archived_response = self.client.get(f"{CATALOG_BASE}/products/?archived=true")
-        self.assertNotIn(
-            self.product.id,
-            [item["id"] for item in current_response.data],
-        )
-        archived_product = next(
-            item for item in archived_response.data if item["id"] == self.product.id
-        )
-        self.assertEqual(archived_product["deletion_mode"], "archive")
-
-        restore_response = self.client.patch(
-            f"{CATALOG_BASE}/products/{self.product.id}/",
-            {"restore": True},
-            format="json",
-        )
-        self.assertEqual(restore_response.status_code, status.HTTP_200_OK)
-        self.assertIsNone(restore_response.data["archived_at"])
+        self.assertTrue(self.product.is_available)
+        self.assertIsNone(self.product.archived_at)
+        self.assertTrue(OrderItem.objects.filter(order=order, variant=variant).exists())
+        listed = self.client.get(f"{CATALOG_BASE}/products/")
+        row = next(item for item in listed.data if item["id"] == self.product.id)
+        self.assertEqual(row["deletion_mode"], "blocked")
 
     def test_addition_classification_create_requires_admin_role(self):
         self.authenticate(self.client_user)
@@ -815,7 +799,7 @@ class AdditionClassificationAPITests(APITestCase):
         self.assertEqual(response.data["variants"][0]["id"], variant.id)
         self.assertEqual(self.product.variants.count(), 1)
 
-    def test_admin_can_create_read_update_and_archive_product(self):
+    def test_admin_can_create_read_update_and_delete_product(self):
         addition_classification = AdditionClassification.objects.create(
             name="إضافات الوجبات"
         )
@@ -939,9 +923,8 @@ class AdditionClassificationAPITests(APITestCase):
         )
         self.assertEqual(update_response.data["variants"][0]["sku"], "MEAL-L")
         self.assertEqual(update_response.data["additions"], [])
-        self.assertEqual(delete_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(delete_response.data["action"], "archived")
-        self.assertIn(
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertNotIn(
             product_id,
             [item["id"] for item in archived_list_response.data],
         )

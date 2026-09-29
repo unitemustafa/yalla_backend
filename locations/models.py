@@ -31,9 +31,9 @@ class ServiceCity(models.Model):
     archived_at = models.DateTimeField(blank=True, null=True, db_index=True)
 
     def get_deletion_mode(self):
-        annotated_mode = getattr(self, "deletion_mode_is_archive", None)
+        annotated_mode = getattr(self, "deletion_mode_is_blocked", None)
         if annotated_mode is not None:
-            return "archive" if annotated_mode else "delete"
+            return "blocked" if annotated_mode else "delete"
 
         from accounts.models import CourierProfile
         from orders.models import Order
@@ -52,7 +52,7 @@ class ServiceCity(models.Model):
             or Order.objects.filter(service_city=self).exists()
             or self.market_region_users.filter(deleted_at__isnull=True).exists()
         )
-        return "archive" if is_protected else "delete"
+        return "blocked" if is_protected else "delete"
 
     def __str__(self):
         return self.name
@@ -84,7 +84,7 @@ class ShippingCompany(models.Model):
         ]
 
     def get_deletion_mode(self):
-        return "archive" if self.orders.exists() else "delete"
+        return "blocked" if self.orders.exists() else "delete"
 
     def __str__(self):
         return self.name
@@ -231,21 +231,21 @@ class DeliveryArea(models.Model):
     archived_at = models.DateTimeField(blank=True, null=True, db_index=True)
 
     def get_deletion_mode(self):
-        annotated_mode = getattr(self, "deletion_mode_is_archive", None)
+        annotated_mode = getattr(self, "deletion_mode_is_blocked", None)
         if annotated_mode is not None:
-            return "archive" if annotated_mode else "delete"
+            return "blocked" if annotated_mode else "delete"
         from accounts.models import CourierProfile
         from orders.models import Order
 
         if CourierProfile.objects.filter(delivery_area=self).exists():
-            return "archive"
+            return "blocked"
         if Order.objects.filter(
             models.Q(delivery_area=self)
             | models.Q(delivery_address__delivery_area=self)
         ).exists():
-            return "archive"
+            return "blocked"
         if self.addresses.filter(is_active=True).exists():
-            return "archive"
+            return "blocked"
         return "delete"
 
     class Meta:

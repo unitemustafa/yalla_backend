@@ -120,7 +120,14 @@ class Product(models.Model):
     archived_at = models.DateTimeField(blank=True, null=True, db_index=True)
 
     def get_deletion_mode(self):
-        return "archive"
+        annotated_mode = getattr(self, "deletion_mode_is_blocked", None)
+        if annotated_mode is not None:
+            return "blocked" if annotated_mode else "delete"
+        if self.variants.filter(
+            models.Q(order_items__isnull=False) | models.Q(offer_items__isnull=False)
+        ).exists():
+            return "blocked"
+        return "delete"
 
 
 class ProductImage(models.Model):

@@ -238,7 +238,7 @@ class StoreSubcategoryAPITests(APITestCase):
             [self.drinks.id],
         )
 
-    def test_used_subcategory_cannot_be_unassigned_and_is_archived_on_delete(self):
+    def test_used_subcategory_cannot_be_unassigned_or_deleted(self):
         market = self.create_market()
         product = Product.objects.create(
             market=market,
@@ -265,14 +265,12 @@ class StoreSubcategoryAPITests(APITestCase):
         response = self.client.delete(
             f"{CATALOG_BASE}/store-subcategories/{self.drinks.id}/"
         )
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["action"], "archived")
-        self.assertEqual(response.data["product_count"], 1)
-        self.assertTrue(Product.objects.filter(pk=product.pk).exists())
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         self.drinks.refresh_from_db()
-        self.assertFalse(self.drinks.is_active)
+        self.assertTrue(self.drinks.is_active)
+        self.assertTrue(StoreSubcategory.objects.filter(pk=self.drinks.pk).exists())
 
-    def test_subcategory_used_only_by_market_is_archived_on_delete(self):
+    def test_subcategory_used_only_by_market_cannot_be_deleted(self):
         market = self.create_market()
         self.authenticate()
 
@@ -280,11 +278,10 @@ class StoreSubcategoryAPITests(APITestCase):
             f"{CATALOG_BASE}/store-subcategories/{self.drinks.id}/"
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["action"], "archived")
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         self.drinks.refresh_from_db()
-        self.assertFalse(self.drinks.is_active)
-        self.assertTrue(market.subcategories.filter(pk=self.drinks.pk).exists())
+        self.assertTrue(self.drinks.is_active)
+        self.assertTrue(StoreSubcategory.objects.filter(pk=self.drinks.pk).exists())
 
     def test_inactive_subcategory_stays_on_existing_product_but_rejects_new_use(self):
         market = self.create_market()

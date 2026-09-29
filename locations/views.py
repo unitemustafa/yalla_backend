@@ -1,7 +1,6 @@
 from django.db import transaction
 from django.db.models import Count, Exists, OuterRef, Q
 from django.db.models.deletion import ProtectedError
-from django.utils import timezone
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -61,7 +60,7 @@ def service_city_queryset():
         )
     )
     return ServiceCity.objects.annotate(
-        deletion_mode_is_archive=Exists(protected_cities),
+        deletion_mode_is_blocked=Exists(protected_cities),
         delivery_area_count=Count("delivery_areas", distinct=True),
         market_count=Count("markets", distinct=True),
         offer_count=Count("offers", distinct=True),
@@ -127,9 +126,18 @@ class ServiceCityDetailView(
             ServiceCity.objects.select_for_update(),
             pk=kwargs[self.lookup_url_kwarg],
         )
-        # Soft-deleted accounts are not active city dependencies. Remove their
-        # dependent data before deleting the city because its foreign keys
-        # intentionally protect a city while stale records still reference it.
+        relations = service_city_relation_counts(city)
+        if relations:
+            return Response(
+                {
+                    "detail": f"لا يمكن حذف مدينة {city.name} لأنها مرتبطة ببيانات مستخدمة.",
+                    "relations": relations,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # Historical records from deleted accounts can be cleared only after
+        # confirming the city itself is deletable.
         CourierProfile.objects.filter(
             service_city=city,
             user__deleted_at__isnull=False,
@@ -146,23 +154,6 @@ class ServiceCityDetailView(
             market_region_service_city=None,
             market_region_updated_at=None,
         )
-        relations = service_city_relation_counts(city)
-        if relations:
-            city.is_active = False
-            city.archived_at = timezone.now()
-            city.save(update_fields=("is_active", "archived_at"))
-            return Response(
-                {
-                    "action": "archived",
-                    "detail": (
-                        f"تمت أرشفة مدينة {city.name} وتعطيلها لأنها "
-                        "مرتبطة ببيانات مستخدمة."
-                    ),
-                    "relations": relations,
-                },
-                status=status.HTTP_200_OK,
-            )
-
         city.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -188,7 +179,7 @@ class DeliveryAreaListCreateView(generics.ListCreateAPIView):
         )
         queryset = (
             DeliveryArea.objects.annotate(
-                deletion_mode_is_archive=Exists(protected_areas),
+                deletion_mode_is_blocked=Exists(protected_areas),
             )
             .select_related("service_city")
             .order_by("name", "id")
@@ -243,22 +234,10 @@ class DeliveryAreaDetailView(
     def update(self, request, *args, **kwargs):
         return super().update(request, *args, **kwargs)
 
-    def archive(self, area, detail):
-        was_active = area.is_active
-        if was_active:
-            area.is_active = False
-            area.archived_at = timezone.now()
-            area.save(update_fields=("is_active", "archived_at"))
-            _schedule_delivery_area_status_change(area.id, False)
-        elif area.archived_at is None:
-            area.archived_at = timezone.now()
-            area.save(update_fields=("archived_at",))
+    def deletion_blocked(self, detail):
         return Response(
-            {
-                "action": "archived",
-                "detail": detail,
-            },
-            status=status.HTTP_200_OK,
+            {"detail": detail},
+            status=status.HTTP_409_CONFLICT,
         )
 
     @transaction.atomic
@@ -268,10 +247,7 @@ class DeliveryAreaDetailView(
         )
 
         if CourierProfile.objects.filter(delivery_area=area).exists():
-            return self.archive(
-                area,
-                "تمت أرشفة منطقة التوصيل لأنها مستخدمة بواسطة طيارين.",
-            )
+            return self.deletion_blocked("لا يمكن حذف منطقة التوصيل لأنها مستخدمة بواسطة طيارين.")
 
         if (
             Order.objects.filter(
@@ -281,10 +257,10 @@ class DeliveryAreaDetailView(
                 delivery_address__delivery_area=area,
             ).exists()
         ):
-            return self.archive(
-                area,
-                "تمت أرشفة منطقة التوصيل لأنها مرتبطة بسجل طلبات سابق.",
-            )
+            return self.deletion_blocked("لا يمكن حذف منطقة التوصيل لأنها مرتبطة بطلبات.")
+
+        if Address.objects.filter(delivery_area=area, is_active=True).exists():
+            return self.deletion_blocked("لا يمكن حذف منطقة التوصيل لأنها مرتبطة بعناوين محفوظة.")
 
         stale_addresses = Address.objects.filter(
             delivery_area=area,
@@ -294,16 +270,7 @@ class DeliveryAreaDetailView(
         try:
             stale_addresses.delete()
         except ProtectedError:
-            return self.archive(
-                area,
-                "تمت أرشفة منطقة التوصيل لأنها مرتبطة بسجل طلبات سابق.",
-            )
-
-        if Address.objects.filter(delivery_area=area, is_active=True).exists():
-            return self.archive(
-                area,
-                "تمت أرشفة منطقة التوصيل لأنها مرتبطة بعناوين محفوظة.",
-            )
+            return self.deletion_blocked("لا يمكن حذف منطقة التوصيل لأنها مرتبطة بطلبات.")
 
         area.markets.clear()
         area.delete()
@@ -366,11 +333,11 @@ class ShippingCompanyDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def patch(self, request, *args, **kwargs):
         company = self.get_object()
-        if request.data.get("archive") is True:
-            company.is_active = False
-            company.archived_at = company.archived_at or timezone.now()
-            company.save(update_fields=("is_active", "archived_at", "updated_at"))
-            return Response(self.get_serializer(company).data)
+        if "archive" in request.data:
+            return Response(
+                {"detail": "أرشفة شركات الشحن لم تعد متاحة."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if request.data.get("restore") is True:
             company.archived_at = None
             company.save(update_fields=("archived_at", "updated_at"))
@@ -384,15 +351,9 @@ class ShippingCompanyDetailView(generics.RetrieveUpdateDestroyAPIView):
             pk=kwargs[self.lookup_url_kwarg],
         )
         if company.orders.exists():
-            company.is_active = False
-            company.archived_at = timezone.now()
-            company.save(update_fields=("is_active", "archived_at", "updated_at"))
             return Response(
-                {
-                    "action": "archived",
-                    "detail": "Shipping company was archived because it is used by orders.",
-                },
-                status=status.HTTP_200_OK,
+                {"detail": "لا يمكن حذف شركة الشحن لأنها مرتبطة بطلبات."},
+                status=status.HTTP_409_CONFLICT,
             )
         logo = company.logo
         company.delete()

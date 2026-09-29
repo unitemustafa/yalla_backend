@@ -1,5 +1,4 @@
-from django.db.models import Count, ProtectedError, Q
-from django.utils import timezone
+from django.db.models import Count, Exists, OuterRef, ProtectedError, Q
 
 from rest_framework import serializers, status
 from rest_framework.generics import get_object_or_404
@@ -20,6 +19,7 @@ from .models import (
     ProductImage,
     ProductCategory,
     ProductAddition,
+    ProductVariant,
     StoreSubcategory,
 )
 from .serializers import (
@@ -49,7 +49,12 @@ IsClientRole = IsCatalogClientRole
 
 
 def product_queryset():
-    return Product.objects.select_related(
+    protected_variants = ProductVariant.objects.filter(product_id=OuterRef("pk")).filter(
+        Q(order_items__isnull=False) | Q(offer_items__isnull=False)
+    )
+    return Product.objects.annotate(
+        deletion_mode_is_blocked=Exists(protected_variants),
+    ).select_related(
         "market__classification",
         "category__classification",
         "subcategory",
@@ -154,18 +159,12 @@ class StoreSubcategoryDetailView(APIView):
             .count()
         )
         if product_count or subcategory.market_count:
-            subcategory.is_active = False
-            subcategory.save(update_fields=("is_active", "updated_at"))
             return Response(
                 {
-                    "detail": (
-                        "تمت أرشفة الفئة الداخلية وتعطيلها لأنها مستخدمة "
-                        "بواسطة منتجات أو محلات حالية."
-                    ),
-                    "action": "archived",
+                    "detail": "لا يمكن حذف القسم لأنه مرتبط بمنتجات أو محلات.",
                     "product_count": product_count,
                 },
-                status=status.HTTP_200_OK,
+                status=status.HTTP_409_CONFLICT,
             )
         subcategory.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -611,16 +610,19 @@ class ProductDetailView(APIView):
 
     def delete(self, request, product_id):
         product = self.get_product(product_id)
-        product.is_available = False
-        product.archived_at = timezone.now()
-        product.save(update_fields=("is_available", "archived_at", "updated_at"))
-        return Response(
-            {
-                "action": "archived",
-                "detail": "تمت أرشفة المنتج ويمكن استعادته من الأرشيف.",
-            },
-            status=status.HTTP_200_OK,
-        )
+        if product.get_deletion_mode() != "delete":
+            return Response(
+                {"detail": "لا يمكن حذف المنتج لأنه مرتبط بطلبات أو عروض."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            product.delete()
+        except ProtectedError:
+            return Response(
+                {"detail": "لا يمكن حذف المنتج لأنه مرتبط ببيانات مستخدمة."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ProductSendNotificationView(APIView):

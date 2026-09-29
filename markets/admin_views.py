@@ -1,7 +1,6 @@
 from django.db import transaction
 from django.db.models import ProtectedError
 from django.db.models import Count, Exists, OuterRef, Q
-from django.utils import timezone
 from rest_framework import status
 from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
@@ -24,7 +23,7 @@ class AdminMarketClassificationListCreateView(APIView):
 
     def get(self, request):
         classifications = MarketClassification.objects.annotate(
-            deletion_mode_is_archive=(
+            deletion_mode_is_blocked=(
                 Exists(Market.objects.filter(classification_id=OuterRef("pk")))
                 | Exists(MarketType.objects.filter(classification_id=OuterRef("pk")))
             ),
@@ -85,29 +84,17 @@ class AdminMarketClassificationDetailView(APIView):
 
     def delete(self, request, classification_id):
         classification = self.get_classification(classification_id)
-        if classification.get_deletion_mode() == "archive":
-            classification.is_active = False
-            classification.save(update_fields=("is_active",))
+        if classification.get_deletion_mode() != "delete":
             return Response(
-                {
-                    "action": "archived",
-                    "detail": "تمت أرشفة فئة المحل وتعطيلها لأنها مرتبطة بمحلات أو فئات ثانوية.",
-                },
-                status=status.HTTP_200_OK,
+                {"detail": "لا يمكن حذف الفئة لأنها مرتبطة بمحلات أو فئات ثانوية."},
+                status=status.HTTP_409_CONFLICT,
             )
         try:
             classification.delete()
         except ProtectedError:
-            classification.is_active = False
-            classification.save(update_fields=("is_active",))
             return Response(
-                {
-                    "action": "archived",
-                    "detail": (
-                        "تمت أرشفة فئة المحل وتعطيلها لأنها مستخدمة بواسطة محلات حالية."
-                    ),
-                },
-                status=status.HTTP_200_OK,
+                {"detail": "لا يمكن حذف الفئة لأنها مرتبطة بمحلات."},
+                status=status.HTTP_409_CONFLICT,
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -237,11 +224,9 @@ class AdminMarketTypeDetailView(APIView):
     def delete(self, request, market_type_id):
         market_type = self.get_market_type(market_type_id)
         if market_type.market_count:
-            market_type.is_active = False
-            market_type.save(update_fields=("is_active", "updated_at"))
             return Response(
-                {"action": "archived", "detail": "تمت أرشفة الفئة الثانوية لأنها مرتبطة بمحلات."},
-                status=status.HTTP_200_OK,
+                {"detail": "لا يمكن حذف الفئة الثانوية لأنها مرتبطة بمحلات."},
+                status=status.HTTP_409_CONFLICT,
             )
         market_type.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -259,7 +244,7 @@ class AdminMarketListCreateView(APIView):
         )
         markets = (
             Market.objects.annotate(
-                deletion_mode_is_archive=Exists(protected_markets),
+                deletion_mode_is_blocked=Exists(protected_markets),
             )
             .select_related("classification")
             .prefetch_related(
@@ -350,16 +335,8 @@ class AdminMarketDetailView(APIView):
         try:
             market.delete()
         except ProtectedError:
-            market.status = Market.Status.INACTIVE
-            market.archived_at = timezone.now()
-            market.save(update_fields=("status", "archived_at", "updated_at"))
             return Response(
-                {
-                    "action": "archived",
-                    "detail": (
-                        "تمت أرشفة المحل بدلًا من حذفه لأنه مرتبط بسجل طلبات سابق."
-                    ),
-                },
-                status=status.HTTP_200_OK,
+                {"detail": "لا يمكن حذف المحل لأنه مرتبط بطلبات أو عروض."},
+                status=status.HTTP_409_CONFLICT,
             )
         return Response(status=status.HTTP_204_NO_CONTENT)

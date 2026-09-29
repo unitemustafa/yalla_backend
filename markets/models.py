@@ -90,10 +90,10 @@ class MarketClassification(models.Model):
         return self.name
 
     def get_deletion_mode(self):
-        annotated_mode = getattr(self, "deletion_mode_is_archive", None)
+        annotated_mode = getattr(self, "deletion_mode_is_blocked", None)
         if annotated_mode is not None:
-            return "archive" if annotated_mode else "delete"
-        return "archive" if self.markets.exists() or self.market_types.exists() else "delete"
+            return "blocked" if annotated_mode else "delete"
+        return "blocked" if self.markets.exists() or self.market_types.exists() else "delete"
 
 
 class MarketType(models.Model):
@@ -228,16 +228,16 @@ class Market(models.Model):
         return self.name
 
     def get_deletion_mode(self):
-        annotated_mode = getattr(self, "deletion_mode_is_archive", None)
+        annotated_mode = getattr(self, "deletion_mode_is_blocked", None)
         if annotated_mode is not None:
-            return "archive" if annotated_mode else "delete"
+            return "blocked" if annotated_mode else "delete"
         if self.orders.exists() or self.order_sections.exists():
-            return "archive"
+            return "blocked"
         protected_products = self.products.filter(
             models.Q(variants__order_items__isnull=False)
             | models.Q(variants__offer_items__isnull=False)
         )
-        return "archive" if protected_products.exists() else "delete"
+        return "blocked" if protected_products.exists() else "delete"
 
 
 class MarketSubcategory(models.Model):

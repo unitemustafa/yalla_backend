@@ -144,7 +144,7 @@ class ShippingCompanyAPITests(TestCase):
         self.assertEqual([row["id"] for row in response.data], [active.id])
         self.assertEqual(forbidden.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_used_company_is_archived_and_can_be_restored(self):
+    def test_used_company_cannot_be_deleted(self):
         company = ShippingCompany.objects.create(name="Used Shipping")
         company.service_cities.add(self.cairo)
         classification = MarketClassification.objects.create(name="Shipping Market")
@@ -162,23 +162,13 @@ class ShippingCompanyAPITests(TestCase):
         deleted = self.client.delete(
             f"/api/v1/locations/shipping-companies/{company.id}/"
         )
-        archived = self.client.get(
-            "/api/v1/locations/shipping-companies/?archived=true"
-        )
-        restored = self.client.patch(
-            f"/api/v1/locations/shipping-companies/{company.id}/",
-            {"restore": True},
-            format="json",
-        )
+        self.assertEqual(deleted.status_code, status.HTTP_409_CONFLICT)
+        company.refresh_from_db()
+        self.assertTrue(company.is_active)
+        self.assertIsNone(company.archived_at)
+        self.assertTrue(ShippingCompany.objects.filter(pk=company.id).exists())
 
-        self.assertEqual(deleted.status_code, status.HTTP_200_OK)
-        self.assertEqual(deleted.data["action"], "archived")
-        self.assertEqual([row["id"] for row in archived.data], [company.id])
-        self.assertEqual(restored.status_code, status.HTTP_200_OK)
-        self.assertIsNone(restored.data["archived_at"])
-        self.assertFalse(restored.data["is_active"])
-
-    def test_admin_can_explicitly_archive_unused_company(self):
+    def test_admin_cannot_explicitly_archive_unused_company(self):
         company = ShippingCompany.objects.create(name="Unused Shipping")
         company.service_cities.add(self.cairo)
 
@@ -188,9 +178,10 @@ class ShippingCompanyAPITests(TestCase):
             format="json",
         )
 
-        self.assertEqual(archived.status_code, status.HTTP_200_OK)
-        self.assertIsNotNone(archived.data["archived_at"])
-        self.assertFalse(archived.data["is_active"])
+        self.assertEqual(archived.status_code, status.HTTP_400_BAD_REQUEST)
+        company.refresh_from_db()
+        self.assertIsNone(company.archived_at)
+        self.assertTrue(company.is_active)
         self.assertTrue(ShippingCompany.objects.filter(pk=company.id).exists())
 
 
@@ -1247,18 +1238,15 @@ class LocationManagementAPITests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(ServiceCity.objects.filter(pk=city.id).exists())
 
-    def assert_service_city_delete_archived(self, city, expected_relation):
+    def assert_service_city_delete_blocked(self, city, expected_relation):
         response = self.client.delete(f"/api/v1/locations/service-cities/{city.id}/")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["action"], "archived")
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         self.assertIn(expected_relation, response.data["relations"])
         self.assertGreater(response.data["relations"][expected_relation], 0)
-        self.assertIn(city.name, response.data["detail"])
-        self.assertTrue(ServiceCity.objects.filter(pk=city.id).exists())
         city.refresh_from_db()
-        self.assertFalse(city.is_active)
-        self.assertIsNotNone(city.archived_at)
+        self.assertTrue(city.is_active)
+        self.assertIsNone(city.archived_at)
         return response
 
     def test_service_city_with_delivery_areas_is_not_deleted(self):
@@ -1268,10 +1256,26 @@ class LocationManagementAPITests(TestCase):
             name="Area",
             delivery_price=Decimal("20.00"),
         )
+        deleted_user = User.objects.create_user(
+            username="deleted_city_courier_with_active_area",
+            email="deleted-city-courier-with-active-area@example.com",
+            phone="+201000000091",
+            password="Passw0rd!",
+            role=User.Role.REPRESENTATIVE,
+        )
+        deleted_user.deleted_at = timezone.now()
+        deleted_user.save(update_fields=["deleted_at"])
+        stale_profile = CourierProfile.objects.create(
+            user=deleted_user,
+            vehicle_type="Bike",
+            plate_number="STALE123",
+            service_city=city,
+        )
 
-        self.assert_service_city_delete_archived(city, "delivery_areas")
+        self.assert_service_city_delete_blocked(city, "delivery_areas")
+        self.assertTrue(CourierProfile.objects.filter(pk=stale_profile.pk).exists())
 
-    def test_archived_service_city_is_hidden_and_can_be_restored(self):
+    def test_linked_service_city_stays_visible_after_blocked_delete(self):
         city = ServiceCity.objects.create(name="Restorable City")
         DeliveryArea.objects.create(
             service_city=city,
@@ -1283,37 +1287,22 @@ class LocationManagementAPITests(TestCase):
         city_before = next(
             item for item in current_before.data if item["id"] == city.id
         )
-        self.assertEqual(city_before["deletion_mode"], "archive")
-
-        self.assert_service_city_delete_archived(city, "delivery_areas")
-
+        self.assertEqual(city_before["deletion_mode"], "blocked")
+        self.assert_service_city_delete_blocked(city, "delivery_areas")
         current_after = self.client.get("/api/v1/locations/service-cities/")
-        archived = self.client.get("/api/v1/locations/service-cities/?archived=true")
-        self.assertNotIn(city.id, [item["id"] for item in current_after.data])
-        self.assertIn(city.id, [item["id"] for item in archived.data])
-
-        restored = self.client.patch(
-            f"/api/v1/locations/service-cities/{city.id}/",
-            {"restore": True},
-            format="json",
-        )
-        self.assertEqual(restored.status_code, status.HTTP_200_OK)
-        self.assertIsNone(restored.data["archived_at"])
-        self.assertEqual(restored.data["deletion_mode"], "archive")
-        city.refresh_from_db()
-        self.assertIsNone(city.archived_at)
+        self.assertIn(city.id, [item["id"] for item in current_after.data])
 
     def test_service_city_with_markets_is_not_deleted(self):
         city = ServiceCity.objects.create(name="Market City")
         self.create_market_for_city(city)
 
-        self.assert_service_city_delete_archived(city, "markets")
+        self.assert_service_city_delete_blocked(city, "markets")
 
     def test_service_city_with_offers_is_not_deleted(self):
         city = ServiceCity.objects.create(name="Offer City")
         self.create_offer_for_city(city)
 
-        self.assert_service_city_delete_archived(city, "offers")
+        self.assert_service_city_delete_blocked(city, "offers")
 
     def test_service_city_with_couriers_is_not_deleted(self):
         city = ServiceCity.objects.create(name="Courier City")
@@ -1331,7 +1320,7 @@ class LocationManagementAPITests(TestCase):
             service_city=city,
         )
 
-        self.assert_service_city_delete_archived(city, "couriers")
+        self.assert_service_city_delete_blocked(city, "couriers")
 
     def test_deleted_courier_profile_does_not_block_service_city_deletion(self):
         city = ServiceCity.objects.create(name="Deleted Courier City")
@@ -1409,7 +1398,7 @@ class LocationManagementAPITests(TestCase):
             delivery_type=Address.DeliveryType.DELIVERY,
         )
 
-        self.assert_service_city_delete_archived(city, "addresses")
+        self.assert_service_city_delete_blocked(city, "addresses")
 
     def test_service_city_with_orders_is_not_deleted(self):
         city = ServiceCity.objects.create(name="Order City")
@@ -1426,7 +1415,7 @@ class LocationManagementAPITests(TestCase):
             total_price=Decimal("100.00"),
         )
 
-        self.assert_service_city_delete_archived(city, "orders")
+        self.assert_service_city_delete_blocked(city, "orders")
 
     def test_service_city_with_region_users_is_not_deleted_and_counts_returned(self):
         city = ServiceCity.objects.create(name="Region City")
@@ -1437,7 +1426,7 @@ class LocationManagementAPITests(TestCase):
             delivery_price=Decimal("20.00"),
         )
 
-        response = self.assert_service_city_delete_archived(city, "users")
+        response = self.assert_service_city_delete_blocked(city, "users")
 
         self.assertEqual(response.data["relations"]["delivery_areas"], 1)
         self.assertEqual(response.data["relations"]["users"], 1)
@@ -1507,46 +1496,17 @@ class LocationManagementAPITests(TestCase):
         self.assertTrue(Market.objects.filter(pk=market.id).exists())
         self.assertFalse(market.delivery_areas.filter(pk=area.id).exists())
 
-    def test_delivery_area_delete_archives_saved_address_relation(self):
+    def test_delivery_area_delete_blocks_saved_address_relation(self):
         area = self.create_area("Address Area")
         address = self.create_address_for_area(area)
 
         response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["action"], "archived")
-        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         area.refresh_from_db()
-        self.assertFalse(area.is_active)
-        self.assertIsNotNone(area.archived_at)
-        address.refresh_from_db()
-        self.assertEqual(address.delivery_area_id, area.id)
-        self.assertEqual(address.delivery_type, Address.DeliveryType.FIXED_AREA)
-        self.assertEqual(address.service_city_id, area.service_city_id)
-        self.assertTrue(Address.objects.filter(pk=address.id).exists())
-        self.assertNotIn(
-            area.id,
-            [
-                item["id"]
-                for item in self.client.get("/api/v1/locations/delivery-areas/").data
-            ],
-        )
-        archived_area = next(
-            item
-            for item in self.client.get(
-                "/api/v1/locations/delivery-areas/?archived=true"
-            ).data
-            if item["id"] == area.id
-        )
-        self.assertEqual(archived_area["deletion_mode"], "archive")
-
-        restore_response = self.client.patch(
-            f"/api/v1/locations/delivery-areas/{area.id}/",
-            {"restore": True},
-            format="json",
-        )
-        self.assertEqual(restore_response.status_code, status.HTTP_200_OK)
-        self.assertIsNone(restore_response.data["archived_at"])
+        self.assertTrue(area.is_active)
+        self.assertIsNone(area.archived_at)
+        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
 
     def test_delivery_area_delete_removes_stale_unreferenced_address(self):
         area = self.create_area("Stale Address Area")
@@ -1571,47 +1531,38 @@ class LocationManagementAPITests(TestCase):
 
         response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["action"], "archived")
-        self.assertTrue(Address.objects.filter(pk=address.id).exists())
-        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         area.refresh_from_db()
-        self.assertFalse(area.is_active)
-        order.refresh_from_db()
-        self.assertEqual(order.delivery_address_id, address.id)
-        self.assertEqual(order.delivery_area_id, area.id)
+        self.assertTrue(area.is_active)
+        self.assertIsNone(area.archived_at)
+        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
 
-    def test_delivery_area_delete_archives_market_with_saved_address_relation(self):
+    def test_delivery_area_delete_blocks_market_with_saved_address_relation(self):
         area = self.create_area("Mixed Area")
         market = self.create_market_for_area(area)
         address = self.create_address_for_area(area)
 
         response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["action"], "archived")
-        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
-        self.assertTrue(Market.objects.filter(pk=market.id).exists())
-        self.assertTrue(market.delivery_areas.filter(pk=area.id).exists())
-        address.refresh_from_db()
-        self.assertEqual(address.delivery_area_id, area.id)
-        self.assertEqual(address.delivery_type, Address.DeliveryType.FIXED_AREA)
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         area.refresh_from_db()
-        self.assertFalse(area.is_active)
+        self.assertTrue(area.is_active)
+        self.assertIsNone(area.archived_at)
+        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
 
-    def test_delivery_area_delete_archives_order_relation(self):
+    def test_delivery_area_delete_blocks_order_relation(self):
         area = self.create_area("Order Area")
         self.create_order_for_area(area)
 
         response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["action"], "archived")
-        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         area.refresh_from_db()
-        self.assertFalse(area.is_active)
+        self.assertTrue(area.is_active)
+        self.assertIsNone(area.archived_at)
+        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
 
-    def test_delivery_area_delete_archives_courier_relation(self):
+    def test_delivery_area_delete_blocks_courier_relation(self):
         area = self.create_area("Courier Area")
         courier = User.objects.create_user(
             username="area_courier",
@@ -1630,11 +1581,11 @@ class LocationManagementAPITests(TestCase):
 
         response = self.client.delete(f"/api/v1/locations/delivery-areas/{area.id}/")
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["action"], "archived")
-        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         area.refresh_from_db()
-        self.assertFalse(area.is_active)
+        self.assertTrue(area.is_active)
+        self.assertIsNone(area.archived_at)
+        self.assertTrue(DeliveryArea.objects.filter(pk=area.id).exists())
 
     def test_delivery_area_delete_requires_admin_permission(self):
         area = self.create_area("Permission Area")
