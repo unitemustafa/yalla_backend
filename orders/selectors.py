@@ -49,7 +49,7 @@ def order_detail_queryset():
             "rejected_by",
         )
         .prefetch_related(
-            "items__variant__product",
+            "items__variant__product__market",
             "items__variant__attribute_values__attribute",
             "items__variant__attribute_values__option",
             "items__variant__attribute_values__product_attribute",

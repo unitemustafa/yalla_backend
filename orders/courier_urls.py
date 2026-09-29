@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     CourierOrderDetailView,
     CourierOrderListView,
+    CourierOrderMarketPickupView,
     CourierOrderStatusView,
 )
 
@@ -17,5 +18,10 @@ urlpatterns = [
         "orders/<int:order_id>/status/",
         CourierOrderStatusView.as_view(),
         name="courier-order-status",
+    ),
+    path(
+        "orders/<int:order_id>/markets/<int:section_id>/pickup/",
+        CourierOrderMarketPickupView.as_view(),
+        name="courier-order-market-pickup",
     ),
 ]

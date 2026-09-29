@@ -16,7 +16,6 @@ from django.utils import timezone
 from rest_framework import serializers
 from config.image_validation import validate_safe_image
 from rest_framework.exceptions import AuthenticationFailed
-from rest_framework.exceptions import PermissionDenied
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.settings import api_settings
@@ -129,6 +128,7 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
         model = User
         fields = (
             "id",
+            "date_joined",
             "first_name",
             "last_name",
             "username",
@@ -148,7 +148,7 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
             "has_password",
             "courier_profile",
         )
-        read_only_fields = ("is_staff", "is_superuser")
+        read_only_fields = ("is_staff", "is_superuser", "date_joined")
         extra_kwargs = {
             "is_verified": {"read_only": True},
             "profile_username_pending": {"read_only": True},
@@ -371,6 +371,8 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
 
         if not user.check_password(attrs["password"]):
             raise AuthenticationFailed("Invalid email or password.")
+        if expected_role and user.role != expected_role:
+            raise AuthenticationFailed("Invalid email or password.")
         if user.deleted_at is not None or not user.is_active:
             if user.role in {
                 User.Role.CLIENT,
@@ -395,14 +397,6 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
                     + timedelta(hours=settings.AUTH_UNVERIFIED_USER_RETENTION_HOURS)
                 ),
             )
-        if expected_role and user.role != expected_role:
-            if expected_role == User.Role.REPRESENTATIVE:
-                raise PermissionDenied(self._representative_wrong_role_error(user))
-            if expected_role == User.Role.ADMIN:
-                raise PermissionDenied("تسجيل الدخول هذا مخصص لحسابات المدير فقط.")
-            role_label = User.Role(expected_role).label.lower()
-            raise PermissionDenied(f"This login is only for {role_label} accounts.")
-
         attrs["user"] = user
         return attrs
 
@@ -440,23 +434,6 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
         if candidates:
             return PendingRegistration.objects.filter(phone__in=candidates).first()
         return None
-
-    def _representative_wrong_role_error(self, user):
-        if user.role == User.Role.ADMIN:
-            return {
-                "code": "admin_account_not_allowed",
-                "detail": "This account belongs to an admin.",
-            }
-        if user.role == User.Role.CLIENT:
-            return {
-                "code": "client_account_not_allowed",
-                "detail": "This account belongs to a client.",
-            }
-        return {
-            "code": "representative_account_required",
-            "detail": "This login is only for representative accounts.",
-        }
-
 
 class ClientLoginSerializer(LoginSerializer):
     """Client-only session choice; omitted values are temporary by default."""

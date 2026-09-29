@@ -462,18 +462,19 @@ class ClientLoginView(LoginView):
     serializer_class = ClientLoginSerializer
 
 
+def _invalid_social_sign_in_response():
+    return Response(
+        {"detail": "Invalid sign-in credentials."},
+        status=status.HTTP_401_UNAUTHORIZED,
+    )
+
+
 def _social_client_error(user):
+    if user.role != User.Role.CLIENT:
+        return _invalid_social_sign_in_response()
     if user.deleted_at is not None or not user.is_active:
         return Response(
             {"code": "account_inactive", "detail": "Account is inactive."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-    if user.role != User.Role.CLIENT:
-        return Response(
-            {
-                "code": "client_account_required",
-                "detail": "Social sign-in is only available for client accounts.",
-            },
             status=status.HTTP_403_FORBIDDEN,
         )
     if not user.is_verified:
@@ -520,6 +521,8 @@ class SocialSessionView(APIView):
             deleted_at__isnull=True,
         ).first()
         if existing_user is not None:
+            if existing_user.role != User.Role.CLIENT:
+                return _invalid_social_sign_in_response()
             return Response(
                 {
                     "status": "account_link_required",
@@ -603,6 +606,12 @@ class SocialSignupView(APIView):
         errors = _social_duplicate_errors(identity.email, data, matching_users)
         if errors:
             if set(errors) == {"email"}:
+                if any(
+                    user.email.lower() == identity.email
+                    and user.role != User.Role.CLIENT
+                    for user in matching_users
+                ):
+                    return _invalid_social_sign_in_response()
                 return Response(
                     {
                         "status": "account_link_required",
@@ -701,10 +710,7 @@ class SocialLinkView(APIView):
             .first()
         )
         if user is None or not user.check_password(data["password"]):
-            return Response(
-                {"detail": "Invalid email or password."},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
+            return _invalid_social_sign_in_response()
         error = _social_client_error(user)
         if error is not None:
             return error

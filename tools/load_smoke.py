@@ -8,12 +8,18 @@ import argparse
 import math
 import os
 import ssl
+import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+
+import requests
+
+
+_thread_local = threading.local()
 
 
 def percentile(values, fraction):
@@ -23,7 +29,7 @@ def percentile(values, fraction):
     return ordered[min(len(ordered) - 1, math.ceil(len(ordered) * fraction) - 1)]
 
 
-def probe(url, token, timeout, forwarded_https, host, ssl_context):
+def probe(url, token, timeout, forwarded_https, host, ssl_context, keep_alive, ca_file):
     headers = {"User-Agent": "YallaLoadSmoke/1.0", "Accept": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -32,6 +38,20 @@ def probe(url, token, timeout, forwarded_https, host, ssl_context):
     if host:
         headers["Host"] = host
     started = time.perf_counter()
+    if keep_alive:
+        session = getattr(_thread_local, "session", None)
+        if session is None:
+            session = requests.Session()
+            _thread_local.session = session
+        try:
+            response = session.get(
+                url, headers=headers, timeout=timeout, verify=ca_file or True
+            )
+            status = response.status_code
+            response.close()
+        except requests.RequestException:
+            status = "network_error"
+        return status, (time.perf_counter() - started) * 1000
     try:
         with urlopen(
             Request(url, headers=headers), timeout=timeout, context=ssl_context
@@ -56,6 +76,9 @@ def main():
         "--requests", type=int, default=200, help="Total GETs (1-10000)"
     )
     parser.add_argument(
+        "--rate", type=float, help="Maximum scheduled GETs per second"
+    )
+    parser.add_argument(
         "--timeout", type=float, default=10, help="Per-request timeout in seconds"
     )
     parser.add_argument(
@@ -65,6 +88,11 @@ def main():
     )
     parser.add_argument("--host", help="Host header for a loopback test")
     parser.add_argument("--ca-file", help="CA certificate for a local HTTPS test")
+    parser.add_argument(
+        "--keep-alive",
+        action="store_true",
+        help="Reuse HTTP connections per client (requires requests)",
+    )
     args = parser.parse_args()
     parsed = urlsplit(args.url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -81,6 +109,8 @@ def main():
         parser.error("users must be 1-100 and requests must be 1-10000")
     if args.timeout <= 0:
         parser.error("timeout must be positive")
+    if args.rate is not None and (not math.isfinite(args.rate) or args.rate <= 0):
+        parser.error("rate must be a positive finite number")
 
     token = os.environ.get("LOAD_TEST_BEARER_TOKEN", "")
     ssl_context = (
@@ -90,18 +120,25 @@ def main():
     durations = []
     started = time.perf_counter()
     with ThreadPoolExecutor(max_workers=args.users) as executor:
-        futures = [
-            executor.submit(
-                probe,
-                args.url,
-                token,
-                args.timeout,
-                args.forwarded_https,
-                args.host,
-                ssl_context,
+        futures = []
+        for index in range(args.requests):
+            if args.rate is not None:
+                delay = started + index / args.rate - time.perf_counter()
+                if delay > 0:
+                    time.sleep(delay)
+            futures.append(
+                executor.submit(
+                    probe,
+                    args.url,
+                    token,
+                    args.timeout,
+                    args.forwarded_https,
+                    args.host,
+                    ssl_context,
+                    args.keep_alive,
+                    args.ca_file,
+                )
             )
-            for _ in range(args.requests)
-        ]
         for future in as_completed(futures):
             status, duration = future.result()
             statuses[status] += 1

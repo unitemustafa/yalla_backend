@@ -62,6 +62,39 @@ class CourierOrderDetailView(APIView):
         )
 
 
+class CourierOrderMarketPickupView(APIView):
+    permission_classes = (IsAuthenticated, IsRepresentativeRole)
+
+    @transaction.atomic
+    def patch(self, request, order_id, section_id):
+        order = generics.get_object_or_404(
+            Order.objects.select_for_update().filter(
+                assigned_representative=request.user,
+            ),
+            pk=order_id,
+        )
+        if order.status != Order.Status.ASSIGNED:
+            return Response(
+                {"status": "Order is not awaiting pickup."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        section = generics.get_object_or_404(
+            OrderMarketSection.objects.select_for_update(),
+            pk=section_id,
+            order=order,
+        )
+        if section.pickup_status != OrderMarketSection.PickupStatus.PICKED_UP:
+            section.pickup_status = OrderMarketSection.PickupStatus.PICKED_UP
+            section.picked_up_at = timezone.now()
+            section.save(update_fields=("pickup_status", "picked_up_at", "updated_at"))
+        return Response(
+            CourierOrderDetailSerializer(
+                order_queryset().get(pk=order.pk),
+                context={"request": request},
+            ).data
+        )
+
+
 class CourierOrderStatusView(APIView):
     permission_classes = (IsAuthenticated, IsRepresentativeRole)
 

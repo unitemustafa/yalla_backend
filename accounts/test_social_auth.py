@@ -205,6 +205,52 @@ class SocialAuthenticationTests(APITestCase):
             SocialIdentity.objects.filter(user=user, provider="google").exists()
         )
 
+    @patch("accounts.serializers.verify_social_id_token")
+    def test_social_sign_in_does_not_reveal_non_client_role(self, verify_token):
+        verify_token.return_value = social_identity()
+        user = User.objects.create_user(
+            username="social.admin",
+            email="social@example.com",
+            phone="+201111111112",
+            password="StrongPass1!",
+            role=User.Role.ADMIN,
+            is_verified=True,
+        )
+        payload = {"id_token": "firebase-id-token"}
+        unlinked_response = self.client.post(
+            f"{AUTH_BASE}/social/session", payload, format="json"
+        )
+        SocialIdentity.objects.create(
+            user=user, firebase_uid="firebase-google-1", provider="google"
+        )
+        linked_response = self.client.post(
+            f"{AUTH_BASE}/social/session", payload, format="json"
+        )
+        signup_response = self.client.post(
+            f"{AUTH_BASE}/social/signup",
+            self.social_payload(),
+            format="json",
+        )
+        link_response = self.client.post(
+            f"{AUTH_BASE}/social/link",
+            {**payload, "password": "StrongPass1!"},
+            format="json",
+        )
+        wrong_password_response = self.client.post(
+            f"{AUTH_BASE}/social/link",
+            {**payload, "password": "WrongPassword123!"},
+            format="json",
+        )
+        for response in (
+            unlinked_response,
+            linked_response,
+            signup_response,
+            link_response,
+            wrong_password_response,
+        ):
+            self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+            self.assertEqual(response.data, {"detail": "Invalid sign-in credentials."})
+
     @patch("accounts.views.issue_registration_otp")
     @patch("accounts.serializers.verify_social_id_token")
     def test_unverified_facebook_email_uses_existing_otp_flow(

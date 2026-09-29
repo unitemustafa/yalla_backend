@@ -285,6 +285,12 @@ class OrderAPITests(APITestCase):
             quantity=1,
             unit_price=Decimal("500.00"),
         )
+        OrderItem.objects.create(
+            order=order,
+            variant=self.second_variant,
+            quantity=1,
+            unit_price=Decimal("700.00"),
+        )
         OrderOffer.objects.create(
             order=order,
             offer=self.offer,
@@ -314,7 +320,93 @@ class OrderAPITests(APITestCase):
             "https://example.com/customer.png",
         )
         self.assertEqual(response.data["items"][0]["variant"]["sku"], "BURGER-1")
+        self.assertEqual(
+            {item["market_name"] for item in response.data["items"]},
+            {self.market.name, self.second_market.name},
+        )
         self.assertEqual(response.data["offers"][0]["offer"]["title"], "Lunch")
+
+    def test_courier_tracks_each_market_pickup_before_order_pickup(self):
+        order = Order.objects.create(
+            user=self.customer,
+            assigned_representative=self.representative,
+            market=self.market,
+            status=Order.Status.ASSIGNED,
+        )
+        first_section = OrderMarketSection.objects.create(
+            order=order, market=self.market, sort_order=0
+        )
+        second_section = OrderMarketSection.objects.create(
+            order=order, market=self.second_market, sort_order=1
+        )
+        OrderItem.objects.create(
+            order=order,
+            section=first_section,
+            variant=self.variant,
+            quantity=1,
+            unit_price=Decimal("500.00"),
+        )
+        OrderItem.objects.create(
+            order=order,
+            section=second_section,
+            variant=self.second_variant,
+            quantity=1,
+            unit_price=Decimal("700.00"),
+        )
+        first_url = (
+            f"/api/v1/courier/orders/{order.id}/markets/{first_section.id}/pickup/"
+        )
+        second_url = (
+            f"/api/v1/courier/orders/{order.id}/markets/{second_section.id}/pickup/"
+        )
+
+        self.client.force_authenticate(self.other_customer)
+        self.assertEqual(self.client.patch(first_url).status_code, status.HTTP_403_FORBIDDEN)
+        other_representative = User.objects.create_user(
+            username="another-order-representative",
+            email="another-order-representative@example.com",
+            phone="+213555700090",
+            password="Password1!",
+            role=User.Role.REPRESENTATIVE,
+        )
+        self.client.force_authenticate(other_representative)
+        self.assertEqual(self.client.patch(first_url).status_code, status.HTTP_404_NOT_FOUND)
+        self.client.force_authenticate(self.representative)
+        first = self.client.patch(first_url)
+        self.assertEqual(first.status_code, status.HTTP_200_OK, first.data)
+        self.assertEqual(first.data["status"], Order.Status.ASSIGNED)
+        self.assertEqual(
+            [section["pickup_status"] for section in first.data["market_sections"]],
+            ["picked_up", "pending"],
+        )
+        self.assertEqual(
+            {item["section_id"] for item in first.data["items"]},
+            {first_section.id, second_section.id},
+        )
+        self.assertEqual(
+            {item["market_id"] for item in first.data["items"]},
+            {self.market.id, self.second_market.id},
+        )
+        reopened = self.client.get(f"/api/v1/courier/orders/{order.id}/")
+        self.assertEqual(
+            [section["pickup_status"] for section in reopened.data["market_sections"]],
+            ["picked_up", "pending"],
+        )
+        first_section.refresh_from_db()
+        picked_up_at = first_section.picked_up_at
+        self.assertEqual(self.client.patch(first_url).status_code, status.HTTP_200_OK)
+        first_section.refresh_from_db()
+        self.assertEqual(first_section.picked_up_at, picked_up_at)
+
+        self.assertEqual(self.client.patch(second_url).status_code, status.HTTP_200_OK)
+        completed = self.client.patch(
+            f"/api/v1/courier/orders/{order.id}/status/",
+            {"status": Order.Status.PICKED_UP},
+            format="json",
+        )
+        self.assertEqual(completed.status_code, status.HTTP_200_OK, completed.data)
+        self.assertEqual(completed.data["status"], Order.Status.PICKED_UP)
+        self.assertEqual(self.client.patch(first_url).status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_inactive_client_cannot_preview_or_create_with_existing_access_token(self):
         token = RefreshToken.for_user(self.customer).access_token

@@ -337,14 +337,69 @@ class AuthenticationAPITests(APITestCase):
         )
         self.assertEqual(admin_response.status_code, status.HTTP_200_OK)
         self.assertEqual(admin_response.data["user"]["role"], User.Role.ADMIN)
-        self.assertEqual(
-            wrong_role_response.status_code,
-            status.HTTP_403_FORBIDDEN,
+        invalid_response = self.client.post(
+            f"{AUTH_BASE}/login/admin/",
+            {"email": client.email, "password": "WrongPassword123!"},
         )
-        self.assertEqual(
-            wrong_role_response.data["detail"],
-            "تسجيل الدخول هذا مخصص لحسابات المدير فقط.",
+        self.assertEqual(wrong_role_response.status_code, invalid_response.status_code)
+        self.assertEqual(wrong_role_response.data, invalid_response.data)
+
+    def test_wrong_role_login_looks_like_invalid_credentials_on_all_apps(self):
+        users = {
+            role: self.create_active_user(
+                role=role,
+                username=f"login_{role}",
+                email=f"login_{role}@example.com",
+                phone=f"+2135550000{index}",
+            )
+            for index, role in enumerate(
+                (User.Role.CLIENT, User.Role.REPRESENTATIVE, User.Role.ADMIN),
+                start=1,
+            )
+        }
+        for endpoint, expected_role in (
+            ("client", User.Role.CLIENT),
+            ("representative", User.Role.REPRESENTATIVE),
+            ("admin", User.Role.ADMIN),
+        ):
+            invalid_response = self.client.post(
+                f"{AUTH_BASE}/login/{endpoint}/",
+                {"email": "unknown@example.com", "password": self.password},
+            )
+            for role, user in users.items():
+                if role == expected_role:
+                    continue
+                with self.subTest(endpoint=endpoint, role=role):
+                    response = self.client.post(
+                        f"{AUTH_BASE}/login/{endpoint}/",
+                        {"email": user.email, "password": self.password},
+                    )
+                    self.assertEqual(response.status_code, invalid_response.status_code)
+                    self.assertEqual(response.data, invalid_response.data)
+                    self.assertNotIn("accessToken", response.data)
+
+    def test_wrong_role_does_not_expose_inactive_or_unverified_state(self):
+        user = self.create_active_user(
+            role=User.Role.CLIENT,
+            username="inactive_client_login",
+            email="inactive-client-login@example.com",
         )
+        invalid_response = self.client.post(
+            f"{AUTH_BASE}/login/representative/",
+            {"email": "unknown@example.com", "password": self.password},
+        )
+        for field in ("is_active", "is_verified"):
+            setattr(user, field, False)
+            user.save(update_fields=[field])
+            with self.subTest(field=field):
+                response = self.client.post(
+                    f"{AUTH_BASE}/login/representative/",
+                    {"email": user.email, "password": self.password},
+                )
+                self.assertEqual(response.status_code, invalid_response.status_code)
+                self.assertEqual(response.data, invalid_response.data)
+            setattr(user, field, True)
+            user.save(update_fields=[field])
 
     def test_representative_login_marks_courier_available_and_notifies_admins(self):
         city = ServiceCity.objects.create(name="Courier Login City")

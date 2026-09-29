@@ -2131,6 +2131,11 @@ class CourierOrderItemSerializer(serializers.ModelSerializer):
     variant = serializers.SerializerMethodField()
     display_name = serializers.SerializerMethodField()
     item_subtotal = serializers.SerializerMethodField()
+    market_name = serializers.CharField(
+        source="variant.product.market.name", read_only=True
+    )
+    market_id = serializers.IntegerField(source="variant.product.market_id", read_only=True)
+    section_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = OrderItem
@@ -2140,6 +2145,9 @@ class CourierOrderItemSerializer(serializers.ModelSerializer):
             "quantity",
             "unit_price",
             "item_subtotal",
+            "market_name",
+            "market_id",
+            "section_id",
             "product",
             "variant",
         )

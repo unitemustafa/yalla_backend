@@ -66,6 +66,7 @@ from .admin_review_views import (
 from .courier_views import (
     CourierOrderDetailView,
     CourierOrderListView,
+    CourierOrderMarketPickupView,
     CourierOrderStatusView,
 )
 from notifications.services import (
