@@ -3056,6 +3056,11 @@ class OrderAPITests(APITestCase):
         self.assertTrue(blocker_response.data["blocked"])
         self.assertEqual(blocker_response.data["pending_count"], 1)
         self.assertEqual(blocker_response.data["orders"][0]["id"], order_id)
+        review_section = blocker_response.data["orders"][0]["market_sections"][0]
+        self.assertEqual(review_section["market"]["name"], self.market.name)
+        self.assertEqual(len(review_section["items"]), 1)
+        self.assertEqual(review_section["items"][0]["product_name"], self.product.name)
+        self.assertEqual(review_section["items"][0]["quantity"], 1)
 
         approve_response = self.client.post(
             f"/api/v1/admin/orders/{order_id}/approve/",
