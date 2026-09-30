@@ -80,10 +80,32 @@ class GeocodingAPITests(TestCase):
         self.assertEqual(params["filter"], "countrycode:eg")
         self.assertEqual(params["bias"], "proximity:31.2,30.1")
         self.assertEqual(params["lang"], "ar")
-        self.assertEqual(params["limit"], 5)
+        self.assertEqual(params["limit"], 10)
         self.assertEqual(params["apiKey"], "backend-secret")
         self.assertEqual(response.data["items"][0]["place_id"], "cairo-id")
         self.assertEqual(response.data["items"][0]["distance_meters"], 125.4)
+
+    def test_autocomplete_keeps_suggestions_beyond_first_five(self):
+        upstream = self.provider_response(
+            [
+                {
+                    "place_id": f"place-{index}",
+                    "formatted": f"Place {index}",
+                    "lat": 30.0 + index / 1000,
+                    "lon": 31.0,
+                }
+                for index in range(8)
+            ]
+        )
+        with patch("locations.geocoding.requests.get", return_value=upstream):
+            response = self.client.get(
+                "/api/v1/locations/geocoding/autocomplete/",
+                {"q": "Cairo", "latitude": 30.0, "longitude": 31.0},
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data["items"]), 8)
+        self.assertEqual(response.data["items"][7]["place_id"], "place-7")
 
     def test_autocomplete_requires_three_characters(self):
         response = self.client.get(

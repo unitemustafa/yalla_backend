@@ -13,6 +13,7 @@ AUTOCOMPLETE_URL = "https://api.geoapify.com/v1/geocode/autocomplete"
 FORWARD_URL = "https://api.geoapify.com/v1/geocode/search"
 REVERSE_URL = "https://api.geoapify.com/v1/geocode/reverse"
 AUTOCOMPLETE_CACHE_SECONDS = 5 * 60
+AUTOCOMPLETE_RESULT_LIMIT = 10
 CITY_COVERAGE_CACHE_SECONDS = 30 * 24 * 60 * 60
 REVERSE_CACHE_SECONDS = 24 * 60 * 60
 EARTH_RADIUS_KM = 6371.0088
@@ -51,11 +52,14 @@ def autocomplete(*, query, latitude, longitude, language, request):
             "filter": "countrycode:eg",
             "bias": f"proximity:{float(longitude)},{float(latitude)}",
             "lang": language,
-            "limit": 5,
+            "limit": AUTOCOMPLETE_RESULT_LIMIT,
         },
         request=request,
     )
-    results = [_normalize_result(item) for item in payload.get("results", [])[:5]]
+    results = [
+        _normalize_result(item)
+        for item in payload.get("results", [])[:AUTOCOMPLETE_RESULT_LIMIT]
+    ]
     caches["geocoding"].set(
         cache_key,
         results,
