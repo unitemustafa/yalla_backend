@@ -201,6 +201,162 @@ class OrderAPITests(APITestCase):
         token = RefreshToken.for_user(self.customer).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
+    def test_client_order_retry_with_same_key_returns_existing_order(self):
+        self.authenticate_customer()
+        payload = {
+            "address_id": self.address.id,
+            "payment_method": "cash",
+            "items": [{"variant_id": self.variant.id, "quantity": 1}],
+        }
+        first = self.client.post(
+            f"{ORDERS_BASE}/create/", payload, format="json",
+            HTTP_IDEMPOTENCY_KEY="checkout-retry-001",
+        )
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED, first.data)
+        events_before_retry = OrderEvent.objects.count()
+        notifications_before_retry = Notification.objects.count()
+        # A retry must still recover the order when the catalog has changed.
+        self.variant.price = Decimal("900.00")
+        self.variant.save(update_fields=["price"])
+        replay = self.client.post(
+            f"{ORDERS_BASE}/create/", payload, format="json",
+            HTTP_IDEMPOTENCY_KEY="checkout-retry-001",
+        )
+        self.assertEqual(replay.status_code, status.HTTP_200_OK, replay.data)
+        self.assertEqual(replay.data[0]["id"], first.data[0]["id"])
+        self.assertEqual(replay.data[0]["total_price"], first.data[0]["total_price"])
+        self.assertEqual(Order.objects.count(), 1)
+        self.assertEqual(OrderEvent.objects.count(), events_before_retry)
+        self.assertEqual(Notification.objects.count(), notifications_before_retry)
+
+    def test_client_order_same_key_with_changed_payload_is_rejected(self):
+        self.authenticate_customer()
+        payload = {
+            "address_id": self.address.id,
+            "payment_method": "cash",
+            "items": [{"variant_id": self.variant.id, "quantity": 1}],
+        }
+        first = self.client.post(
+            f"{ORDERS_BASE}/create/", payload, format="json",
+            HTTP_IDEMPOTENCY_KEY="checkout-conflict-001",
+        )
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED, first.data)
+        payload["items"][0]["quantity"] = 2
+        conflict = self.client.post(
+            f"{ORDERS_BASE}/create/", payload, format="json",
+            HTTP_IDEMPOTENCY_KEY="checkout-conflict-001",
+        )
+        self.assertEqual(conflict.status_code, status.HTTP_409_CONFLICT, conflict.data)
+        self.assertEqual(Order.objects.count(), 1)
+
+    def test_client_order_rejects_invalid_request_keys(self):
+        self.authenticate_customer()
+        payload = {
+            "address_id": self.address.id,
+            "payment_method": "cash",
+            "items": [{"variant_id": self.variant.id, "quantity": 1}],
+        }
+        for key in ("", "short", "x" * 129, "invalid key"):
+            with self.subTest(key_length=len(key)):
+                response = self.client.post(
+                    f"{ORDERS_BASE}/create/", payload, format="json",
+                    HTTP_IDEMPOTENCY_KEY=key,
+                )
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(Order.objects.count(), 0)
+
+    def test_client_order_validation_failure_does_not_consume_key(self):
+        self.authenticate_customer()
+        payload = {
+            "address_id": self.address.id,
+            "payment_method": "cash",
+            "items": [{"variant_id": self.variant.id, "quantity": 0}],
+        }
+        invalid = self.client.post(
+            f"{ORDERS_BASE}/create/", payload, format="json",
+            HTTP_IDEMPOTENCY_KEY="checkout-validation-001",
+        )
+        self.assertEqual(invalid.status_code, status.HTTP_400_BAD_REQUEST)
+        payload["items"][0]["quantity"] = 1
+        valid = self.client.post(
+            f"{ORDERS_BASE}/create/", payload, format="json",
+            HTTP_IDEMPOTENCY_KEY="checkout-validation-001",
+        )
+        self.assertEqual(valid.status_code, status.HTTP_201_CREATED, valid.data)
+        self.assertEqual(Order.objects.count(), 1)
+
+    def test_client_order_different_keys_allow_intentional_repeat_orders(self):
+        self.authenticate_customer()
+        payload = {
+            "address_id": self.address.id,
+            "payment_method": "cash",
+            "items": [{"variant_id": self.variant.id, "quantity": 1}],
+        }
+        for key in ("checkout-first-001", "checkout-second-001"):
+            response = self.client.post(
+                f"{ORDERS_BASE}/create/", payload, format="json",
+                HTTP_IDEMPOTENCY_KEY=key,
+            )
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(Order.objects.count(), 2)
+
+    def test_client_order_without_key_preserves_older_client_behavior(self):
+        self.authenticate_customer()
+        payload = {
+            "address_id": self.address.id,
+            "payment_method": "cash",
+            "items": [{"variant_id": self.variant.id, "quantity": 1}],
+        }
+        for _ in range(2):
+            response = self.client.post(f"{ORDERS_BASE}/create/", payload, format="json")
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(Order.objects.count(), 2)
+
+    def test_client_order_keys_are_isolated_by_account(self):
+        self.authenticate_customer()
+        payload = {
+            "address_id": self.address.id,
+            "payment_method": "cash",
+            "items": [{"variant_id": self.variant.id, "quantity": 1}],
+        }
+        first = self.client.post(
+            f"{ORDERS_BASE}/create/", payload, format="json",
+            HTTP_IDEMPOTENCY_KEY="checkout-shared-001",
+        )
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED, first.data)
+        self.other_customer.market_region_mode = User.MarketRegionMode.SERVICE_CITY
+        self.other_customer.market_region_service_city = self.service_city
+        self.other_customer.save()
+        address = Address.objects.create(
+            user=self.other_customer, name="Other home",
+            service_city=self.service_city, delivery_area=self.delivery_area,
+            latitude=self.address.latitude, longitude=self.address.longitude,
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+        )
+        self.client.force_authenticate(self.other_customer)
+        payload["address_id"] = address.pk
+        other = self.client.post(
+            f"{ORDERS_BASE}/create/", payload, format="json",
+            HTTP_IDEMPOTENCY_KEY="checkout-shared-001",
+        )
+        self.assertEqual(other.status_code, status.HTTP_201_CREATED, other.data)
+        self.assertNotEqual(first.data[0]["id"], other.data[0]["id"])
+        self.assertEqual(other.data[0]["user_id"], self.other_customer.pk)
+        self.assertEqual(Order.objects.count(), 2)
+
+    def test_client_order_request_key_uniqueness_is_enforced_by_database(self):
+        from django.db import IntegrityError, transaction
+
+        Order.objects.create(
+            user=self.customer, market=self.market, payment_method="cash",
+            client_request_key="checkout-unique-001",
+        )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Order.objects.create(
+                user=self.customer, market=self.market, payment_method="cash",
+                client_request_key="checkout-unique-001",
+            )
+
     def create_order_with_private_media(self):
         return Order.objects.create(
             user=self.customer,

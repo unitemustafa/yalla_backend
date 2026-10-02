@@ -24,6 +24,7 @@ from config.pagination import paginated_list_response
 from offers.models import Offer
 from .models import Order, OrderEvent, OrderMarketSection
 from .request_validation import normalized_order_request_data
+from .idempotency import existing_order_for_request, order_request_identity
 from .selectors import (
     active_available_representatives,
     courier_order_list_queryset,
@@ -233,12 +234,29 @@ class ClientOrderCreateView(APIView):
     def post(self, request):
         target_user = resolve_order_target_user(request, action="create", lock=True)
         data = normalized_order_request_data(request.data, include_create_fields=True)
+        request_key, request_hash = order_request_identity(request, data)
+        existing_order = existing_order_for_request(
+            target_user, request_key, request_hash,
+        )
+        if existing_order is not None:
+            return Response(
+                OrderSerializer(
+                    [existing_order], many=True, context={"request": request},
+                ).data,
+                status=status.HTTP_200_OK,
+            )
         serializer = ClientOrderCreateSerializer(
             data=data,
             context={"request": request, "preview_user": target_user},
         )
         serializer.is_valid(raise_exception=True)
         orders = serializer.create_orders()
+        if request_key is not None:
+            # Checkout creates one parent order with multiple market sections.
+            order = orders[0]
+            order.client_request_key = request_key
+            order.client_request_hash = request_hash
+            order.save(update_fields=["client_request_key", "client_request_hash"])
         for order in orders:
             event = record_order_event(
                 order,

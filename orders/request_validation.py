@@ -2,6 +2,8 @@ from rest_framework import serializers
 
 
 CREATE_SYSTEM_CONTROLLED_FIELDS = {
+    "client_request_key",
+    "client_request_hash",
     "assigned_representative_id",
     "assigned_at",
     "delivered_at",

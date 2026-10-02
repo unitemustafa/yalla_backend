@@ -8,6 +8,7 @@ import os
 from urllib.parse import urlsplit
 
 import dj_database_url
+from corsheaders.defaults import default_headers
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
@@ -83,6 +84,7 @@ ALLOWED_HOSTS = _environment_list(
 )
 CSRF_TRUSTED_ORIGINS = _environment_list("CSRF_TRUSTED_ORIGINS")
 CORS_ALLOWED_ORIGINS = _environment_list("CORS_ALLOWED_ORIGINS")
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
 CORS_ALLOW_ALL_ORIGINS = (
     not IS_PRODUCTION
     and os.environ.get("CORS_ALLOW_ALL_ORIGINS", "True").lower() == "true"

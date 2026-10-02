@@ -117,6 +117,8 @@ class Order(models.Model):
         blank=True,
     )
     payment_method = models.CharField(max_length=50)
+    client_request_key = models.CharField(max_length=128, blank=True, null=True)
+    client_request_hash = models.CharField(max_length=64, blank=True, default="")
     discount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     description = models.TextField(blank=True)
     status = models.CharField(
@@ -183,6 +185,10 @@ class Order(models.Model):
 
     class Meta:
         constraints = [
+            models.UniqueConstraint(
+                fields=["user", "client_request_key"],
+                name="orders_user_request_key_unique",
+            ),
             models.CheckConstraint(
                 condition=(
                     models.Q(delivery_price__isnull=True)
