@@ -279,6 +279,102 @@ class Notification(models.Model):
         return self.title
 
 
+class LegacyPushOutbox(models.Model):
+    """Retired storage, retained for data preservation and ORM cascade/flush.
+
+    No runtime producer or worker uses this model. Its existing table must stay
+    visible to Django until legacy records have been deliberately archived.
+    """
+
+    id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True)
+    kind = models.CharField(
+        max_length=32,
+        choices=[
+            ("notification", "Notification"),
+            ("courier_notification", "Courier notification"),
+            ("account_restored", "Account restored"),
+            ("account_disabled", "Account disabled"),
+            ("delivery_area_status", "Delivery area status"),
+        ],
+    )
+    options = models.JSONField(default=dict, blank=True)
+    status = models.CharField(
+        max_length=16,
+        default="pending",
+        choices=[
+            ("pending", "Pending"),
+            ("processing", "Processing"),
+            ("completed", "Completed"),
+            ("failed", "Failed"),
+        ],
+    )
+    attempts = models.PositiveSmallIntegerField(default=0)
+    available_at = models.DateTimeField(auto_now_add=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    delivery_area = models.ForeignKey(
+        "locations.DeliveryArea",
+        on_delete=models.CASCADE,
+        related_name="legacy_push_outbox_entries",
+        null=True,
+        blank=True,
+    )
+    notification = models.ForeignKey(
+        Notification,
+        on_delete=models.CASCADE,
+        related_name="legacy_push_outbox_entries",
+        null=True,
+        blank=True,
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="legacy_push_outbox_entries",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        db_table = "notifications_pushoutbox"
+        indexes = [
+            models.Index(
+                fields=["status", "available_at"], name="notificatio_status_91b957_idx"
+            )
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        kind="account_disabled",
+                        user__isnull=False,
+                        notification__isnull=True,
+                        delivery_area__isnull=True,
+                    )
+                    | models.Q(
+                        kind__in=(
+                            "notification",
+                            "courier_notification",
+                            "account_restored",
+                        ),
+                        user__isnull=True,
+                        notification__isnull=False,
+                        delivery_area__isnull=True,
+                    )
+                    | models.Q(
+                        kind="delivery_area_status",
+                        user__isnull=True,
+                        notification__isnull=True,
+                        delivery_area__isnull=False,
+                    )
+                ),
+                name="notifications_push_outbox_target_valid",
+            )
+        ]
+
+
 class ClientDevice(models.Model):
     class Platform(models.TextChoices):
         ANDROID = "android", "Android"

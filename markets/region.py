@@ -201,32 +201,30 @@ def region_filtered_offer_queryset(queryset, user):
     ).distinct()
 
 
-def visible_offer_queryset(user):
+def visible_offer_queryset(user, *, apply_region=True):
     now = timezone.now()
     queryset = Offer.objects.filter(
         status=Offer.Status.ACTIVE,
         start_time__lte=now,
         end_time__gte=now,
     )
-    queryset = (
-        region_filtered_offer_queryset(queryset, user)
-        .annotate(
-            total_offer_uses=Count(
-                "order_offers__order",
-                filter=~Q(order_offers__order__status="cancelled"),
-                distinct=True,
-            ),
-            customer_offer_uses=Count(
-                "order_offers__order",
-                filter=Q(order_offers__order__user=user)
-                & ~Q(order_offers__order__status="cancelled"),
-                distinct=True,
-            ),
-        )
-        .filter(
-            Q(use_limits__isnull=True) | Q(total_offer_uses__lt=F("use_limits")),
-            Q(user_limit__isnull=True) | Q(customer_offer_uses__lt=F("user_limit")),
-        )
+    if apply_region:
+        queryset = region_filtered_offer_queryset(queryset, user)
+    queryset = queryset.annotate(
+        total_offer_uses=Count(
+            "order_offers__order",
+            filter=~Q(order_offers__order__status="cancelled"),
+            distinct=True,
+        ),
+        customer_offer_uses=Count(
+            "order_offers__order",
+            filter=Q(order_offers__order__user=user)
+            & ~Q(order_offers__order__status="cancelled"),
+            distinct=True,
+        ),
+    ).filter(
+        Q(use_limits__isnull=True) | Q(total_offer_uses__lt=F("use_limits")),
+        Q(user_limit__isnull=True) | Q(customer_offer_uses__lt=F("user_limit")),
     )
     return queryset.order_by("-announcement_priority", "-created_at", "-id")
 

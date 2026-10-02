@@ -58,6 +58,7 @@ class Order(models.Model):
         blank=True,
         null=True,
     )
+    delivery_address_snapshot = models.JSONField(default=dict, blank=True)
     assigned_representative = models.ForeignKey(
         "accounts.User",
         on_delete=models.PROTECT,
@@ -240,6 +241,17 @@ class Order(models.Model):
             models.Index(fields=["-created_at", "-id"]),
         ]
 
+    def save(self, *args, **kwargs):
+        if not self.delivery_address_snapshot and self.delivery_address_id:
+            from .address_snapshot import address_snapshot
+
+            self.delivery_address_snapshot = address_snapshot(self.delivery_address)
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = set(kwargs["update_fields"]) | {
+                    "delivery_address_snapshot"
+                }
+        return super().save(*args, **kwargs)
+
 
 class OrderMarketSection(models.Model):
     class PickupStatus(models.TextChoices):
@@ -306,6 +318,7 @@ class OrderItem(models.Model):
     )
     quantity = models.PositiveIntegerField()
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+    additions = models.JSONField(default=list, blank=True)
 
 
 class OrderOffer(models.Model):

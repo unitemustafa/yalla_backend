@@ -181,6 +181,13 @@ Backups are stored under `/srv/yalla/backups` with checksums and the deployed
 Git revision. A backup on the same VPS is not disaster recovery, so retain
 Hostinger snapshots or copy backups to separate storage.
 
+The backup script now retains the newest seven marked, verified backups by
+default (`YALLA_BACKUP_KEEP_COUNT`). Legacy unmarked backups are not removed.
+For verified external copies and an isolated restoration drill, follow
+[`RELEASE_OPERATIONS.md`](RELEASE_OPERATIONS.md). Set
+`YALLA_BACKUP_RCLONE_REMOTE` only after configuring a private remote as the
+backup service user; leaving it empty does not provide external recovery.
+
 After committing and pushing a tested change to the GitHub `main` branch, go to
 **hPanel → VPS → Manage → Terminal** (not a container shell) and update
 production with:

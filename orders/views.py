@@ -1,5 +1,6 @@
 import mimetypes
 from decimal import Decimal
+import hashlib
 from pathlib import PurePosixPath
 from urllib.parse import quote
 
@@ -22,6 +23,7 @@ from accounts.permissions import (
 )
 from config.pagination import paginated_list_response
 from offers.models import Offer
+from .admin_list import AdminOrderListMixin
 from .models import Order, OrderEvent, OrderMarketSection
 from .request_validation import normalized_order_request_data
 from .idempotency import existing_order_for_request, order_request_identity
@@ -156,7 +158,7 @@ class OrderDeliveryProofView(OrderPrivateMediaView):
     field_name = "delivery_proof"
 
 
-class OrderListCreateView(generics.ListCreateAPIView):
+class OrderListCreateView(AdminOrderListMixin, generics.ListCreateAPIView):
     permission_classes = (IsAuthenticated, IsAdminRole)
     serializer_class = OrderSerializer
 
@@ -179,12 +181,24 @@ class OrderListCreateView(generics.ListCreateAPIView):
         if "delivery_address_id" not in data and "address_id" in data:
             data["delivery_address_id"] = data["address_id"]
         data["user_id"] = target_user.id
+        request_key, request_hash = order_request_identity(request, data)
+        if request_key is not None:
+            request_key = "admin:" + hashlib.sha256(
+                f"{request.user.pk}:{request_key}".encode("utf-8")
+            ).hexdigest()
+        existing_order = existing_order_for_request(target_user, request_key, request_hash)
+        if existing_order is not None:
+            return Response(OrderSerializer(existing_order, context={"request": request}).data)
         serializer = AdminOrderCreateSerializer(
             data=data,
             context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
         order = serializer.save()
+        if request_key is not None:
+            order.client_request_key = request_key
+            order.client_request_hash = request_hash
+            order.save(update_fields=["client_request_key", "client_request_hash"])
         record_order_event(
             order,
             OrderEvent.EventType.ORDER_CREATED,
@@ -294,17 +308,24 @@ class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
-        order = self.get_object()
+        order = generics.get_object_or_404(
+            Order.objects.select_for_update(), pk=kwargs[self.lookup_url_kwarg],
+        )
+        if Order.Status.CANCELLED not in allowed_statuses_for_order(order):
+            return Response({"status": "Invalid status transition."}, status=status.HTTP_400_BAD_REQUEST)
         old_status = order.status
         old_representative = order.assigned_representative
         order.status = Order.Status.CANCELLED
         order.assigned_representative = None
         order.assigned_at = None
+        if order.review_status == Order.ReviewStatus.PENDING_REVIEW:
+            order.review_status = Order.ReviewStatus.REJECTED
         order.save(
             update_fields=[
                 "status",
                 "assigned_representative",
                 "assigned_at",
+                "review_status",
                 "updated_at",
             ]
         )
@@ -358,6 +379,10 @@ class OrderStatusView(APIView):
         if order.status in (Order.Status.CANCELLED, Order.Status.FAILED_DELIVERY):
             order.assigned_representative = None
             order.assigned_at = None
+        if new_status == Order.Status.CANCELLED:
+            if order.review_status == Order.ReviewStatus.PENDING_REVIEW:
+                order.review_status = Order.ReviewStatus.REJECTED
+            resolve_order_review_notifications(order)
         order.save()
         event = record_order_event(
             order,

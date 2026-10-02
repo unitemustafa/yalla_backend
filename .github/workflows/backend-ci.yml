@@ -32,6 +32,8 @@ jobs:
       - name: Install real media test tools
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: ruff check .
+      - name: Backup safety regressions
+        run: python -m unittest discover -s tools -p test_backup_script.py
       - run: python manage.py makemigrations --check --dry-run --settings=config.ci_settings
       - run: python manage.py check --settings=config.ci_settings
       - run: coverage run --source=accounts,catalog,config,dashboard,locations,markets,notifications,offers,orders,partners manage.py test --settings=config.ci_settings

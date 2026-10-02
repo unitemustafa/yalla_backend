@@ -15,6 +15,8 @@ class StoreSubcategoryMigrationTests(TransactionTestCase):
 
     def test_legacy_categories_are_merged_and_empty_data_uses_other(self):
         executor = MigrationExecutor(connection)
+        latest = executor.loader.graph.leaf_nodes()
+        self.addCleanup(lambda: MigrationExecutor(connection).migrate(latest))
         executor.migrate(self.migrate_from)
         old_apps = executor.loader.project_state(self.migrate_from).apps
 

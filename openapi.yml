@@ -6330,16 +6330,17 @@ components:
     AdminOrderItemCreate:
       type: object
       properties:
-        id:
-          type: integer
-          readOnly: true
         variant_id:
           type: integer
         quantity:
           type: integer
           minimum: 1
+        addition_ids:
+          type: array
+          items:
+            type: integer
+            minimum: 1
       required:
-      - id
       - quantity
       - variant_id
     AdminOrderItemCreateRequest:
@@ -6350,6 +6351,11 @@ components:
         quantity:
           type: integer
           minimum: 1
+        addition_ids:
+          type: array
+          items:
+            type: integer
+            minimum: 1
       required:
       - quantity
       - variant_id
@@ -7209,7 +7215,10 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        additions:
+          readOnly: true
       required:
+      - additions
       - id
       - product_name
       - quantity

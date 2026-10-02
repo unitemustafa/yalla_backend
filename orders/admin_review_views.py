@@ -31,6 +31,7 @@ class AdminOrderReviewBlockerView(APIView):
     def get(self, request):
         orders = order_list_queryset().filter(
             review_status=Order.ReviewStatus.PENDING_REVIEW,
+            status=Order.Status.PENDING,
         )
         pending_count = orders.count()
         order_summaries = OrderListSerializer(
@@ -39,9 +40,13 @@ class AdminOrderReviewBlockerView(APIView):
             context={"request": request},
         ).data
         if order_summaries:
-            current_order = order_detail_queryset().filter(
-                pk=order_summaries[0]["id"],
-            ).first()
+            current_order = (
+                order_detail_queryset()
+                .filter(
+                    pk=order_summaries[0]["id"],
+                )
+                .first()
+            )
             if current_order is not None:
                 order_summaries[0] = OrderSerializer(
                     current_order,
@@ -69,7 +74,10 @@ class AdminOrderApproveView(APIView):
             ),
             pk=order_id,
         )
-        if order.review_status != Order.ReviewStatus.PENDING_REVIEW:
+        if (
+            order.review_status != Order.ReviewStatus.PENDING_REVIEW
+            or order.status != Order.Status.PENDING
+        ):
             return Response(
                 {"detail": "Order must be pending review."},
                 status=status.HTTP_400_BAD_REQUEST,

@@ -29,7 +29,7 @@ administrative reporting.
 | Authentication | Simple JWT with custom database-state validation |
 | Database | PostgreSQL |
 | Request limiting | Nginx shared memory |
-| Push delivery | Synchronous Firebase delivery |
+| Background work | Celery workers and beat, with Redis as broker |
 | Media storage | Persistent filesystem, Nginx, and Cloudflare CDN |
 | Push notifications | Firebase Cloud Messaging |
 | API documentation | drf-spectacular and OpenAPI |
@@ -177,9 +177,13 @@ splitting large modules or introducing version 2 behavior.
 
 ## Push delivery
 
-The production stack sends Firebase notifications synchronously and does not
-run a broker or background worker. Push failures are logged without rolling
-back the business request.
+The production stack runs Celery workers for notifications, mail, and media,
+plus a single beat scheduler. Redis is the private broker; PostgreSQL retains
+notification delivery state. Enqueueing occurs after the business transaction
+commits, and delivery tasks use bounded retries and deduplication. Keep the
+workers healthy as well as the web process: a successful HTTP response alone
+does not prove OTP or push delivery. See `compose.yaml` and
+`docs/RELEASE_OPERATIONS.md` for verification and backup procedures.
 
 ## Environment configuration
 
@@ -295,8 +299,8 @@ to become healthy. It preserves the server-only `.env.production` file and the
 persistent data under `/srv/yalla`. Use `deploy/backup.sh --with-media` when a
 release also needs a local media archive.
 
-The Compose stack contains Nginx, Django, PostgreSQL, persistent media, and
-static files. The admin dashboard and Flutter applications remain independent
+The Compose stack contains Nginx, Django, PostgreSQL, Redis, Celery workers and
+beat, persistent media, and static files. The admin dashboard and Flutter applications remain independent
 clients and connect over HTTPS through `api.<domain>`; public media lives at
 `api.<domain>/media/`.
 

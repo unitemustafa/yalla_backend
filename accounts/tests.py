@@ -2303,7 +2303,7 @@ class AuthenticationAPITests(APITestCase):
                 "first_name": "Client",
                 "last_name": "Updated",
                 "username": "client_updated",
-                "email": "client-updated@example.com",
+                "email": user.email,
                 "phone": "+213555000088",
                 "gender": "female",
                 "birth_date": "1998-08-20",
@@ -2316,12 +2316,12 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(response.data["first_name"], "Client")
         self.assertEqual(response.data["last_name"], "Updated")
         self.assertEqual(response.data["username"], "client_updated")
-        self.assertEqual(response.data["email"], "client-updated@example.com")
+        self.assertEqual(response.data["email"], user.email)
         self.assertEqual(response.data["phone"], "+213555000088")
         self.assertEqual(response.data["role"], User.Role.CLIENT)
         self.assertIsNotNone(response.data["username_changed_at"])
         user.refresh_from_db()
-        self.assertEqual(user.email, "client-updated@example.com")
+        self.assertEqual(user.email, self.email)
         self.assertEqual(user.phone, "+213555000088")
 
     def test_client_profile_same_phone_same_format_is_noop(self):

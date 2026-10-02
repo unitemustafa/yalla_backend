@@ -247,7 +247,9 @@ class DeliveryAreaDetailView(
         )
 
         if CourierProfile.objects.filter(delivery_area=area).exists():
-            return self.deletion_blocked("لا يمكن حذف منطقة التوصيل لأنها مستخدمة بواسطة طيارين.")
+            return self.deletion_blocked(
+                "لا يمكن حذف منطقة التوصيل لأنها مستخدمة بواسطة طيارين."
+            )
 
         if (
             Order.objects.filter(
@@ -257,10 +259,14 @@ class DeliveryAreaDetailView(
                 delivery_address__delivery_area=area,
             ).exists()
         ):
-            return self.deletion_blocked("لا يمكن حذف منطقة التوصيل لأنها مرتبطة بطلبات.")
+            return self.deletion_blocked(
+                "لا يمكن حذف منطقة التوصيل لأنها مرتبطة بطلبات."
+            )
 
         if Address.objects.filter(delivery_area=area, is_active=True).exists():
-            return self.deletion_blocked("لا يمكن حذف منطقة التوصيل لأنها مرتبطة بعناوين محفوظة.")
+            return self.deletion_blocked(
+                "لا يمكن حذف منطقة التوصيل لأنها مرتبطة بعناوين محفوظة."
+            )
 
         stale_addresses = Address.objects.filter(
             delivery_area=area,
@@ -270,7 +276,9 @@ class DeliveryAreaDetailView(
         try:
             stale_addresses.delete()
         except ProtectedError:
-            return self.deletion_blocked("لا يمكن حذف منطقة التوصيل لأنها مرتبطة بطلبات.")
+            return self.deletion_blocked(
+                "لا يمكن حذف منطقة التوصيل لأنها مرتبطة بطلبات."
+            )
 
         area.markets.clear()
         area.delete()
@@ -487,7 +495,7 @@ class AddressDetailView(APIView):
             "delivery_area__service_city",
         )
         if for_update:
-            queryset = queryset.select_for_update()
+            queryset = queryset.select_for_update(of=("self",))
         queryset = queryset.filter(is_active=True)
         if request.user.role != request.user.Role.ADMIN:
             queryset = queryset.filter(user=request.user)

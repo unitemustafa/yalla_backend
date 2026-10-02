@@ -68,6 +68,9 @@ def permanently_delete_client_account(user):
         latitude=None,
         longitude=None,
     )
+    # An order owns a frozen copy of delivery instructions. Erase that copy as
+    # well as the address book when the customer permanently deletes the account.
+    user.orders.update(delivery_address_snapshot={})
 
     user.notifications.all().delete()
     user.client_devices.all().delete()
@@ -114,6 +117,8 @@ def permanently_delete_client_account(user):
     revoke_user_sessions(user)
 
     if old_avatar and old_avatar.name:
-        transaction.on_commit(lambda: schedule_storage_cleanup(old_avatar.storage, old_avatar.name))
+        transaction.on_commit(
+            lambda: schedule_storage_cleanup(old_avatar.storage, old_avatar.name)
+        )
 
     return user

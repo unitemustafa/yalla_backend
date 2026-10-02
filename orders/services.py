@@ -67,6 +67,8 @@ def record_order_event(
 
 def resolve_order_target_user(request, *, action, lock=False):
     user = request.user
+    if not hasattr(request.data, "get"):
+        raise serializers.ValidationError({"detail": "Expected an object."})
     user_id = request.data.get("user_id")
 
     if user.role == User.Role.CLIENT:

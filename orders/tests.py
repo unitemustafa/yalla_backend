@@ -740,7 +740,7 @@ class OrderAPITests(APITestCase):
         self.assertEqual(assigned.status_code, status.HTTP_200_OK)
         self.assertEqual(picked_up.status_code, status.HTTP_200_OK)
         self.assertEqual(failed.status_code, status.HTTP_200_OK)
-        self.assertEqual(repeated.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(repeated.status_code, status.HTTP_200_OK)
         self.assertEqual(
             Notification.objects.filter(order=order, recipient=self.customer).count(),
             before_repeat,

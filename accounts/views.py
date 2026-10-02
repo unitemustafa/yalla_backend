@@ -64,6 +64,7 @@ from .services import (
     otp_response_data,
     registration_expires_at,
     verify_registration_otp,
+    verify_otp,
 )
 from .exceptions import EmailVerificationRequired
 from .deactivation import revoke_user_sessions
@@ -1111,18 +1112,24 @@ class ResetPasswordView(APIView):
     permission_classes = [AllowAny]
     rate_limit_scopes = ("otp_verify_ip", "otp_verify_identifier")
 
-    @transaction.atomic
     def post(self, request):
         serializer = ResetPasswordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data["user"]
-        user.set_password(serializer.validated_data["password"])
-        user.save(update_fields=["password"])
-        revoke_user_sessions(user)
-        otp = serializer.validated_data["otp_instance"]
-        otp.used_at = timezone.now()
-        otp.save(update_fields=["used_at"])
-        clear_otp_cooldown(user.email, OneTimePassword.Purpose.PASSWORD_RESET)
+        with transaction.atomic():
+            # Recheck under the OTP lock; validation failures above commit the
+            # attempt counter, while successful consumption and reset are atomic.
+            otp, error = verify_otp(
+                user,
+                OneTimePassword.Purpose.PASSWORD_RESET,
+                serializer.validated_data["otp"],
+            )
+            if error:
+                return Response({"otp": error}, status=status.HTTP_400_BAD_REQUEST)
+            user.set_password(serializer.validated_data["password"])
+            user.save(update_fields=["password"])
+            revoke_user_sessions(user)
+            clear_otp_cooldown(user.email, OneTimePassword.Purpose.PASSWORD_RESET)
         return Response({"detail": "Password reset successfully."})
 
 

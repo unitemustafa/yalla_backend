@@ -455,6 +455,7 @@ class FCMTokenHandlingTests(TestCase):
             message_kwargs["data"],
             {
                 "event": "account_restored",
+                "recipient_id": str(user.pk),
                 "notification_id": str(notification.id),
                 "route": "login",
             },

@@ -436,6 +436,7 @@ class LoginSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             return PendingRegistration.objects.filter(phone__in=candidates).first()
         return None
 
+
 class ClientLoginSerializer(LoginSerializer):
     """Client-only session choice; omitted values are temporary by default."""
 
@@ -652,6 +653,15 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
     def validate_email(self, value):
         email = normalize_email(value)
         user = self.context["request"].user
+        if (
+            self.instance is not None
+            and self.instance.pk == user.pk
+            and user.role != User.Role.ADMIN
+            and email != normalize_email(self.instance.email)
+        ):
+            raise serializers.ValidationError(
+                "تغيير البريد يحتاج إثبات ملكية البريد الجديد وهو غير متاح حاليًا."
+            )
         if (
             user.role == User.Role.ADMIN
             and self.instance is not None

@@ -183,6 +183,14 @@ def send_notifications_push(
             "title": notification.title,
             "message": notification.message,
         }
+        # Public catalog announcements can share a multicast payload. Private
+        # order/account/courier events must identify their owning session.
+        if (
+            notification.audience == Notification.Audience.COURIER
+            or notification.order_id is not None
+            or data.get("event") in {"account_disabled", "account_restored"}
+        ):
+            data["recipient_id"] = notification.recipient_id
         normalized_data = _string_data(data)
         group_key = (
             notification.title,
@@ -247,6 +255,7 @@ def _send_notification_push_now(
         )
         data = {
             **(notification.data or {}),
+            "recipient_id": notification.recipient_id,
             "notification_id": notification.id,
             "title": notification.title,
             "message": notification.message,
@@ -301,6 +310,7 @@ def _send_account_restored_push_now(notification_id):
         tokens,
         {
             "event": "account_restored",
+            "recipient_id": notification.recipient_id,
             "notification_id": str(notification.id),
             "route": "login",
         },
@@ -326,6 +336,7 @@ def _send_account_disabled_event_now(user_id):
         devices,
         {
             "event": "account_disabled",
+            "recipient_id": user_id,
             "code": "account_inactive",
             "message": ACCOUNT_INACTIVE_MESSAGE,
         },
@@ -359,7 +370,11 @@ def _send_courier_notification_push_now(notification_id):
             is_active=True,
         ).values_list("token", flat=True)
     )
-    data = {**(notification.data or {}), "notification_id": str(notification.id)}
+    data = {
+        **(notification.data or {}),
+        "notification_id": str(notification.id),
+        "recipient_id": notification.recipient_id,
+    }
     event = data.get("event")
     channel_id = (
         "account_updates"

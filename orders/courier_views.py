@@ -1,4 +1,6 @@
 from django.db import transaction
+from django.db.models import Count, Sum
+from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
@@ -6,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import IsRepresentativeRole
-from config.pagination import paginated_list_response
+from config.pagination import paginated_list_response, YallaPageNumberPagination
 from notifications.order_services import (
     create_admin_courier_order_status_notification,
     schedule_order_lifecycle_notification,
@@ -31,6 +33,37 @@ class CourierOrderListView(APIView):
 
     def get(self, request):
         queryset = courier_order_list_queryset(request.user)
+        scope = request.query_params.get("scope")
+        if scope not in (None, "active", "history"):
+            return Response(
+                {"scope": "Unsupported order scope."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        terminal = (
+            Order.Status.DELIVERED,
+            Order.Status.FAILED_DELIVERY,
+            Order.Status.CANCELLED,
+        )
+        if scope == "active":
+            queryset = queryset.exclude(status__in=terminal)
+        elif scope == "history":
+            queryset = queryset.filter(status__in=terminal)
+        for parameter, lookup in (
+            ("delivered_from", "delivered_at__gte"),
+            ("delivered_before", "delivered_at__lt"),
+        ):
+            value = request.query_params.get(parameter)
+            if value:
+                try:
+                    parsed = parse_datetime(value)
+                except ValueError:
+                    parsed = None
+                if parsed is None or timezone.is_naive(parsed):
+                    return Response(
+                        {parameter: "Use an ISO timestamp with timezone."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                queryset = queryset.filter(**{lookup: parsed})
         order_status = request.query_params.get("status")
         if order_status:
             if order_status not in COURIER_STATUSES:
@@ -39,6 +72,28 @@ class CourierOrderListView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             queryset = queryset.filter(status=order_status)
+        if scope:
+            totals = queryset.aggregate(
+                count=Count("pk"),
+                total_value=Sum("total_price"),
+                total_delivery_fees=Sum("delivery_price"),
+            )
+            paginator = YallaPageNumberPagination()
+            # Scoped responses always paginate, including callers without page.
+            page = super(YallaPageNumberPagination, paginator).paginate_queryset(
+                queryset, request
+            )
+            response = paginator.get_paginated_response(
+                CourierOrderListSerializer(
+                    page, many=True, context={"request": request}
+                ).data
+            )
+            response.data["summary"] = {
+                "count": totals["count"],
+                "total_value": f"{totals['total_value'] or 0:.2f}",
+                "total_delivery_fees": f"{totals['total_delivery_fees'] or 0:.2f}",
+            }
+            return response
         return paginated_list_response(
             request,
             queryset,
@@ -109,6 +164,14 @@ class CourierOrderStatusView(APIView):
         serializer = CourierOrderStatusSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         new_status = serializer.validated_data["status"]
+        if new_status == order.status:
+            # Lost-response retries do not replace the committed note/proof or
+            # repeat notifications. Authorization is still checked above.
+            return Response(
+                CourierOrderDetailSerializer(
+                    order_queryset().get(pk=order.pk), context={"request": request}
+                ).data
+            )
         allowed_next_statuses = COURIER_TRANSITIONS.get(order.status, set())
         if new_status not in allowed_next_statuses:
             return Response(

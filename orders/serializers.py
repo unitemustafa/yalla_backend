@@ -12,7 +12,6 @@ from markets.region import (
     address_matches_market_region,
     current_market_region_selection,
     order_region_validation_error,
-    visible_offer_queryset,
 )
 from offers.models import Offer
 
@@ -21,6 +20,12 @@ from .models import Order, OrderEvent, OrderItem, OrderMarketSection, OrderOffer
 from .pricing import calculate_multi_market_fee, ordered_market_ids
 from .services import allowed_statuses_for_order
 from .write_validation import OrderWriteValidationMixin
+from .checkout_content import (
+    additions_price,
+    offer_variant_rows,
+    selected_additions,
+    validate_checkout_content,
+)
 
 User = get_user_model()
 
@@ -54,6 +59,13 @@ class OrderPreviewItemSerializer(serializers.Serializer):
         source="variant",
     )
     quantity = serializers.IntegerField(min_value=1)
+    addition_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), required=False, default=list
+    )
+
+    def validate(self, attrs):
+        attrs["additions"] = selected_additions(attrs)
+        return attrs
 
 
 class OrderPreviewOfferSerializer(serializers.Serializer):
@@ -214,15 +226,12 @@ class OrderPreviewSerializer(serializers.Serializer):
         )
         if region_error:
             raise serializers.ValidationError(region_error)
-        available_offer_ids = set(
-            visible_offer_queryset(user)
-            .filter(id__in=[item["offer"].id for item in offers])
-            .values_list("id", flat=True)
+        validate_checkout_content(
+            items,
+            offers,
+            user=user,
+            lock_offers=isinstance(self, ClientOrderCreateSerializer),
         )
-        if any(item["offer"].id not in available_offer_ids for item in offers):
-            raise serializers.ValidationError(
-                {"offers": "One or more offers are no longer available."}
-            )
 
     def _validated_address(
         self,
@@ -435,7 +444,9 @@ class OrderPreviewSerializer(serializers.Serializer):
             variant = item["variant"]
             product = variant.product
             quantity = item["quantity"]
-            unit_price = self._product_unit_price(variant)
+            unit_price = self._product_unit_price(variant) + additions_price(
+                item.get("additions", [])
+            )
             subtotal = unit_price * quantity
             group = self._market_group(market_groups, product.market)
             line = {
@@ -446,6 +457,7 @@ class OrderPreviewSerializer(serializers.Serializer):
                 "quantity": quantity,
                 "unit_price": self._money(unit_price),
                 "subtotal": self._money(subtotal),
+                "additions": item.get("additions", []),
             }
             group["selected_products"].append(line)
             group["products_subtotal"] += subtotal
@@ -611,23 +623,7 @@ class OrderPreviewSerializer(serializers.Serializer):
 
     @staticmethod
     def _offer_variant_rows(offer):
-        offer_items = list(offer.items.all())
-        if offer_items:
-            return [
-                (
-                    item.variant,
-                    item.quantity,
-                    item.apply_product_discount,
-                )
-                for item in offer_items
-            ]
-
-        rows = []
-        for product in offer.products.all():
-            variant = product.variants.order_by("id").first()
-            if variant is not None:
-                rows.append((variant, 1, True))
-        return rows
+        return offer_variant_rows(offer)
 
     def _image_url(self, image):
         if not image:
@@ -925,7 +921,9 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
             variant = item["variant"]
             product = variant.product
             quantity = item["quantity"]
-            unit_price = self._product_unit_price(variant)
+            unit_price = self._product_unit_price(variant) + additions_price(
+                item.get("additions", [])
+            )
             subtotal = unit_price * quantity
             group = self._create_group(
                 groups,
@@ -940,6 +938,7 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
                     "variant": variant,
                     "quantity": quantity,
                     "unit_price": unit_price,
+                    "additions": item.get("additions", []),
                 }
             )
             group["products_subtotal"] += subtotal
@@ -1041,6 +1040,7 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
+    additions = serializers.JSONField(read_only=True)
     variant_id = serializers.PrimaryKeyRelatedField(
         queryset=ProductVariant.objects.select_related("product"),
         source="variant",
@@ -1059,6 +1059,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
             "variant_name",
             "quantity",
             "unit_price",
+            "additions",
         )
         read_only_fields = ("id", "product_name", "variant_name")
 
@@ -1146,17 +1147,12 @@ class OrderMarketSectionSerializer(serializers.ModelSerializer):
         return f"{total:.2f}"
 
 
-class AdminOrderItemCreateSerializer(serializers.ModelSerializer):
+class AdminOrderItemCreateSerializer(OrderPreviewItemSerializer):
     variant_id = serializers.PrimaryKeyRelatedField(
         queryset=ProductVariant.objects.select_related("product"),
         source="variant",
     )
     quantity = serializers.IntegerField(min_value=1)
-
-    class Meta:
-        model = OrderItem
-        fields = ("id", "variant_id", "quantity")
-        read_only_fields = ("id",)
 
 
 class AdminOrderOfferCreateSerializer(serializers.ModelSerializer):
@@ -1514,7 +1510,9 @@ class OrderSerializer(
         return data
 
     def get_delivery_address(self, instance) -> dict | None:
-        return order_delivery_address_data(instance.delivery_address)
+        return instance.delivery_address_snapshot or order_delivery_address_data(
+            instance.delivery_address
+        )
 
     def get_delivery_price_status(self, instance) -> str:
         if (
@@ -1656,6 +1654,7 @@ class OrderSerializer(
                     "variant": item.variant,
                     "quantity": item.quantity,
                     "unit_price": item.unit_price,
+                    "additions": item.additions,
                 }
             else:
                 item_data = item
@@ -1765,7 +1764,9 @@ class OrderListSerializer(serializers.ModelSerializer):
         return user_summary(instance.user, self.context.get("request"))
 
     def get_delivery_address(self, instance) -> dict | None:
-        return order_delivery_address_data(instance.delivery_address)
+        return instance.delivery_address_snapshot or order_delivery_address_data(
+            instance.delivery_address
+        )
 
     def get_delivery_price_status(self, instance) -> str:
         if (
@@ -1878,6 +1879,9 @@ class AdminOrderCreateSerializer(OrderSerializer):
             attrs["market"] = first_market
 
         attrs = super().validate(attrs)
+        validate_checkout_content(
+            items, offers, user=attrs["user"], lock_offers=True, apply_region=False
+        )
         if not attrs.get("items") and not attrs.get("order_offers"):
             raise serializers.ValidationError(
                 {"items": "Choose at least one product variant or offer."}
@@ -1983,11 +1987,14 @@ class AdminOrderCreateSerializer(OrderSerializer):
         for item in items:
             variant = item["variant"]
             quantity = item["quantity"]
-            unit_price = OrderPreviewSerializer._product_unit_price(variant)
+            unit_price = OrderPreviewSerializer._product_unit_price(
+                variant
+            ) + additions_price(item.get("additions", []))
             priced_item = {
                 "variant": variant,
                 "quantity": quantity,
                 "unit_price": unit_price,
+                "additions": item.get("additions", []),
             }
             priced_items.append(priced_item)
             selected_lines_by_variant.setdefault(variant.id, []).append(
@@ -2127,6 +2134,7 @@ class OrderReviewActionSerializer(serializers.Serializer):
 
 
 class CourierOrderItemSerializer(serializers.ModelSerializer):
+    additions = serializers.JSONField(read_only=True)
     product = serializers.SerializerMethodField()
     variant = serializers.SerializerMethodField()
     display_name = serializers.SerializerMethodField()
@@ -2134,7 +2142,9 @@ class CourierOrderItemSerializer(serializers.ModelSerializer):
     market_name = serializers.CharField(
         source="variant.product.market.name", read_only=True
     )
-    market_id = serializers.IntegerField(source="variant.product.market_id", read_only=True)
+    market_id = serializers.IntegerField(
+        source="variant.product.market_id", read_only=True
+    )
     section_id = serializers.IntegerField(read_only=True)
 
     class Meta:
@@ -2145,6 +2155,7 @@ class CourierOrderItemSerializer(serializers.ModelSerializer):
             "quantity",
             "unit_price",
             "item_subtotal",
+            "additions",
             "market_name",
             "market_id",
             "section_id",
@@ -2271,7 +2282,9 @@ class CourierOrderListSerializer(serializers.ModelSerializer):
         return sum(item.quantity for item in instance.items.all())
 
     def get_delivery_address(self, instance):
-        return order_delivery_address_data(instance.delivery_address)
+        return instance.delivery_address_snapshot or order_delivery_address_data(
+            instance.delivery_address
+        )
 
 
 class CourierOrderDetailSerializer(
