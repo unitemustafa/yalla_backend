@@ -124,6 +124,7 @@ services:
       - "443:443"
     volumes:
       - ./deploy/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./deploy/nginx/django-proxy.conf:/etc/nginx/snippets/django-proxy.conf:ro
       - ${YALLA_DATA_ROOT:-/srv/yalla}/tls:/etc/nginx/tls:ro
       - ${YALLA_DATA_ROOT:-/srv/yalla}/media/public:/srv/yalla/media/public:ro
       - ${YALLA_DATA_ROOT:-/srv/yalla}/media/private:/srv/yalla/media/private:ro
@@ -184,6 +185,21 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  celery-media-worker:
+    <<: *backend-service
+    command: ["celery", "-A", "config", "worker", "-l", "INFO", "-c", "1", "-Q", "media", "-n", "media@%h"]
+    depends_on:
+      release:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "ffmpeg -version >/dev/null && ffprobe -version >/dev/null && celery -A config inspect ping -d media@$$HOSTNAME --timeout 5"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
   postgres:
     image: postgres:17-alpine

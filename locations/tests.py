@@ -24,7 +24,7 @@ User = get_user_model()
 
 def shipping_logo_upload(name="shipping-logo.png"):
     content = BytesIO()
-    Image.new("RGB", (4, 4), "blue").save(content, format="PNG")
+    Image.new("RGB", (400, 400), "blue").save(content, format="PNG")
     return SimpleUploadedFile(name, content.getvalue(), content_type="image/png")
 
 

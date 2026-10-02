@@ -9,6 +9,22 @@ COMPOSE_FILE = BASE_DIR / "compose.yaml"
 
 
 class NginxProtectedMediaTests(SimpleTestCase):
+    def test_nginx_uses_a_small_default_and_scoped_multipart_limits(self):
+        configuration = NGINX_TEMPLATE.read_text(encoding="utf-8")
+
+        self.assertIn("client_max_body_size 8m;", configuration)
+        for route, size in (
+            ("catalog/products/|offers/home-campaigns/[^/]+/media/", "55m"),
+            ("dashboard/media-jobs/", "32m"),
+            ("dashboard/app-media/", "57m"),
+            ("home/markets/", "12m"),
+        ):
+            with self.subTest(route=route):
+                location = next(block for block in configuration.split("location ") if route in block)
+                self.assertIn(f"client_max_body_size {size};", location)
+                self.assertIn("include /etc/nginx/snippets/django-proxy.conf;", location)
+                self.assertIn("^/api/v[12]/", location)
+
     def test_nginx_is_recreated_for_each_deployment_revision(self):
         configuration = COMPOSE_FILE.read_text(encoding="utf-8")
         nginx_service = configuration.split("  nginx:", maxsplit=1)[1].split(

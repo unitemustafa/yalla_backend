@@ -1,3 +1,4 @@
+from config.media_cleanup import schedule_storage_cleanup
 from pathlib import Path
 
 from django.db import transaction
@@ -5,7 +6,7 @@ from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers
 
-from config.image_validation import validate_safe_image
+from config.media_specs import validate_media_image
 
 from .courier_rules import active_assigned_orders_for_user
 from .models import CourierProfile, OneTimePassword, PendingRegistration, User
@@ -118,7 +119,7 @@ class AdminUserWriteMixin:
             )
         if value.size > AVATAR_MAX_SIZE:
             raise serializers.ValidationError("Profile photo must be 5 MB or smaller.")
-        return validate_safe_image(value)
+        return validate_media_image(value, "avatar")
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -290,7 +291,7 @@ class AdminUserWriteMixin:
             and old_avatar.name
             and old_avatar.name != instance.avatar_image.name
         ):
-            old_avatar.delete(save=False)
+            schedule_storage_cleanup(old_avatar.storage, old_avatar.name)
 
     @staticmethod
     def _sync_courier_profile(instance, profile_data):

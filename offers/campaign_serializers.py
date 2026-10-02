@@ -3,12 +3,14 @@ from urllib.parse import urlparse
 
 from django.conf import settings
 from rest_framework import serializers
+from django.db import transaction
+from dashboard.media_jobs import create_media_job, ready_job, apply_ready_job, job_data
 
 from catalog.models import Product, ProductCategory
 from locations.models import ServiceCity
 from markets.models import Market
 
-from .campaign_media import validate_campaign_image, validate_campaign_video
+from .campaign_media import validate_campaign_image, validate_campaign_video, validate_campaign_teaser
 from .models import HomeCampaign, Offer
 
 
@@ -22,6 +24,10 @@ TARGET_FIELDS = {
 
 
 class AdminHomeCampaignSerializer(serializers.ModelSerializer):
+    video_processing = serializers.SerializerMethodField()
+
+    def get_video_processing(self, instance):
+        return job_data(instance.pending_video_job, self.context.get("request")) if instance.pending_video_job_id else None
     effective_status = serializers.SerializerMethodField()
     additional_images = serializers.SerializerMethodField()
     service_city_id = serializers.PrimaryKeyRelatedField(
@@ -88,6 +94,7 @@ class AdminHomeCampaignSerializer(serializers.ModelSerializer):
             "additional_images",
             "video",
             "video_poster",
+            "video_processing",
             "open_mode",
             "dismiss_behavior",
             "action_type",
@@ -214,6 +221,8 @@ class AdminHomeCampaignSerializer(serializers.ModelSerializer):
             attrs["copy_text"] = ""
 
         media_type = value("media_type", HomeCampaign.MediaType.NONE)
+        if "media_type" in attrs and (instance is None or media_type != instance.media_type or media_type == HomeCampaign.MediaType.NONE):
+            attrs["pending_video_job"] = None
         if media_type == HomeCampaign.MediaType.NONE:
             attrs.update(sheet_image=None, video=None, video_poster=None)
         elif media_type == HomeCampaign.MediaType.IMAGE:
@@ -249,10 +258,11 @@ class AdminHomeCampaignSerializer(serializers.ModelSerializer):
 
 
 class HomeCampaignMediaSerializer(serializers.ModelSerializer):
+    video_job_id = serializers.UUIDField(write_only=True, required=False)
     teaser_image = serializers.ImageField(
         required=False,
         allow_null=True,
-        validators=[validate_campaign_image],
+        validators=[validate_campaign_teaser],
     )
     sheet_image = serializers.ImageField(
         required=False,
@@ -272,7 +282,31 @@ class HomeCampaignMediaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = HomeCampaign
-        fields = ("teaser_image", "sheet_image", "video", "video_poster")
+        fields = ("teaser_image", "sheet_image", "video", "video_poster", "video_job_id")
+
+    def validate(self, attrs):
+        if attrs.get("video") and attrs.get("video_job_id"):
+            raise serializers.ValidationError("Choose one video upload.")
+        if attrs.get("video_job_id"):
+            ready_job(attrs["video_job_id"], "campaign")
+        return attrs
+
+    def update(self, instance, validated_data):
+        job_id = validated_data.pop("video_job_id", None)
+        has_video = "video" in validated_data
+        upload = validated_data.pop("video", None)
+        with transaction.atomic():
+            job = ready_job(job_id, "campaign", lock=True) if job_id else None
+            instance = HomeCampaign.objects.select_for_update().get(pk=instance.pk)
+            if upload is not None:
+                validated_data["pending_video_job"] = create_media_job(upload, self.context["request"].user, "campaign", validated=True, poster=validated_data.pop("video_poster", None))
+            elif job is not None:
+                apply_ready_job(instance, job, poster=validated_data.pop("video_poster", None))
+            elif has_video or "sheet_image" in validated_data:
+                validated_data["pending_video_job"] = None
+                if has_video:
+                    validated_data["video"] = None
+            return super().update(instance, validated_data)
 
 
 def _file_url(request, field):

@@ -35,7 +35,7 @@ SETTINGS_URL = "/api/v1/dashboard/settings/"
 
 
 def small_png(name="logo.png"):
-    image = Image.new("RGB", (1, 1), color="white")
+    image = Image.new("RGB", (512, 512), color="white")
     content = BytesIO()
     image.save(content, format="PNG")
     return SimpleUploadedFile(name, content.getvalue(), content_type="image/png")
@@ -248,7 +248,7 @@ class DashboardSettingsAPITests(APITestCase):
         self.assertEqual(settings.logo.name, original_logo)
         self.assertTrue(settings.logo.storage.exists(original_logo))
 
-    def test_replacing_logo_changes_url_and_removes_old_file(self):
+    def test_replacing_logo_changes_url_and_defers_old_file_cleanup(self):
         self.authenticate_admin()
         first_response = self.client.patch(
             SETTINGS_URL,
@@ -271,7 +271,9 @@ class DashboardSettingsAPITests(APITestCase):
         self.assertNotEqual(
             second_response.data["logo_url"], first_response.data["logo_url"]
         )
-        self.assertFalse(settings.logo.storage.exists(old_logo_name))
+        self.assertTrue(settings.logo.storage.exists(old_logo_name))
+        from dashboard.models import MediaCleanup
+        self.assertTrue(MediaCleanup.objects.filter(name=old_logo_name).exists())
 
 
 @override_settings(TIME_ZONE="UTC", USE_TZ=True)

@@ -147,6 +147,7 @@ class OfferItem(models.Model):
 
 
 class HomeCampaign(models.Model):
+    pending_video_job = models.ForeignKey("dashboard.MediaJob", null=True, blank=True, on_delete=models.SET_NULL)
     class Template(models.TextChoices):
         HERO = "hero", "Hero"
         SPLIT = "split", "Split"

@@ -3,7 +3,7 @@ from django.db.models import Max
 from django.utils import timezone
 from rest_framework import serializers
 
-from config.image_validation import validate_safe_image
+from config.media_specs import validate_media_image
 from config.media_cleanup import (
     delete_storage_file_if_unreferenced,
 )
@@ -33,7 +33,7 @@ def validate_product_image_upload(value):
         raise serializers.ValidationError("Unsupported product image type.")
     if value.size > PRODUCT_IMAGE_MAX_SIZE:
         raise serializers.ValidationError("Product images must be 5 MB or smaller.")
-    return validate_safe_image(value)
+    return validate_media_image(value, "product")
 
 
 def _sync_legacy_image(product):

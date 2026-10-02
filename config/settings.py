@@ -344,12 +344,16 @@ CELERY_TASK_ALWAYS_EAGER = os.environ.get(
 CELERY_TASK_EAGER_PROPAGATES = True
 CELERY_TASK_DEFAULT_QUEUE = "default"
 CELERY_TASK_ROUTES = {
+    "dashboard.tasks.process_media_job": {"queue": "media"},
+    "dashboard.tasks.monitor_media_jobs": {"queue": "default"},
     "notifications.tasks.*": {"queue": "notifications"},
     "accounts.tasks.send_email_task": {"queue": "mail"},
     "config.tasks.delete_storage_file_task": {"queue": "default"},
     "accounts.tasks.cleanup_unverified_users_task": {"queue": "default"},
 }
 CELERY_BEAT_SCHEDULE = {
+    "cleanup-media": {"task": "dashboard.tasks.cleanup_due_media", "schedule": 3600.0},
+    "monitor-media-jobs": {"task": "dashboard.tasks.monitor_media_jobs", "schedule": 60.0},
     "cleanup-stale-unverified-users-hourly": {
         "task": "accounts.tasks.cleanup_unverified_users_task",
         "schedule": 3600.0,
@@ -368,6 +372,8 @@ CELERY_TASK_STORE_ERRORS_EVEN_IF_IGNORED = True
 CELERY_RESULT_EXPIRES = 3600
 CELERY_TASK_SOFT_TIME_LIMIT = int(os.environ.get("CELERY_TASK_SOFT_TIME_LIMIT", "60"))
 CELERY_TASK_TIME_LIMIT = int(os.environ.get("CELERY_TASK_TIME_LIMIT", "120"))
+FFMPEG_BINARY = os.environ.get("FFMPEG_BINARY", "ffmpeg")
+FFPROBE_BINARY = os.environ.get("FFPROBE_BINARY", "ffprobe")
 
 
 # Password validation
@@ -564,6 +570,9 @@ API_MAX_REQUEST_BODY_SIZE = int(
 API_SINGLE_UPLOAD_REQUEST_SIZE = int(
     os.environ.get("API_SINGLE_UPLOAD_REQUEST_SIZE", str(8 * 1024 * 1024))
 )
+DATA_UPLOAD_MAX_MEMORY_SIZE = API_MAX_REQUEST_BODY_SIZE
+FILE_UPLOAD_MAX_MEMORY_SIZE = 1024 * 1024
+DATA_UPLOAD_MAX_NUMBER_FILES = 12
 API_PRODUCT_UPLOAD_REQUEST_SIZE = int(
     os.environ.get("API_PRODUCT_UPLOAD_REQUEST_SIZE", str(55 * 1024 * 1024))
 )

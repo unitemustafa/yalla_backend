@@ -1,3 +1,4 @@
+from config.media_cleanup import schedule_storage_cleanup
 import uuid
 
 from django.db import transaction
@@ -113,6 +114,6 @@ def permanently_delete_client_account(user):
     revoke_user_sessions(user)
 
     if old_avatar and old_avatar.name:
-        transaction.on_commit(lambda: old_avatar.delete(save=False))
+        transaction.on_commit(lambda: schedule_storage_cleanup(old_avatar.storage, old_avatar.name))
 
     return user

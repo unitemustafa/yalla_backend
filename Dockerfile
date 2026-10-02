@@ -10,7 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpq5 \
+    && apt-get install -y --no-install-recommends libpq5 ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --home-dir /app --shell /usr/sbin/nologin --no-create-home app

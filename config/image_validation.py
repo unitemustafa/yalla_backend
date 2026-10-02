@@ -22,12 +22,16 @@ MAX_IMAGE_DIMENSION = 12_000
 def validate_safe_image(value):
     """Verify decoded image metadata instead of trusting filename or MIME."""
 
+    if value.size > 5 * 1024 * 1024:
+        raise serializers.ValidationError("Images must be 5 MB or smaller.")
     original_position = value.tell() if hasattr(value, "tell") else None
     try:
         value.seek(0)
         image = Image.open(value)
         detected_format = (image.format or "").upper()
         width, height = image.size
+        if getattr(image, "n_frames", 1) != 1:
+            raise serializers.ValidationError("Animated images are not supported.")
         image.verify()
     except (Image.DecompressionBombError, Image.DecompressionBombWarning):
         raise serializers.ValidationError(

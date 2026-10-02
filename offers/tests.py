@@ -36,7 +36,7 @@ OFFERS_BASE = "/api/v1/offers"
 
 def offer_image_upload(name="offer.png", image_format="PNG", color="blue"):
     content = BytesIO()
-    Image.new("RGB", (2, 2), color=color).save(content, format=image_format)
+    Image.new("RGB", (1200, 450), color=color).save(content, format=image_format)
     mime_type = (
         "image/jpeg" if image_format == "JPEG" else f"image/{image_format.lower()}"
     )

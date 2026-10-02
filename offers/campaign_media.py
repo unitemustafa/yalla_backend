@@ -2,11 +2,11 @@ import struct
 
 from rest_framework import serializers
 
-from config.image_validation import validate_safe_image
+from config.media_specs import validate_media_image
 
 
 CAMPAIGN_IMAGE_MAX_SIZE = 5 * 1024 * 1024
-CAMPAIGN_VIDEO_MAX_SIZE = 15 * 1024 * 1024
+CAMPAIGN_VIDEO_MAX_SIZE = 30 * 1024 * 1024
 CAMPAIGN_VIDEO_MAX_SECONDS = 30
 CAMPAIGN_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 CAMPAIGN_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -22,7 +22,7 @@ def validate_campaign_image(value):
         raise serializers.ValidationError("Unsupported campaign image type.")
     if value.size > CAMPAIGN_IMAGE_MAX_SIZE:
         raise serializers.ValidationError("Campaign images must be 5 MB or smaller.")
-    return validate_safe_image(value)
+    return validate_media_image(value, "campaignMedia")
 
 
 def _atom_header(stream, limit):
@@ -103,23 +103,10 @@ def mp4_duration_seconds(value):
 
 
 def validate_campaign_video(value):
-    name = value.name or ""
-    extension = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-    content_type = (getattr(value, "content_type", "") or "").lower()
-    if extension != "mp4" or content_type != "video/mp4":
-        raise serializers.ValidationError("Upload an MP4 video.")
-    if value.size > CAMPAIGN_VIDEO_MAX_SIZE:
-        raise serializers.ValidationError("Campaign videos must be 15 MB or smaller.")
-    value.seek(0)
-    header = value.read(12)
-    value.seek(0)
-    if len(header) < 12 or header[4:8] != b"ftyp":
-        raise serializers.ValidationError("The uploaded file is not a valid MP4 video.")
-    duration = mp4_duration_seconds(value)
-    if duration is None:
-        raise serializers.ValidationError("Could not read the MP4 video duration.")
-    if duration > CAMPAIGN_VIDEO_MAX_SECONDS:
-        raise serializers.ValidationError(
-            "Campaign videos must be 30 seconds or shorter."
-        )
-    return value
+    from dashboard.media_jobs import validate_video_upload
+    return validate_video_upload(value)
+
+
+
+def validate_campaign_teaser(value):
+    return validate_media_image(value, "campaignTeaser")

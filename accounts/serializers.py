@@ -1,3 +1,4 @@
+from config.media_cleanup import schedule_storage_cleanup
 import re
 from datetime import timedelta
 from pathlib import Path
@@ -14,7 +15,7 @@ from django.db.models import Count, Max, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import serializers
-from config.image_validation import validate_safe_image
+from config.media_specs import validate_media_image
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
@@ -692,7 +693,7 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             )
         if value.size > AVATAR_MAX_SIZE:
             raise serializers.ValidationError("Profile photo must be 5 MB or smaller.")
-        return validate_safe_image(value)
+        return validate_media_image(value, "avatar")
 
     def validate_phone(self, value):
         phone = normalize_egyptian_phone(value)
@@ -771,7 +772,7 @@ class UserUpdateSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
             and old_avatar.name
             and old_avatar.name != instance.avatar_image.name
         ):
-            old_avatar.delete(save=False)
+            schedule_storage_cleanup(old_avatar.storage, old_avatar.name)
         return instance
 
 

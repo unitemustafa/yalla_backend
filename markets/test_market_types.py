@@ -18,7 +18,7 @@ User = get_user_model()
 
 def image_upload(name="type.png", color="orange"):
     content = BytesIO()
-    Image.new("RGB", (4, 4), color=color).save(content, format="PNG")
+    Image.new("RGB", (512, 512), color=color).save(content, format="PNG")
     return SimpleUploadedFile(name, content.getvalue(), content_type="image/png")
 
 

@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.db import models
+from config.media_specs import center_focus
 from django.db.models import (
     Count,
     DecimalField,
@@ -151,6 +152,7 @@ class Market(models.Model):
         blank=True,
         null=True,
     )
+    cover_focus = models.JSONField(default=center_focus)
     delivery_time_min_minutes = models.PositiveSmallIntegerField(
         blank=True,
         null=True,

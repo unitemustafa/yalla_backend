@@ -1,3 +1,4 @@
+from pathlib import Path
 import io
 import importlib
 import os
@@ -40,7 +41,7 @@ User = get_user_model()
 AUTH_BASE = "/api/v1/auth"
 
 
-def profile_image_file(name="avatar.png", size=(4, 4), image_format="PNG"):
+def profile_image_file(name="avatar.png", size=(400, 400), image_format="PNG"):
     buffer = io.BytesIO()
     Image.new("RGB", size, color=(32, 120, 180)).save(buffer, format=image_format)
     return SimpleUploadedFile(
@@ -2449,7 +2450,9 @@ class AuthenticationAPITests(APITestCase):
 
         self.assertEqual(second_response.status_code, status.HTTP_200_OK)
         user.refresh_from_db()
-        self.assertFalse(os.path.exists(old_path))
+        self.assertTrue(os.path.exists(old_path))
+        from dashboard.models import MediaCleanup
+        self.assertTrue(MediaCleanup.objects.filter(name=Path(old_path).relative_to(user.avatar_image.storage.location).as_posix()).exists())
         self.assertTrue(os.path.exists(user.avatar_image.path))
         self.assertNotEqual(
             first_response.data["avatar_url"], second_response.data["avatar_url"]

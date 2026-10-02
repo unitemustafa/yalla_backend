@@ -2,8 +2,11 @@ import re
 from pathlib import Path
 
 from rest_framework import serializers
+from django.db import transaction
 
 from config.image_validation import validate_safe_image
+from config.media_specs import validate_media_image, validate_focal_point
+from .media_jobs import create_media_job, ready_job, apply_ready_job, job_data, validate_video_upload
 
 from .models import AppLaunchMedia, DashboardSettings
 
@@ -20,6 +23,9 @@ class AppLaunchMediaSerializer(serializers.ModelSerializer):
     onboarding_three_url = serializers.SerializerMethodField()
     market_login_url = serializers.SerializerMethodField()
     delivery_login_url = serializers.SerializerMethodField()
+    market_login_poster_url = serializers.SerializerMethodField()
+    market_login_processing = serializers.SerializerMethodField()
+    video_job_id = serializers.UUIDField(write_only=True, required=False)
 
     class Meta:
         model = AppLaunchMedia
@@ -28,10 +34,11 @@ class AppLaunchMediaSerializer(serializers.ModelSerializer):
             "market_login", "market_login_video", "delivery_login", "onboarding_one_url",
             "onboarding_two_url", "onboarding_three_url", "market_login_url",
             "delivery_login_url", "updated_at",
+            "market_login_poster", "market_login_poster_url", "market_login_focus", "delivery_login_focus", "market_login_processing", "video_job_id",
         )
         extra_kwargs = {
             key: {"write_only": True, "required": False}
-            for key in ("onboarding_one", "onboarding_two", "onboarding_three", "market_login", "market_login_video", "delivery_login")
+            for key in ("onboarding_one", "onboarding_two", "onboarding_three", "market_login", "market_login_video", "delivery_login", "market_login_poster")
         }
         read_only_fields = ("updated_at",)
 
@@ -57,35 +64,58 @@ class AppLaunchMediaSerializer(serializers.ModelSerializer):
     def get_delivery_login_url(self, obj):
         return self._url(obj, "delivery_login")
 
+    def get_market_login_poster_url(self, obj):
+        return self._url(obj, "market_login_poster")
+
+    def get_market_login_processing(self, obj):
+        request = self.context.get("request")
+        if getattr(getattr(request, "user", None), "role", None) != "admin":
+            return None
+        return job_data(obj.market_login_pending_job, request) if obj.market_login_pending_job_id else None
+
+    def validate_market_login_focus(self, value):
+        return validate_focal_point(value)
+
+    def validate_delivery_login_focus(self, value):
+        return validate_focal_point(value)
+
     def validate(self, attrs):
-        image_fields = ("onboarding_one", "onboarding_two", "onboarding_three", "market_login", "delivery_login")
-        for field in image_fields:
+        image_fields = {"onboarding_one": "onboarding", "onboarding_two": "onboarding", "onboarding_three": "onboarding", "market_login": "marketLogin", "delivery_login": "deliveryLogin", "market_login_poster": "marketLogin"}
+        for field, spec in image_fields.items():
             file = attrs.get(field)
             if file is not None:
-                self._validate_image(file)
+                try:
+                    self._validate_image(file)
+                    validate_media_image(file, spec)
+                except serializers.ValidationError as exc:
+                    raise serializers.ValidationError({field: exc.detail}) from exc
         file = attrs.get("market_login_video")
         if file is not None:
-            extension = Path(file.name or "").suffix.lower().lstrip(".")
-            content_type = (getattr(file, "content_type", "") or "").lower()
-            if extension == "mp4" and content_type == "video/mp4":
-                if file.size > 30 * 1024 * 1024:
-                    raise serializers.ValidationError({"market_login_video": "Video must be 30 MB or smaller."})
-                header = file.read(12)
-                file.seek(0)
-                if len(header) < 12 or header[4:8] != b"ftyp":
-                    raise serializers.ValidationError({"market_login_video": "Upload a valid MP4 video."})
-            else:
-                raise serializers.ValidationError({"market_login_video": "Upload a valid MP4 video."})
+            try:
+                validate_video_upload(file)
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({"market_login_video": exc.detail}) from exc
+        if sum(bool(attrs.get(field)) for field in ("market_login", "market_login_video", "video_job_id")) > 1:
+            raise serializers.ValidationError("Choose one login image or video.")
+        if attrs.get("video_job_id"):
+            ready_job(attrs["video_job_id"], "market_login")
         return attrs
 
     def update(self, instance, validated_data):
-        if validated_data.get("market_login") is not None:
-            validated_data["market_login_video"] = None
-        elif validated_data.get("market_login_video") is not None:
-            validated_data["market_login"] = None
-        elif "market_login" in validated_data and validated_data["market_login"] is None:
-            validated_data["market_login_video"] = None
-        return super().update(instance, validated_data)
+        job_id = validated_data.pop("video_job_id", None)
+        has_video = "market_login_video" in validated_data
+        upload = validated_data.pop("market_login_video", None)
+        with transaction.atomic():
+            job = ready_job(job_id, "market_login", lock=True) if job_id else None
+            instance = AppLaunchMedia.objects.select_for_update().get(pk=instance.pk)
+            if upload is not None:
+                job = create_media_job(upload, self.context["request"].user, "market_login", validated=True, poster=validated_data.pop("market_login_poster", None))
+                validated_data["market_login_pending_job"] = job
+            elif job is not None:
+                apply_ready_job(instance, job, poster=validated_data.pop("market_login_poster", None))
+            elif "market_login" in validated_data or has_video:
+                validated_data.update(market_login_video=None, market_login_poster=None, market_login_pending_job=None)
+            return super().update(instance, validated_data)
 
     @staticmethod
     def _validate_image(file):
@@ -166,7 +196,7 @@ class DashboardSettingsSerializer(serializers.ModelSerializer):
             )
         if value.size > DASHBOARD_LOGO_MAX_SIZE:
             raise serializers.ValidationError("Dashboard logo must be 5 MB or smaller.")
-        return validate_safe_image(value)
+        return validate_media_image(value, "dashboardLogo")
 
     def update(self, instance, validated_data):
         logo = validated_data.pop("logo", None)
@@ -180,7 +210,8 @@ class DashboardSettingsSerializer(serializers.ModelSerializer):
             instance.logo = None
         instance.save()
         if old_logo and old_logo.name and old_logo.name != instance.logo.name:
-            old_logo.delete(save=False)
+            from config.media_cleanup import schedule_storage_cleanup
+            schedule_storage_cleanup(old_logo.storage, old_logo.name)
         return instance
 
 

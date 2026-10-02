@@ -1,8 +1,9 @@
 from collections import defaultdict
 from pathlib import Path
+import json
 
 from django.apps import apps
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import models, transaction
 
 
@@ -10,6 +11,9 @@ class Command(BaseCommand):
     help = "Report missing media references and unreferenced files."
 
     def add_arguments(self, parser):
+        parser.add_argument("--verify-content", action="store_true", help="Decode images and probe videos against the launch contract.")
+        parser.add_argument("--report-json", help="Write a machine-readable audit report to this local path.")
+        parser.add_argument("--fail-on-invalid", action="store_true", help="Exit nonzero for missing or incompatible media (also verifies content).")
         parser.add_argument(
             "--delete-orphans",
             action="store_true",
@@ -25,6 +29,7 @@ class Command(BaseCommand):
         storage_references = defaultdict(set)
         storage_objects = {}
         missing = []
+        invalid = []
 
         for model in apps.get_models():
             for field in model._meta.concrete_fields:
@@ -57,6 +62,12 @@ class Command(BaseCommand):
                     storage_references[storage_key].add(name)
                     if not storage.exists(name):
                         missing.append((model, field, pk, name))
+                    elif options["verify_content"] or options["fail_on_invalid"]:
+                        from config.media_audit import check_stored_media
+                        try:
+                            check_stored_media(model, field, storage, name)
+                        except Exception as exc:
+                            invalid.append({"model": model._meta.label, "field": field.name, "pk": str(pk), "name": name, "error": str(exc)[:400]})
 
         orphans = []
         for storage_key, storage in storage_objects.items():
@@ -121,6 +132,11 @@ class Command(BaseCommand):
             )
         for _, name in orphans:
             self.stdout.write(f"ORPHAN {name}")
+        for entry in invalid:
+            self.stdout.write(f"INVALID {entry['model']}.{entry['field']} pk={entry['pk']} {entry['name']} {entry['error']}")
+        if options["report_json"]:
+            report = {"missing": [{"model": model._meta.label, "field": field.name, "pk": str(pk), "name": name} for model, field, pk, name in missing], "invalid": invalid, "orphans": [name for _, name in orphans]}
+            Path(options["report_json"]).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
         if options["clear_missing"]:
             with transaction.atomic():
@@ -136,8 +152,10 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 "Media audit complete: "
-                f"missing={len(missing)}, orphans={len(orphans)}, "
+                f"missing={len(missing)}, invalid={len(invalid)}, orphans={len(orphans)}, "
                 f"cleared={len(missing) if options['clear_missing'] else 0}, "
                 f"deleted={len(orphans) if options['delete_orphans'] else 0}."
             )
         )
+        if options["fail_on_invalid"] and (missing or invalid):
+            raise CommandError("The published media audit has unresolved issues. See the report.")

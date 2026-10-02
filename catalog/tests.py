@@ -38,7 +38,7 @@ CATALOG_BASE = "/api/v1/catalog"
 
 def product_image_upload(name="product.png", image_format="PNG", color="red"):
     content = BytesIO()
-    Image.new("RGB", (2, 2), color=color).save(content, format=image_format)
+    Image.new("RGB", (1600, 800), color=color).save(content, format=image_format)
     mime_type = (
         "image/jpeg" if image_format == "JPEG" else f"image/{image_format.lower()}"
     )

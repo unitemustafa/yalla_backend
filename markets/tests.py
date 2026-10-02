@@ -41,7 +41,7 @@ HOME_BASE = "/api/v1/home"
 
 def market_image_upload(name="market.png", color="blue"):
     content = BytesIO()
-    Image.new("RGB", (2, 2), color=color).save(content, format="PNG")
+    Image.new("RGB", (1600, 900), color=color).save(content, format="PNG")
     return SimpleUploadedFile(
         name,
         content.getvalue(),

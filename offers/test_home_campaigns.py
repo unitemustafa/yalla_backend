@@ -1,10 +1,14 @@
+from config.media_test_tools import FFMPEG, FFPROBE
 from datetime import timedelta
 from decimal import Decimal
-import base64
-import struct
+from io import BytesIO
+from pathlib import Path
+import subprocess
+import tempfile
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.utils import timezone
@@ -21,7 +25,9 @@ from catalog.models import (
 )
 from locations.models import ServiceCity
 from markets.models import Market, MarketClassification
-from config.tasks import delete_storage_file_task
+from dashboard.models import MediaCleanup, MediaJob
+from dashboard.tasks import cleanup_due_media
+from PIL import Image
 from .models import HomeCampaign, HomeCampaignImage
 
 
@@ -29,30 +35,29 @@ User = get_user_model()
 CAMPAIGNS_BASE = "/api/v1/offers/home-campaigns/"
 
 
-def _atom(atom_type, payload):
-    return struct.pack(">I4s", len(payload) + 8, atom_type) + payload
-
-
 def mp4_upload(seconds=5):
-    mvhd = (
-        b"\x00\x00\x00\x00"
-        + b"\x00" * 8
-        + struct.pack(">I", 1000)
-        + struct.pack(">I", seconds * 1000)
-    )
-    content = _atom(b"ftyp", b"isom\x00\x00\x02\x00isom") + _atom(
-        b"moov", _atom(b"mvhd", mvhd)
-    )
-    return SimpleUploadedFile("campaign.mp4", content, content_type="video/mp4")
+    ffmpeg = FFMPEG
+    if not ffmpeg.is_file():
+        raise RuntimeError("Portable FFmpeg is required for media integration tests.")
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "campaign.mp4"
+        subprocess.run([
+            str(ffmpeg), "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i",
+            f"color=c=blue:s=320x180:r=24:d={seconds}", "-c:v", "mpeg4", str(path),
+        ], check=True, stdin=subprocess.DEVNULL)
+        return SimpleUploadedFile("campaign.mp4", path.read_bytes(), content_type="video/mp4")
 
 
 def image_upload(name="campaign.png"):
-    content = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-    )
-    return SimpleUploadedFile(name, content, content_type="image/png")
+    content = BytesIO()
+    Image.new("RGB", (1200, 675), "blue").save(content, format="PNG")
+    return SimpleUploadedFile(name, content.getvalue(), content_type="image/png")
 
 
+@override_settings(
+    FFMPEG_BINARY=str(FFMPEG),
+    FFPROBE_BINARY=str(FFPROBE),
+)
 class HomeCampaignAPITests(APITestCase):
     password = "Password1!"
 
@@ -311,7 +316,7 @@ class HomeCampaignAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("video", response.data)
 
-    def test_video_requires_poster_before_activation(self):
+    def test_raw_video_upload_stays_pending_before_activation(self):
         campaign = self.create_campaign(
             is_active=False,
             media_type=HomeCampaign.MediaType.VIDEO,
@@ -323,27 +328,63 @@ class HomeCampaignAPITests(APITestCase):
             format="multipart",
         )
         self.assertEqual(uploaded.status_code, status.HTTP_200_OK)
-        self.assertTrue(uploaded.data["video"].endswith(".mp4"))
-        self.assertTrue(uploaded.data["video_poster"].endswith(".webp"))
+        campaign.refresh_from_db()
+        self.assertIsNotNone(campaign.pending_video_job)
+        self.assertFalse(campaign.video)
 
         activated = self.client.patch(
             f"{CAMPAIGNS_BASE}{campaign.id}/",
             {"is_active": True},
             format="json",
         )
-        self.assertEqual(activated.status_code, status.HTTP_200_OK)
-        self.assertTrue(activated.data["is_active"])
+        self.assertEqual(activated.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("media_type", activated.data)
+
+    def test_raw_video_replacement_keeps_old_campaign_poster_until_job_is_ready(self):
+        campaign = self.create_campaign(
+            is_active=False,
+            media_type=HomeCampaign.MediaType.VIDEO,
+        )
+        campaign.video.save("published.mp4", ContentFile(b"published"), save=False)
+        campaign.video_poster.save("published.png", image_upload("published.png"), save=True)
+        old_video, old_poster = campaign.video.name, campaign.video_poster.name
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            f"{CAMPAIGNS_BASE}{campaign.id}/media/",
+            {"video": mp4_upload(), "video_poster": image_upload("replacement.png")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         campaign.refresh_from_db()
-        video_name = campaign.video.name
-        video_storage = campaign.video.storage
-        with (
-            patch("config.tasks.delete_storage_file_task.delay") as enqueue,
-            self.captureOnCommitCallbacks(execute=True),
-        ):
-            campaign.delete()
-        for call in enqueue.call_args_list:
-            delete_storage_file_task.apply(args=call.args).get()
-        self.assertFalse(video_storage.exists(video_name))
+        self.assertEqual(campaign.video.name, old_video)
+        self.assertEqual(campaign.video_poster.name, old_poster)
+        self.assertIsNotNone(campaign.pending_video_job)
+        self.assertTrue(campaign.pending_video_job.custom_poster)
+
+    def test_campaign_media_endpoint_rejects_pending_or_wrong_slot_job(self):
+        campaign = self.create_campaign(is_active=False)
+        pending = MediaJob.objects.create(owner=self.admin, slot="campaign")
+        wrong_slot = MediaJob.objects.create(
+            owner=self.admin, slot="market_login", state=MediaJob.State.READY,
+        )
+        wrong_slot.video.save("prepared.mp4", ContentFile(b"video"), save=False)
+        wrong_slot.poster.save("prepared.png", image_upload("prepared.png"), save=False)
+        wrong_slot.save(update_fields=["video", "poster"])
+        self.authenticate(self.admin)
+
+        pending_response = self.client.post(
+            f"{CAMPAIGNS_BASE}{campaign.id}/media/", {"video_job_id": str(pending.pk)}, format="json",
+        )
+        wrong_slot_response = self.client.post(
+            f"{CAMPAIGNS_BASE}{campaign.id}/media/", {"video_job_id": str(wrong_slot.pk)}, format="json",
+        )
+
+        self.assertEqual(pending_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("video_job_id", pending_response.data)
+        self.assertEqual(wrong_slot_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("video_job_id", wrong_slot_response.data)
 
     def test_switching_media_type_removes_replaced_file(self):
         campaign = self.create_campaign(
@@ -356,20 +397,15 @@ class HomeCampaignAPITests(APITestCase):
         self.assertTrue(storage.exists(old_name))
         self.authenticate(self.admin)
 
-        with (
-            patch("config.tasks.delete_storage_file_task.delay") as enqueue,
-            self.captureOnCommitCallbacks(execute=True),
-        ):
-            response = self.client.patch(
-                f"{CAMPAIGNS_BASE}{campaign.id}/",
-                {"media_type": HomeCampaign.MediaType.NONE},
-                format="json",
-            )
+        response = self.client.patch(
+            f"{CAMPAIGNS_BASE}{campaign.id}/",
+            {"media_type": HomeCampaign.MediaType.NONE},
+            format="json",
+        )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        enqueue.assert_called_once()
-        delete_storage_file_task.apply(args=enqueue.call_args.args).get()
-        self.assertFalse(storage.exists(old_name))
+        self.assertTrue(storage.exists(old_name))
+        self.assertTrue(MediaCleanup.objects.filter(name=old_name).exists())
 
     def test_multiple_images_upload_display_and_delete(self):
         campaign = self.create_campaign(
@@ -429,3 +465,22 @@ class HomeCampaignAPITests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertFalse(HomeCampaignImage.objects.filter(campaign=campaign).exists())
+
+    @patch("offers.views.HomeCampaignImage.objects.create", side_effect=OSError("storage unavailable"))
+    def test_storage_failure_rolls_back_publication_and_keeps_previous_file(self, create_image):
+        campaign = self.create_campaign(is_active=False, media_type=HomeCampaign.MediaType.IMAGE)
+        campaign.sheet_image.save("published.png", image_upload(), save=True)
+        published = campaign.sheet_image.name
+        self.authenticate(self.admin)
+        response = self.client.post(f"{CAMPAIGNS_BASE}{campaign.id}/media/", {
+            "sheet_image": image_upload("replacement.png"),
+            "images": [image_upload("extra.png")],
+        }, format="multipart")
+        campaign.refresh_from_db()
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(campaign.sheet_image.name, published)
+        self.assertTrue(campaign.sheet_image.storage.exists(published))
+        self.assertFalse(campaign.additional_images.exists())
+        self.assertFalse(MediaCleanup.objects.filter(name=published).exists())
+        self.assertTrue(MediaCleanup.objects.exists())
+        create_image.assert_called_once()

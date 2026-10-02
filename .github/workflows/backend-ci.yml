@@ -29,6 +29,8 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements-dev.txt
+      - name: Install real media test tools
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: ruff check .
       - run: python manage.py makemigrations --check --dry-run --settings=config.ci_settings
       - run: python manage.py check --settings=config.ci_settings

@@ -1,7 +1,7 @@
 from django.db.models import Max
 from rest_framework import serializers
 
-from config.image_validation import validate_safe_image
+from config.media_specs import validate_media_image, validate_focal_point
 
 from catalog.models import (
     Product,
@@ -53,7 +53,7 @@ class AdminMarketClassificationSerializer(serializers.ModelSerializer):
         return name
 
     def validate_image(self, value):
-        return validate_safe_image(value)
+        return validate_media_image(value, "classification")
 
     def validate(self, attrs):
         classification_type = attrs.get(
@@ -120,7 +120,7 @@ class MarketTypeSerializer(serializers.ModelSerializer):
         return value.strip()
 
     def validate_image(self, value):
-        return validate_safe_image(value)
+        return validate_media_image(value, "marketType")
 
     def validate(self, attrs):
         classification = attrs.get(
@@ -289,6 +289,7 @@ class HomeMarketSerializer(serializers.ModelSerializer):
             "description",
             "image",
             "cover_image",
+            "cover_focus",
             "delivery_time_min_minutes",
             "delivery_time_max_minutes",
             "branch",
@@ -442,6 +443,7 @@ class AdminMarketSerializer(AdminMarketWriteMixin, serializers.ModelSerializer):
             "description",
             "image",
             "cover_image",
+            "cover_focus",
             "delivery_time_min_minutes",
             "delivery_time_max_minutes",
             "branch",
@@ -474,10 +476,13 @@ class AdminMarketSerializer(AdminMarketWriteMixin, serializers.ModelSerializer):
         return value.strip()
 
     def validate_image(self, value):
-        return validate_safe_image(value)
+        return validate_media_image(value, "storeLogo")
+
+    def validate_cover_focus(self, value):
+        return validate_focal_point(value)
 
     def validate_cover_image(self, value):
-        return validate_safe_image(value)
+        return validate_media_image(value, "storeCover")
 
     def get_subcategories(self, market):
         assignments = market.subcategory_assignments.select_related(
@@ -716,6 +721,7 @@ class MarketWithStoreProductsSerializer(HomeMarketSerializer):
             "description",
             "image",
             "cover_image",
+            "cover_focus",
             "delivery_time_min_minutes",
             "delivery_time_max_minutes",
             "branch",

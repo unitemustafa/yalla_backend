@@ -1204,6 +1204,27 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v1/courier/orders/{order_id}/markets/{section_id}/pickup/:
+    patch:
+      operationId: v1_courier_orders_markets_pickup_partial_update_by_order_id_and_section_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: section_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
   /api/v1/courier/orders/{order_id}/status/:
     patch:
       operationId: v1_courier_orders_status_partial_update_by_order_id
@@ -1240,6 +1261,115 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v1/dashboard/media-jobs/:
+    post:
+      operationId: v1_dashboard_media_jobs_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MediaJobUploadRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MediaJobUploadRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaJobStatus'
+          description: ''
+  /api/v1/dashboard/media-jobs/{job_id}/:
+    get:
+      operationId: v1_dashboard_media_jobs_retrieve_by_job_id
+      parameters:
+      - in: path
+        name: job_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaJobStatus'
+          description: ''
+    delete:
+      operationId: v1_dashboard_media_jobs_destroy_by_job_id
+      parameters:
+      - in: path
+        name: job_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/dashboard/media-jobs/{job_id}/retry/:
+    post:
+      operationId: v1_dashboard_media_jobs_retry_create_by_job_id
+      parameters:
+      - in: path
+        name: job_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaJobStatus'
+          description: ''
+  /api/v1/dashboard/media-jobs/stats/:
+    get:
+      operationId: v1_dashboard_media_jobs_stats_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaJobStats'
+          description: ''
+  /api/v1/dashboard/media-specs/:
+    get:
+      operationId: v1_dashboard_media_specs_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaContract'
+          description: ''
   /api/v1/dashboard/overview/:
     get:
       operationId: v1_dashboard_overview_retrieve
@@ -4061,6 +4191,27 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v2/courier/orders/{order_id}/markets/{section_id}/pickup/:
+    patch:
+      operationId: v2_courier_orders_markets_pickup_partial_update_by_order_id_and_section_id
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: section_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
   /api/v2/courier/orders/{order_id}/status/:
     patch:
       operationId: v2_courier_orders_status_partial_update_by_order_id
@@ -4097,6 +4248,115 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v2/dashboard/media-jobs/:
+    post:
+      operationId: v2_dashboard_media_jobs_create
+      tags:
+      - v2
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MediaJobUploadRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MediaJobUploadRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaJobStatus'
+          description: ''
+  /api/v2/dashboard/media-jobs/{job_id}/:
+    get:
+      operationId: v2_dashboard_media_jobs_retrieve_by_job_id
+      parameters:
+      - in: path
+        name: job_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaJobStatus'
+          description: ''
+    delete:
+      operationId: v2_dashboard_media_jobs_destroy_by_job_id
+      parameters:
+      - in: path
+        name: job_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v2/dashboard/media-jobs/{job_id}/retry/:
+    post:
+      operationId: v2_dashboard_media_jobs_retry_create_by_job_id
+      parameters:
+      - in: path
+        name: job_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaJobStatus'
+          description: ''
+  /api/v2/dashboard/media-jobs/stats/:
+    get:
+      operationId: v2_dashboard_media_jobs_stats_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaJobStats'
+          description: ''
+  /api/v2/dashboard/media-specs/:
+    get:
+      operationId: v2_dashboard_media_specs_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaContract'
+          description: ''
   /api/v2/dashboard/overview/:
     get:
       operationId: v2_dashboard_overview_retrieve
@@ -6506,6 +6766,97 @@ components:
       description: |-
         * `active` - Active
         * `inactive` - Inactive
+    MediaContract:
+      type: object
+      properties:
+        version:
+          type: integer
+        images:
+          type: object
+          additionalProperties: {}
+        video: {}
+      required:
+      - images
+      - version
+      - video
+    MediaJobStats:
+      type: object
+      properties:
+        counts:
+          type: object
+          additionalProperties:
+            type: integer
+        stalled:
+          type: integer
+        alert_after_seconds:
+          type: integer
+      required:
+      - alert_after_seconds
+      - counts
+      - stalled
+    MediaJobStatus:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        slot:
+          type: string
+        state:
+          $ref: '#/components/schemas/StateEnum'
+        cancelled:
+          type: boolean
+        error:
+          type: string
+        error_code:
+          type: string
+        retryable:
+          type: boolean
+        video_url:
+          type: string
+          format: uri
+          nullable: true
+        poster_url:
+          type: string
+          format: uri
+          nullable: true
+        metadata: {}
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - cancelled
+      - completed_at
+      - created_at
+      - error
+      - error_code
+      - id
+      - metadata
+      - poster_url
+      - retryable
+      - slot
+      - started_at
+      - state
+      - video_url
+    MediaJobUploadRequest:
+      type: object
+      properties:
+        slot:
+          $ref: '#/components/schemas/SlotEnum'
+        file:
+          type: string
+          format: binary
+      required:
+      - file
+      - slot
     NullEnum:
       enum:
       - null
@@ -7708,6 +8059,26 @@ components:
           maxLength: 150
       required:
       - name
+    SlotEnum:
+      enum:
+      - market_login
+      - campaign
+      type: string
+      description: |-
+        * `market_login` - market_login
+        * `campaign` - campaign
+    StateEnum:
+      enum:
+      - pending
+      - processing
+      - ready
+      - failed
+      type: string
+      description: |-
+        * `pending` - pending
+        * `processing` - processing
+        * `ready` - ready
+        * `failed` - failed
     TypeEnum:
       enum:
       - package

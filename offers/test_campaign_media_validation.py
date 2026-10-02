@@ -1,9 +1,13 @@
+from config.media_test_tools import FFMPEG, FFPROBE
 import struct
 from io import BytesIO
+from pathlib import Path
+import subprocess
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from rest_framework import serializers
 
 from .campaign_media import (
@@ -27,7 +31,23 @@ def video_upload(seconds=5, *, version=0):
     return SimpleUploadedFile("intro.mp4", content, content_type="video/mp4")
 
 
+@override_settings(
+    FFMPEG_BINARY=str(FFMPEG),
+    FFPROBE_BINARY=str(FFPROBE),
+)
 class CampaignMediaValidationTests(SimpleTestCase):
+    def real_video_upload(self, seconds=1):
+        ffmpeg = FFMPEG
+        if not ffmpeg.is_file():
+            self.skipTest("Portable FFmpeg is required for media integration tests.")
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "intro.mp4"
+            subprocess.run([
+                str(ffmpeg), "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i",
+                f"color=c=blue:s=320x180:r=24:d={seconds}", "-c:v", "mpeg4", str(path),
+            ], check=True, stdin=subprocess.DEVNULL)
+            return SimpleUploadedFile("intro.mp4", path.read_bytes(), content_type="video/mp4")
+
     def test_valid_mp4_duration_is_checked_and_read_position_is_restored(self):
         for version in (0, 1):
             with self.subTest(version=version):
@@ -35,18 +55,21 @@ class CampaignMediaValidationTests(SimpleTestCase):
                 upload.seek(3)
                 self.assertEqual(mp4_duration_seconds(upload), 5)
                 self.assertEqual(upload.tell(), 3)
-                self.assertIs(validate_campaign_video(upload), upload)
+        real = self.real_video_upload()
+        real.seek(3)
+        self.assertIs(validate_campaign_video(real), real)
+        self.assertEqual(real.tell(), 3)
 
     def test_rejects_disguised_corrupt_long_and_oversized_videos(self):
         invalid = SimpleUploadedFile("intro.mp4", b"not an mp4", content_type="video/mp4")
-        with self.assertRaisesMessage(serializers.ValidationError, "not a valid MP4"):
+        with self.assertRaisesMessage(serializers.ValidationError, "corrupted"):
             validate_campaign_video(invalid)
         with self.assertRaisesMessage(serializers.ValidationError, "30 seconds"):
-            validate_campaign_video(video_upload(seconds=31))
+            validate_campaign_video(self.real_video_upload(seconds=31))
         with self.assertRaisesMessage(serializers.ValidationError, "Upload an MP4"):
             validate_campaign_video(SimpleUploadedFile("intro.txt", b"x", content_type="text/plain"))
         large = SimpleNamespace(name="intro.mp4", content_type="video/mp4", size=CAMPAIGN_VIDEO_MAX_SIZE + 1)
-        with self.assertRaisesMessage(serializers.ValidationError, "15 MB"):
+        with self.assertRaisesMessage(serializers.ValidationError, "30 MB"):
             validate_campaign_video(large)
 
     def test_rejects_missing_or_malformed_timing_atoms(self):

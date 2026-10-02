@@ -3,7 +3,7 @@ import logging
 from django.db import transaction
 from rest_framework import serializers
 
-from config.image_validation import validate_safe_image
+from config.media_specs import validate_media_image
 
 from config.media_cleanup import (
     delete_storage_file_if_unreferenced,
@@ -40,7 +40,7 @@ def validate_offer_image_upload(value):
         raise serializers.ValidationError("Unsupported offer image type.")
     if value.size > OFFER_IMAGE_MAX_SIZE:
         raise serializers.ValidationError("Offer images must be 5 MB or smaller.")
-    return validate_safe_image(value)
+    return validate_media_image(value, "offerBanner")
 
 
 def replace_offer_image(offer_id, upload):

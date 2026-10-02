@@ -54,4 +54,13 @@ class RequestBodyLimitMiddleware:
             )
         ):
             return settings.API_PRODUCT_UPLOAD_REQUEST_SIZE
+        if path.startswith(("/api/v1/dashboard/media-jobs/", "/api/v2/dashboard/media-jobs/")):
+            return 32 * 1024 * 1024
+        if path.startswith(("/api/v1/dashboard/app-media/", "/api/v2/dashboard/app-media/")):
+            # Three onboarding images, delivery image, optional poster and video.
+            return 57 * 1024 * 1024
+        if path.startswith(("/api/v1/offers/home-campaigns/", "/api/v2/offers/home-campaigns/")) and path.endswith("/media/"):
+            return settings.API_PRODUCT_UPLOAD_REQUEST_SIZE
+        if path.startswith(("/api/v1/home/markets/", "/api/v2/home/markets/")):
+            return 12 * 1024 * 1024
         return settings.API_SINGLE_UPLOAD_REQUEST_SIZE

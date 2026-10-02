@@ -2,6 +2,8 @@ from django.apps import apps
 from django.core.files.storage import Storage
 from django.db import models, transaction
 from django.db.models.signals import post_delete, post_save, pre_save
+from django.utils import timezone
+from datetime import timedelta
 
 
 def storage_name_is_referenced(name, *, storage=None):
@@ -19,7 +21,10 @@ def storage_name_is_referenced(name, *, storage=None):
 
 
 def get_identifier_by_storage(storage):
-    from config.media import raw_public_media_storage, private_media_storage
+    from config.media import raw_public_media_storage, private_media_storage, raw_private_media_storage
+
+    if isinstance(storage, type(raw_private_media_storage)):
+        return "raw_private"
 
     if storage is raw_public_media_storage or isinstance(
         storage, type(raw_public_media_storage)
@@ -33,6 +38,9 @@ def get_identifier_by_storage(storage):
 
 
 def get_storage_by_identifier(storage_id: str):
+    if storage_id == "raw_private":
+        from config.media import raw_private_media_storage
+        return raw_private_media_storage
     if storage_id == "raw_public":
         from config.media import raw_public_media_storage
 
@@ -53,11 +61,12 @@ def delete_storage_file_if_unreferenced(storage: Storage, name):
 
 def schedule_storage_cleanup(storage, name):
     if name:
-        from config.tasks import delete_storage_file_task
-
+        from dashboard.models import MediaCleanup
         storage_id = get_identifier_by_storage(storage)
-        transaction.on_commit(
-            lambda s=storage_id, n=name: delete_storage_file_task.delay(s, n)
+        # Persist within the caller's transaction so a broker outage cannot lose cleanup.
+        MediaCleanup.objects.update_or_create(
+            storage_id=storage_id, name=name,
+            defaults={"delete_after": timezone.now() + timedelta(hours=24)},
         )
 
 

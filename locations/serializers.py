@@ -1,9 +1,10 @@
+from config.media_cleanup import schedule_storage_cleanup
 from decimal import Decimal
 
 from rest_framework import serializers
 
 from accounts.models import User
-from config.image_validation import validate_safe_image
+from config.media_specs import validate_media_image
 
 from .coverage import (
     contains_point,
@@ -192,7 +193,7 @@ class ShippingCompanySerializer(ShippingCompanySummarySerializer):
             raise serializers.ValidationError(
                 "Shipping company logo must be 5 MB or smaller."
             )
-        return validate_safe_image(value)
+        return validate_media_image(value, "shippingLogo")
 
     def create(self, validated_data):
         validated_data.pop("remove_logo", False)
@@ -208,7 +209,7 @@ class ShippingCompanySerializer(ShippingCompanySummarySerializer):
         if old_logo and old_logo.name:
             current_name = instance.logo.name if instance.logo else ""
             if old_logo.name != current_name:
-                old_logo.delete(save=False)
+                schedule_storage_cleanup(old_logo.storage, old_logo.name)
         return instance
 
 

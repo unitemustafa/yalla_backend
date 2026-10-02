@@ -1,7 +1,7 @@
 from django.db.models import Q
 from rest_framework import serializers
 
-from config.image_validation import validate_safe_image
+from config.media_specs import validate_media_image
 
 from .models import (
     AdditionClassification,
@@ -95,7 +95,7 @@ class ProductCategorySerializer(serializers.ModelSerializer):
         return value.strip()
 
     def validate_image(self, value):
-        return validate_safe_image(value)
+        return validate_media_image(value, "classification")
 
 
 class StoreSubcategorySerializer(serializers.ModelSerializer):
@@ -160,7 +160,7 @@ class StoreSubcategorySerializer(serializers.ModelSerializer):
         return value.strip()
 
     def validate_image(self, value):
-        return validate_safe_image(value)
+        return validate_media_image(value, "classification")
 
 
 class ProductSubcategorySerializer(serializers.ModelSerializer):
@@ -612,4 +612,4 @@ class ProductAdditionSerializer(serializers.ModelSerializer):
         return value.strip()
 
     def validate_image(self, value):
-        return validate_safe_image(value)
+        return validate_media_image(value, "addon")

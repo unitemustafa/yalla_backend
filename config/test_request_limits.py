@@ -62,3 +62,20 @@ class RequestBodyLimitMiddlewareTests(SimpleTestCase):
         response = self.middleware(request)
 
         self.assertEqual(response.status_code, 413)
+
+    def test_media_routes_use_their_explicit_launch_and_campaign_limits(self):
+        cases = (
+            ("/api/v1/dashboard/media-jobs/", 32 * 1024 * 1024),
+            ("/api/v1/dashboard/app-media/", 57 * 1024 * 1024),
+            ("/api/v2/dashboard/media-jobs/", 32 * 1024 * 1024),
+            ("/api/v2/dashboard/app-media/", 57 * 1024 * 1024),
+            ("/api/v1/offers/home-campaigns/2/media/", 300),
+            ("/api/v1/home/markets/2/", 12 * 1024 * 1024),
+            ("/api/v1/offers/2/image/", 200),
+        )
+        for path, expected in cases:
+            with self.subTest(path=path):
+                request = self.factory.post(path, data={})
+                request.META["CONTENT_TYPE"] = "multipart/form-data; boundary=test"
+
+                self.assertEqual(self.middleware._limit_for_request(request), expected)

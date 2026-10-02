@@ -221,3 +221,18 @@ class OptimizedPrivateMediaStorage(
 
 private_media_storage = OptimizedPrivateMediaStorage()
 raw_public_media_storage = RawPublicMediaStorage()
+
+
+@deconstructible
+class RawPrivateMediaStorage(DelegatingStorage):
+    """Quarantined original uploads; never exposed by a public media URL."""
+
+    def _create_backend(self, backend_type: str, **kwargs):
+        if backend_type == "s3":
+            return _create_s3_private_storage(**kwargs)
+        local_kwargs = {"location": settings.PRIVATE_MEDIA_ROOT, "base_url": None}
+        local_kwargs.update(kwargs)
+        return FileSystemStorage(**local_kwargs)
+
+
+raw_private_media_storage = RawPrivateMediaStorage()

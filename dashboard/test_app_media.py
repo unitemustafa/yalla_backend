@@ -1,6 +1,9 @@
+from config.media_test_tools import FFMPEG, FFPROBE
 import shutil
 import tempfile
 from io import BytesIO
+from pathlib import Path
+import subprocess
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -15,16 +18,23 @@ URL = "/api/v1/dashboard/app-media/"
 User = get_user_model()
 
 
-def small_png(name):
+
+
+def small_png(name, size=(800, 450)):
     content = BytesIO()
-    Image.new("RGB", (2, 2), "blue").save(content, format="PNG")
+    Image.new("RGB", size, "blue").save(content, format="PNG")
     return SimpleUploadedFile(name, content.getvalue(), content_type="image/png")
 
 
 class AppLaunchMediaTests(APITestCase):
     def setUp(self):
         self.media_root = tempfile.mkdtemp()
-        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override = override_settings(
+            MEDIA_ROOT=self.media_root,
+            PRIVATE_MEDIA_ROOT=str(Path(self.media_root) / "private"),
+            FFMPEG_BINARY=str(FFMPEG),
+            FFPROBE_BINARY=str(FFPROBE),
+        )
         self.override.enable()
         self.admin = User.objects.create_user(
             username="app_media_admin", email="media-admin@example.com",
@@ -39,25 +49,38 @@ class AppLaunchMediaTests(APITestCase):
         self.override.disable()
         shutil.rmtree(self.media_root, ignore_errors=True)
 
+    def real_video(self):
+        if not FFMPEG.is_file() or not FFPROBE.is_file():
+            self.skipTest("Portable FFmpeg is required for media integration tests.")
+        target = Path(self.media_root) / "intro.mp4"
+        subprocess.run([
+            str(FFMPEG), "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i",
+            "color=c=blue:s=320x180:r=24:d=1", "-c:v", "mpeg4", str(target),
+        ], check=True, stdin=subprocess.DEVNULL)
+        return SimpleUploadedFile("intro.mp4", target.read_bytes(), content_type="video/mp4")
+
     def test_public_read_and_admin_only_write(self):
         self.assertEqual(self.client.get(URL).status_code, 200)
         self.assertEqual(self.client.patch(URL, {"delivery_login": None}, format="json").status_code, 401)
         self.client.force_authenticate(self.client_user)
         self.assertEqual(self.client.patch(URL, {"delivery_login": None}, format="json").status_code, 403)
 
-    def test_admin_can_upload_and_reset_market_video(self):
+    def test_admin_uploads_market_video_to_a_private_pending_job_then_can_cancel_it(self):
         self.client.force_authenticate(self.admin)
-        video = SimpleUploadedFile("intro.mp4", b"\x00\x00\x00\x18ftypisom" + b"\x00" * 16, content_type="video/mp4")
-        response = self.client.patch(URL, {"market_login_video": video}, format="multipart")
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(URL, {"market_login_video": self.real_video()}, format="multipart")
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertIn("/media/app-launch/login/", response.data["market_login_url"])
+        self.assertIsNone(response.data["market_login_url"])
+        self.assertEqual(response.data["market_login_processing"]["state"], "pending")
+        job_id = response.data["market_login_processing"]["id"]
         self.client.force_authenticate(user=None)
-        self.assertEqual(self.client.get(URL).data["market_login_url"], response.data["market_login_url"])
+        self.assertIsNone(self.client.get(URL).data["market_login_url"])
         self.client.force_authenticate(self.admin)
-        reset = self.client.patch(URL, {"market_login": None}, format="json")
-        self.assertEqual(reset.status_code, 200, reset.data)
-        self.assertIsNone(reset.data["market_login_url"])
-        self.assertFalse(AppLaunchMedia.objects.get(pk=1).market_login_video)
+        cancelled = self.client.delete(f"/api/v1/dashboard/media-jobs/{job_id}/")
+        self.assertEqual(cancelled.status_code, 204)
+        media = AppLaunchMedia.objects.get(pk=1)
+        self.assertIsNone(media.market_login_pending_job)
+        self.assertFalse(media.market_login_video)
 
     def test_rejects_fake_video(self):
         self.client.force_authenticate(self.admin)
@@ -71,17 +94,30 @@ class AppLaunchMediaTests(APITestCase):
         response = self.client.patch(URL, {"market_login_video": wrong_type}, format="multipart")
         self.assertEqual(response.status_code, 400)
 
+    def test_rejects_oversized_image_with_its_field_name(self):
+        self.client.force_authenticate(self.admin)
+        upload = small_png("large.png")
+        upload.seek(0, 2)
+        upload.write(b"\x00" * (5 * 1024 * 1024))
+        upload.seek(0)
+        response = self.client.patch(URL, {"market_login": upload}, format="multipart")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("market_login", response.data)
+        self.assertIn("5 MB", str(response.data["market_login"]))
+
     def test_image_upload_replaces_video_and_onboarding_images_are_public(self):
         self.client.force_authenticate(self.admin)
-        video = SimpleUploadedFile("intro.mp4", b"\x00\x00\x00\x18ftypisom" + b"\x00" * 16, content_type="video/mp4")
-        self.assertEqual(self.client.patch(URL, {"market_login_video": video}, format="multipart").status_code, 200)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(self.client.patch(URL, {"market_login_video": self.real_video()}, format="multipart").status_code, 200)
         response = self.client.patch(URL, {
             "market_login": small_png("login.png"),
             "onboarding_one": small_png("first.png"),
+            "market_login_focus": '{"x":0.25,"y":0.75}',
         }, format="multipart")
         self.assertEqual(response.status_code, 200, response.data)
         self.assertTrue(response.data["market_login_url"].endswith(".webp"))
         self.assertIsNotNone(response.data["onboarding_one_url"])
+        self.assertEqual(response.data["market_login_focus"], {"x": 0.25, "y": 0.75})
         self.assertFalse(AppLaunchMedia.objects.get(pk=1).market_login_video)
         self.client.force_authenticate(user=None)
         self.assertEqual(self.client.get(URL).data["onboarding_one_url"], response.data["onboarding_one_url"])

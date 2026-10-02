@@ -1,18 +1,22 @@
 import logging
 import uuid
 
+from botocore.exceptions import BotoCoreError, ClientError
+from django.db import transaction
 from django.db.models import Exists, OuterRef, ProtectedError, Q
 
 from rest_framework import serializers, status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import get_object_or_404
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, MultiPartParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
 from config.pagination import paginated_list_response
+from config.media_cleanup import schedule_storage_cleanup
+from dashboard.media_jobs import MediaUnavailable
 from markets.region import (
     current_market_region_selection,
     no_market_region_selection_response,
@@ -129,7 +133,7 @@ class HomeCampaignDetailView(APIView):
 
 class HomeCampaignMediaUploadView(APIView):
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def post(self, request, campaign_id):
         if request.user.role != User.Role.ADMIN:
@@ -147,13 +151,30 @@ class HomeCampaignMediaUploadView(APIView):
             campaign,
             data=request.data,
             partial=True,
+            context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
-        campaign = serializer.save()
-        for image in images:
-            HomeCampaignImage.objects.create(campaign=campaign, image=image)
-        if images:
-            campaign.save(update_fields=["updated_at"])
+        file_names = ("teaser_image", "sheet_image", "video", "video_poster")
+        old_names = {name: getattr(campaign, name).name for name in file_names}
+        written = []
+        try:
+            with transaction.atomic():
+                campaign = serializer.save()
+                for name in file_names:
+                    field = getattr(campaign, name)
+                    if field and field.name != old_names[name]:
+                        written.append((field.storage, field.name))
+                for image in images:
+                    uploaded = HomeCampaignImage.objects.create(campaign=campaign, image=image)
+                    written.append((uploaded.image.storage, uploaded.image.name))
+                if images:
+                    campaign.save(update_fields=["updated_at"])
+        except (OSError, BotoCoreError, ClientError) as exc:
+            # Rollback preserves published references. Clean successfully written
+            # new files only after the rollback, with the normal 24-hour grace.
+            for storage, name in written:
+                schedule_storage_cleanup(storage, name)
+            raise MediaUnavailable("Media storage is temporarily unavailable. Please retry later.") from exc
         return Response(
             AdminHomeCampaignSerializer(
                 campaign,

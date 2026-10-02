@@ -24,7 +24,7 @@ User = get_user_model()
 
 def market_image_upload(name):
     content = BytesIO()
-    Image.new("RGB", (2, 2), color="blue").save(content, format="PNG")
+    Image.new("RGB", (1600, 900), color="blue").save(content, format="PNG")
     return SimpleUploadedFile(name, content.getvalue(), content_type="image/png")
 
 
