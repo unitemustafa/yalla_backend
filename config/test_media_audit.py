@@ -24,7 +24,7 @@ def png_upload(name, size=(2, 2)):
 
 
 class MediaAuditCommandTests(TestCase):
-    def test_verify_content_reports_corrupt_and_wrong_ratio_without_mutating_media(self):
+    def test_verify_content_reports_corruption_and_accepts_other_ratios_without_mutating_media(self):
         with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
             classification = CategoryClassification.objects.create(name="Verified")
             corrupt_category = ProductCategory.objects.create(
@@ -36,7 +36,7 @@ class MediaAuditCommandTests(TestCase):
             with corrupt_category.image.storage.open(corrupt_name, "wb") as content:
                 content.write(b"stored file is corrupt")
             offer = Offer.objects.create(
-                title="Wrong ratio", description="", discount=0,
+                title="Alternative ratio", description="", discount=0,
                 start_time=timezone.now() - timedelta(minutes=1),
                 end_time=timezone.now() + timedelta(days=1),
                 image=png_upload("banner.png", size=(1200, 1200)),
@@ -53,7 +53,7 @@ class MediaAuditCommandTests(TestCase):
             report = json.loads(Path(report_path).read_text(encoding="utf-8"))
             invalid_names = {entry["name"] for entry in report["invalid"]}
             self.assertIn(corrupt_name, invalid_names)
-            self.assertIn(offer.image.name, invalid_names)
+            self.assertNotIn(offer.image.name, invalid_names)
             corrupt_category.refresh_from_db()
             offer.refresh_from_db()
             self.assertEqual(corrupt_category.image.name, corrupt_name)

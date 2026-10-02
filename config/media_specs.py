@@ -1,7 +1,6 @@
 """Versioned design and safety contract for uploaded application media."""
 import math
 
-from PIL import Image, ImageOps
 from rest_framework import serializers
 
 from .image_validation import validate_safe_image
@@ -13,29 +12,28 @@ VIDEO_OUTPUT_MAX_BYTES = 15 * 1024 * 1024
 VIDEO_MAX_SECONDS = 30
 
 
-def _spec(key, width, height, minimum_width, minimum_height, fit, required=None):
-    return dict(key=key, width=width, height=height, minimumWidth=minimum_width,
-                minimumHeight=minimum_height, fit=fit,
-                ratioRequired=(fit == "cover") if required is None else required,
+def _spec(key, width, height, fit):
+    return dict(key=key, width=width, height=height, minimumWidth=1,
+                minimumHeight=1, fit=fit, ratioRequired=False,
                 maxBytes=IMAGE_MAX_BYTES, contentTypes=["image/jpeg", "image/png", "image/webp"])
 
 
 MEDIA_SPECS = {
-    "product": _spec("product", 1600, 1600, 800, 800, "contain"),
-    "addon": _spec("addon", 1200, 1200, 600, 600, "contain"),
-    "storeLogo": _spec("store-logo", 1024, 1024, 512, 512, "contain"),
-    "storeCover": _spec("store-cover", 1600, 900, 1200, 675, "cover", False),
-    "classification": _spec("classification", 1200, 1200, 600, 600, "contain"),
-    "marketType": _spec("market-type", 1000, 1000, 512, 512, "contain"),
-    "offerBanner": _spec("offer-banner", 1600, 600, 1200, 450, "cover"),
-    "campaignTeaser": _spec("campaign-teaser", 800, 800, 400, 400, "cover"),
-    "campaignMedia": _spec("campaign-media", 1600, 900, 1200, 675, "cover"),
-    "avatar": _spec("avatar", 800, 800, 400, 400, "cover"),
-    "shippingLogo": _spec("shipping-logo", 800, 800, 400, 400, "contain"),
-    "dashboardLogo": _spec("dashboard-logo", 1024, 1024, 512, 512, "contain"),
-    "onboarding": _spec("onboarding", 1200, 1200, 400, 400, "contain"),
-    "marketLogin": _spec("market-login", 1600, 1000, 640, 400, "cover", False),
-    "deliveryLogin": _spec("delivery-login", 1600, 1000, 640, 400, "cover", False),
+    "product": _spec("product", 1600, 1600, "contain"),
+    "addon": _spec("addon", 1200, 1200, "contain"),
+    "storeLogo": _spec("store-logo", 1024, 1024, "contain"),
+    "storeCover": _spec("store-cover", 1600, 900, "contain"),
+    "classification": _spec("classification", 1200, 1200, "contain"),
+    "marketType": _spec("market-type", 1000, 1000, "contain"),
+    "offerBanner": _spec("offer-banner", 1600, 600, "cover"),
+    "campaignTeaser": _spec("campaign-teaser", 800, 800, "cover"),
+    "campaignMedia": _spec("campaign-media", 1600, 900, "cover"),
+    "avatar": _spec("avatar", 800, 800, "cover"),
+    "shippingLogo": _spec("shipping-logo", 800, 800, "contain"),
+    "dashboardLogo": _spec("dashboard-logo", 1024, 1024, "contain"),
+    "onboarding": _spec("onboarding", 1200, 1200, "contain"),
+    "marketLogin": _spec("market-login", 1600, 1000, "cover"),
+    "deliveryLogin": _spec("delivery-login", 1600, 1000, "cover"),
 }
 
 
@@ -48,28 +46,10 @@ def media_contract():
 
 
 def validate_media_image(value, spec_key):
+    """Accept any image size or ratio; slot dimensions are recommendations only."""
     if value is None:
         return value
-    validate_safe_image(value)
-    position = value.tell()
-    try:
-        value.seek(0)
-        with Image.open(value) as image:
-            width, height = ImageOps.exif_transpose(image).size
-    finally:
-        value.seek(position)
-    spec = MEDIA_SPECS[spec_key]
-    if width < spec["minimumWidth"] or height < spec["minimumHeight"]:
-        raise serializers.ValidationError(
-            f"Minimum image size is {spec['minimumWidth']}x{spec['minimumHeight']}px."
-        )
-    if spec["ratioRequired"]:
-        ratio = spec["width"] / spec["height"]
-        if abs(width / height - ratio) / ratio > 0.04:
-            raise serializers.ValidationError(
-                f"Use the {spec['width']}:{spec['height']} aspect ratio."
-            )
-    return value
+    return validate_safe_image(value)
 
 
 def validate_focal_point(value):

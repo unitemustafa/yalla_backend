@@ -7,7 +7,7 @@ from PIL import Image
 from rest_framework import serializers
 
 from .media import OptimizedPublicMediaStorage
-from .media_specs import validate_focal_point, validate_media_image
+from .media_specs import media_contract, validate_focal_point, validate_media_image
 
 
 def image_upload(*, name="image.png", size=(1600, 800), mode="RGB", exif=None, image_format=None):
@@ -25,6 +25,36 @@ def image_upload(*, name="image.png", size=(1600, 800), mode="RGB", exif=None, i
 
 
 class MediaSpecsValidationTests(SimpleTestCase):
+    def test_every_slot_accepts_small_images_and_arbitrary_ratios(self):
+        for key in media_contract()["images"]:
+            for size in [(1, 1), (32, 96), (96, 32), (799, 800)]:
+                with self.subTest(slot=key, size=size):
+                    upload = image_upload(size=size)
+                    upload.seek(8)
+                    self.assertIs(validate_media_image(upload, key), upload)
+                    self.assertEqual(upload.tell(), 8)
+
+    def test_contract_keeps_dimensions_advisory_for_every_slot(self):
+        for key, spec in media_contract()["images"].items():
+            with self.subTest(slot=key):
+                self.assertEqual(spec["minimumWidth"], 1)
+                self.assertEqual(spec["minimumHeight"], 1)
+                self.assertFalse(spec["ratioRequired"])
+                self.assertGreater(spec["width"], 1)
+                self.assertGreater(spec["height"], 1)
+
+    def test_empty_optional_image_is_accepted(self):
+        self.assertIsNone(validate_media_image(None, "product"))
+
+    def test_store_cover_contract_preserves_the_complete_image_and_other_ratios(self):
+        spec = media_contract()["images"]["storeCover"]
+        self.assertEqual(spec["fit"], "contain")
+        self.assertFalse(spec["ratioRequired"])
+        for size in [(1600, 900), (1600, 1000), (1200, 1200)]:
+            with self.subTest(size=size):
+                upload = image_upload(size=size)
+                self.assertIs(validate_media_image(upload, "storeCover"), upload)
+
     def test_product_accepts_a_rectangular_image_without_imposing_a_crop_ratio(self):
         upload = image_upload(size=(1600, 800))
 
@@ -37,9 +67,7 @@ class MediaSpecsValidationTests(SimpleTestCase):
 
         self.assertIs(validate_media_image(upload, "product"), upload)
 
-    def test_rejects_too_small_misleading_or_corrupt_images(self):
-        with self.assertRaisesMessage(serializers.ValidationError, "Minimum image size"):
-            validate_media_image(image_upload(size=(799, 800)), "product")
+    def test_rejects_misleading_or_corrupt_images(self):
         with self.assertRaisesMessage(serializers.ValidationError, "extension"):
             validate_media_image(image_upload(name="image.jpg", image_format="PNG"), "product")
         corrupt = SimpleUploadedFile("image.png", b"not an image", content_type="image/png")

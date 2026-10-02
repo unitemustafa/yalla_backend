@@ -105,6 +105,20 @@ class AppLaunchMediaTests(APITestCase):
         self.assertIn("market_login", response.data)
         self.assertIn("5 MB", str(response.data["market_login"]))
 
+    def test_small_images_of_any_ratio_can_be_uploaded_to_every_slot(self):
+        self.client.force_authenticate(self.admin)
+        for field in ("market_login", "delivery_login", "onboarding_one", "onboarding_two", "onboarding_three"):
+            for size in ((1, 1), (32, 96), (96, 32)):
+                with self.subTest(field=field, size=size):
+                    response = self.client.patch(URL, {
+                        field: small_png(f"{field}.png", size=size),
+                    }, format="multipart")
+                    self.assertEqual(response.status_code, 200, response.data)
+                    self.assertTrue(response.data[f"{field}_url"].endswith(".webp"))
+                    stored = getattr(AppLaunchMedia.objects.get(pk=1), field)
+                    with stored.open("rb") as content, Image.open(content) as image:
+                        self.assertEqual(image.size, size)
+
     def test_image_upload_replaces_video_and_onboarding_images_are_public(self):
         self.client.force_authenticate(self.admin)
         with self.captureOnCommitCallbacks(execute=True):
