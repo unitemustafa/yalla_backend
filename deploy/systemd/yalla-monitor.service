@@ -1,0 +1,11 @@
+[Unit]
+Description=Yalla service readiness and backup monitoring
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/yalla_backend
+ExecStart=/usr/bin/python3 /opt/yalla_backend/deploy/monitor.py
+TimeoutStartSec=120
+UMask=0077

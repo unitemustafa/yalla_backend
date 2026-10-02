@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Yalla services and backups every five minutes
+
+[Timer]
+OnBootSec=3m
+OnUnitActiveSec=5m
+AccuracySec=30s
+Unit=yalla-monitor.service
+
+[Install]
+WantedBy=timers.target
