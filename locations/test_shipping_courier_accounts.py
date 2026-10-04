@@ -3,7 +3,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import CourierProfile, User
-from accounts.serializers import CourierProfileSerializer
+from accounts.serializers import CourierProfileSerializer, UserSerializer
 from markets.models import Market, MarketClassification
 from orders.models import Order
 from orders.selectors import eligible_representatives_for_order
@@ -87,6 +87,75 @@ class ShippingCourierAccountTests(TestCase):
         self.assertFalse(company.service_cities.exists())
         self.assertTrue(company.logo.storage.exists(company.logo.name))
         self.assertIsNotNone(company.courier_account_id)
+
+    def test_courier_login_and_profile_use_existing_company_logo(self):
+        company = self.create_company(
+            request_format="multipart", logo=shipping_logo_upload(), is_active=True
+        )
+        expected_url = f"http://testserver{company.logo.url}"
+        self.client.force_authenticate(user=None)
+        login = self.client.post(
+            "/api/v1/auth/login/representative/",
+            {"email": "company@example.com", "password": "CompanyPass1!"},
+            format="json",
+        )
+        self.assertEqual(login.status_code, 200, login.data)
+        self.assertEqual(login.data["user"]["avatar_url"], expected_url)
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {login.data['accessToken']}"
+        )
+        profile = self.client.get("/api/v1/auth/me/")
+        self.assertEqual(profile.status_code, 200, profile.data)
+        self.assertEqual(profile.data["avatar_url"], expected_url)
+
+    def test_company_logo_replacement_and_removal_update_courier_profile(self):
+        company = self.create_company(
+            request_format="multipart", logo=shipping_logo_upload()
+        )
+        old_url = company.logo.url
+        replaced = self.client.patch(
+            f"{self.base}{company.pk}/",
+            {"logo": shipping_logo_upload("updated-shipping-logo.png")},
+            format="multipart",
+        )
+        self.assertEqual(replaced.status_code, 200, replaced.data)
+        company.refresh_from_db()
+        self.assertNotEqual(company.logo.url, old_url)
+        self.client.force_authenticate(User.objects.get(pk=company.courier_account_id))
+        profile = self.client.get("/api/v1/auth/me/")
+        self.assertEqual(
+            profile.data["avatar_url"], f"http://testserver{company.logo.url}"
+        )
+
+        self.client.force_authenticate(self.admin)
+        removed = self.client.patch(
+            f"{self.base}{company.pk}/", {"remove_logo": True}, format="json"
+        )
+        self.assertEqual(removed.status_code, 200, removed.data)
+        self.client.force_authenticate(User.objects.get(pk=company.courier_account_id))
+        profile = self.client.get("/api/v1/auth/me/")
+        self.assertIsNone(profile.data["avatar_url"])
+
+    def test_company_logo_takes_priority_over_separate_user_avatar(self):
+        company = self.create_company(
+            request_format="multipart", logo=shipping_logo_upload()
+        )
+        user = company.courier_account
+        user.avatar_image = "avatars/separate-courier.png"
+        user.avatar_url = "https://example.com/old-avatar.png"
+        user.save(update_fields=["avatar_image", "avatar_url"])
+        self.assertEqual(UserSerializer(user).data["avatar_url"], company.logo.url)
+
+    def test_regular_account_avatar_is_preserved(self):
+        self.customer.avatar_url = "https://example.com/customer-avatar.png"
+        self.assertEqual(
+            UserSerializer(self.customer).data["avatar_url"], self.customer.avatar_url
+        )
+        self.customer.avatar_image = "avatars/customer.png"
+        self.assertEqual(
+            UserSerializer(self.customer).data["avatar_url"],
+            self.customer.avatar_image.url,
+        )
 
     def test_create_global_company_accepts_explicit_empty_cities(self):
         company = self.create_company(service_city_ids=[])

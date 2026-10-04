@@ -173,15 +173,17 @@ class UserSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
         return obj.has_usable_password()
 
     def get_avatar_url(self, obj):
-        if obj.avatar_image:
+        company = getattr(obj, "shipping_company", None)
+        image = company.logo if company is not None else obj.avatar_image
+        if image:
             try:
-                url = obj.avatar_image.url
+                url = image.url
             except ValueError:
                 url = None
             if url:
                 request = self.context.get("request")
                 return request.build_absolute_uri(url) if request else url
-        return obj.avatar_url or None
+        return None if company is not None else obj.avatar_url or None
 
 
 class AdminUserSerializer(UserSerializer):
