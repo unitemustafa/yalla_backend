@@ -185,11 +185,19 @@ class CourierProfile(models.Model):
         "locations.ServiceCity",
         on_delete=models.PROTECT,
         related_name="courier_profiles",
+        blank=True,
+        null=True,
     )
-    max_active_orders = models.PositiveSmallIntegerField(default=3)
+    max_active_orders = models.PositiveSmallIntegerField(
+        blank=True, null=True, default=None
+    )
     is_available = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def is_shipping_company(self):
+        return hasattr(self.user, "shipping_company")
 
 
 class OneTimePassword(models.Model):

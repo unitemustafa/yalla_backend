@@ -1220,6 +1220,36 @@ class OrderAPITests(APITestCase):
             OrderEvent.EventType.DELIVERY_QUOTE_ACCEPTED,
         )
 
+    def test_admin_can_approve_sent_delivery_quote_without_customer_approval(self):
+        order_id = self.create_order().data["id"]
+        order = Order.objects.get(pk=order_id)
+        total = order.subtotal_price - order.discount + Decimal("75.50") + order.multi_market_fee
+        Order.objects.filter(pk=order_id).update(
+            delivery_type=Order.DeliveryType.DELIVERY,
+            delivery_area=None,
+            fulfillment_type=Order.FulfillmentType.EXTERNAL_SHIPPING,
+            external_shipping_status=Order.ExternalShippingStatus.AWAITING_CUSTOMER_APPROVAL,
+            delivery_price=Decimal("75.50"),
+            total_price=total,
+        )
+        response = self.client.patch(
+            f"{ORDERS_BASE}/{order_id}/delivery-price/",
+            {"delivery_price": "75.50", "action": "save"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["external_shipping_status"], Order.ExternalShippingStatus.QUOTED)
+        order.refresh_from_db()
+        self.assertEqual(order.delivery_price, Decimal("75.50"))
+        self.assertEqual(order.total_price, total)
+        event = order.history_events.latest("id")
+        self.assertEqual(event.actor_id, self.admin.pk)
+        self.assertFalse(event.metadata["requires_customer_approval"])
+
+        self.authenticate_customer()
+        response = self.client.post(f"{ORDERS_BASE}/{order_id}/delivery-price/accept/", format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_admin_cannot_restore_delivery_fee_on_free_delivery_order(self):
         self.offer.type = Offer.OfferType.DELIVERY
         self.offer.discount = Decimal("0.00")
@@ -1846,6 +1876,9 @@ class OrderAPITests(APITestCase):
     def test_client_create_general_order_uses_default_delivery_address_without_scope_leakage(
         self,
     ):
+        ShippingCompany.objects.create(
+            name="Global checkout shipping", courier_account=self.representative,
+        )
         self.make_general_market_region()
         general_address = self.create_general_address(
             manual_city="القاهرة",

@@ -315,6 +315,7 @@ class OrderWriteValidationMixin:
         )
         if (
             courier_service_city is not None
+            and not profile.is_shipping_company
             and profile.service_city_id != courier_service_city.id
         ):
             raise serializers.ValidationError(

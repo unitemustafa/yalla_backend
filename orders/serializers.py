@@ -1,6 +1,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 from rest_framework import serializers
 
 from catalog.models import ProductVariant
@@ -745,13 +746,21 @@ class ClientOrderCreateSerializer(OrderPreviewSerializer):
         shipping_company = attrs.get("shipping_company")
         available_companies = ShippingCompany.objects.none()
         if address.service_city_id:
-            available_companies = ShippingCompany.objects.filter(
-                is_active=True,
-                archived_at__isnull=True,
-                service_cities=address.service_city,
-                service_cities__is_active=True,
-                service_cities__archived_at__isnull=True,
-            ).distinct()
+            available_companies = (
+                ShippingCompany.objects.filter(
+                    is_active=True,
+                    archived_at__isnull=True,
+                )
+                .filter(
+                    Q(courier_account__isnull=False)
+                    | Q(
+                        service_cities=address.service_city,
+                        service_cities__is_active=True,
+                        service_cities__archived_at__isnull=True,
+                    )
+                )
+                .distinct()
+            )
         has_available_companies = available_companies.exists()
         if has_available_companies and shipping_company is None:
             raise serializers.ValidationError(

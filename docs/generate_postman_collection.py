@@ -441,7 +441,9 @@ BODY_EXAMPLES: dict[tuple[str, str], dict[str, Any]] = {
     ),
     ("POST", "/locations/shipping-companies/"): form(
         ("name", "Postman Shipping {{run_suffix}}", "text", False),
-        ("service_city_ids", "{{service_city_id}}", "text", False),
+        ("email", "shipping-{{run_suffix}}@example.com", "text", False),
+        ("password", "ShippingPass1!", "text", False),
+        ("service_city_ids", "{{service_city_id}}", "text", True),
         ("is_active", "true", "text", False),
         ("logo", "{{sample_image_path}}", "file", True),
     ),

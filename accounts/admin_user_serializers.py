@@ -124,6 +124,14 @@ class AdminUserWriteMixin:
     def validate(self, attrs):
         attrs = super().validate(attrs)
         role = attrs.get("role", getattr(self.instance, "role", None))
+        if (
+            self.instance is not None
+            and hasattr(self.instance, "shipping_company")
+            and role != User.Role.REPRESENTATIVE
+        ):
+            raise serializers.ValidationError(
+                {"role": "Shipping company accounts must remain representatives."}
+            )
         profile_data = attrs.get("courier_profile")
         if profile_data is not None and role != User.Role.REPRESENTATIVE:
             raise serializers.ValidationError(
@@ -237,6 +245,11 @@ class AdminUserWriteMixin:
             password,
         )
         self._sync_courier_profile(instance, profile_data)
+        if hasattr(instance, "shipping_company"):
+            company = instance.shipping_company
+            if company.is_active != instance.is_active:
+                company.is_active = instance.is_active
+                company.save(update_fields=["is_active", "updated_at"])
         self._handle_account_status_change(
             instance,
             was_active,

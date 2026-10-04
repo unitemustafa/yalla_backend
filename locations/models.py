@@ -59,6 +59,13 @@ class ServiceCity(models.Model):
 
 
 class ShippingCompany(models.Model):
+    courier_account = models.OneToOneField(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="shipping_company",
+        blank=True,
+        null=True,
+    )
     name = models.CharField(max_length=150)
     logo = models.ImageField(
         upload_to="shipping-companies/",
@@ -84,7 +91,10 @@ class ShippingCompany(models.Model):
         ]
 
     def get_deletion_mode(self):
-        return "blocked" if self.orders.exists() else "delete"
+        used = self.orders.exists() or (
+            self.courier_account_id and self.courier_account.assigned_orders.exists()
+        )
+        return "blocked" if used else "delete"
 
     def __str__(self):
         return self.name

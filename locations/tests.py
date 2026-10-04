@@ -54,6 +54,8 @@ class ShippingCompanyAPITests(TestCase):
             "/api/v1/locations/shipping-companies/",
             {
                 "name": "Fast Ship",
+                "email": "fast-ship@example.com",
+                "password": "CompanyPass1!",
                 "service_city_ids": [self.cairo.id, self.giza.id],
                 "is_active": True,
             },
@@ -75,6 +77,8 @@ class ShippingCompanyAPITests(TestCase):
             "/api/v1/locations/shipping-companies/",
             {
                 "name": "Logo Shipping",
+                "email": "logo-shipping@example.com",
+                "password": "CompanyPass1!",
                 "service_city_ids": [self.cairo.id],
                 "logo": shipping_logo_upload(),
             },

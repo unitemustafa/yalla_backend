@@ -1,9 +1,16 @@
 from config.media_cleanup import schedule_storage_cleanup
 from decimal import Decimal
+from uuid import uuid4
 
+from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 
-from accounts.models import User
+from accounts.models import CourierProfile, User
+from accounts.courier_rules import active_assigned_orders_for_user
+from accounts.serializers import PasswordValidationMixin
+from accounts.services import normalize_email
+from accounts.validation import reject_whitespace
 from config.media_specs import validate_media_image
 
 from .coverage import (
@@ -125,7 +132,14 @@ class ShippingCompanySummarySerializer(serializers.ModelSerializer):
         return request.build_absolute_uri(url) if request else url
 
 
-class ShippingCompanySerializer(ShippingCompanySummarySerializer):
+class ShippingCompanySerializer(
+    PasswordValidationMixin, ShippingCompanySummarySerializer
+):
+    email = serializers.EmailField(required=False, max_length=254)
+    password = serializers.CharField(
+        write_only=True, required=False, trim_whitespace=False
+    )
+    courier_account_id = serializers.IntegerField(read_only=True)
     logo = serializers.ImageField(
         write_only=True,
         required=False,
@@ -140,6 +154,7 @@ class ShippingCompanySerializer(ShippingCompanySummarySerializer):
         source="service_cities",
         many=True,
         allow_empty=False,
+        required=False,
     )
     service_cities = ShippingCompanyServiceCitySummarySerializer(
         many=True,
@@ -152,6 +167,9 @@ class ShippingCompanySerializer(ShippingCompanySummarySerializer):
         fields = (
             "id",
             "name",
+            "email",
+            "password",
+            "courier_account_id",
             "logo",
             "remove_logo",
             "logo_url",
@@ -175,6 +193,97 @@ class ShippingCompanySerializer(ShippingCompanySummarySerializer):
     def get_deletion_mode(self, instance) -> str:
         return instance.get_deletion_mode()
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        if request is not None and request.user.role == User.Role.ADMIN:
+            data["email"] = (
+                instance.courier_account.email if instance.courier_account_id else None
+            )
+        else:
+            data.pop("email", None)
+            data.pop("courier_account_id", None)
+        return data
+
+    def validate_email(self, value):
+        reject_whitespace(value)
+        value = normalize_email(value)
+        users = User.objects.filter(email__iexact=value)
+        if self.instance is not None:
+            users = users.exclude(pk=self.instance.courier_account_id)
+        if users.exists():
+            raise serializers.ValidationError(
+                "An account with this email already exists."
+            )
+        return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        needs_account = self.instance is None or (
+            self.instance.courier_account_id is None
+            and ("email" in attrs or "password" in attrs)
+        )
+        if needs_account:
+            missing = {
+                field: "This field is required."
+                for field in ("email", "password")
+                if not attrs.get(field)
+            }
+            if missing:
+                raise serializers.ValidationError(missing)
+        if (
+            self.instance is not None
+            and attrs.get("is_active") is False
+            and self.instance.courier_account_id
+            and active_assigned_orders_for_user(self.instance.courier_account).exists()
+        ):
+            raise serializers.ValidationError(
+                {"is_active": "Reassign active orders before disabling this company."}
+            )
+        return attrs
+
+    def _sync_account(self, instance, email, password):
+        user = instance.courier_account
+        if user is None:
+            if email is None and password is None:
+                return
+            user = User.objects.create_user(
+                username=f"shipping_{uuid4().hex}",
+                email=email,
+                password=password,
+                first_name=instance.name,
+                city="كل المدن",
+                role=User.Role.REPRESENTATIVE,
+                is_active=instance.is_active,
+                is_verified=True,
+                terms_accepted=True,
+                terms_accepted_at=timezone.now(),
+            )
+            instance.courier_account = user
+            instance.save(update_fields=["courier_account", "updated_at"])
+        else:
+            user.first_name = instance.name
+            user.city = "كل المدن"
+            user.is_active = instance.is_active
+            if email is not None:
+                user.email = email
+            if password is not None:
+                user.set_password(password)
+                user.auth_token_version += 1
+            if not instance.is_active:
+                user.auth_token_version += 1
+            user.save()
+        CourierProfile.objects.update_or_create(
+            user=user,
+            defaults={
+                "vehicle_type": "شركة شحن",
+                "plate_number": "شركة شحن",
+                "service_city": None,
+                "delivery_area": None,
+                "max_active_orders": None,
+            },
+        )
+
     def validate_name(self, value):
         value = value.strip()
         if not value:
@@ -195,17 +304,26 @@ class ShippingCompanySerializer(ShippingCompanySummarySerializer):
             )
         return validate_media_image(value, "shippingLogo")
 
+    @transaction.atomic
     def create(self, validated_data):
+        email = validated_data.pop("email")
+        password = validated_data.pop("password")
         validated_data.pop("remove_logo", False)
-        return super().create(validated_data)
+        instance = super().create(validated_data)
+        self._sync_account(instance, email, password)
+        return instance
 
+    @transaction.atomic
     def update(self, instance, validated_data):
+        email = validated_data.pop("email", None)
+        password = validated_data.pop("password", None)
         logo = validated_data.get("logo")
         remove_logo = validated_data.pop("remove_logo", False)
         old_logo = instance.logo if logo is not None or remove_logo else None
         if remove_logo and logo is None:
             validated_data["logo"] = None
         instance = super().update(instance, validated_data)
+        self._sync_account(instance, email, password)
         if old_logo and old_logo.name:
             current_name = instance.logo.name if instance.logo else ""
             if old_logo.name != current_name:

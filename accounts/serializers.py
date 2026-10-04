@@ -64,13 +64,12 @@ AVATAR_ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 
 
 class CourierProfileSerializer(RequiredFieldMessagesMixin, serializers.ModelSerializer):
-    service_city_name = serializers.CharField(
-        source="service_city.name",
-        read_only=True,
-    )
+    service_city_name = serializers.SerializerMethodField()
+    is_shipping_company = serializers.BooleanField(read_only=True)
     service_city = serializers.PrimaryKeyRelatedField(
         queryset=ServiceCity.objects.filter(is_active=True),
         required=False,
+        allow_null=True,
     )
 
     class Meta:
@@ -83,18 +82,33 @@ class CourierProfileSerializer(RequiredFieldMessagesMixin, serializers.ModelSeri
             "service_city_name",
             "max_active_orders",
             "is_available",
+            "is_shipping_company",
         )
         extra_kwargs = {
             "delivery_area": {"required": False, "allow_null": True},
         }
 
     def validate_max_active_orders(self, value):
-        if value < 1:
+        if value is not None and value < 1:
             raise serializers.ValidationError("Must be at least 1.")
         return value
 
+    def get_service_city_name(self, instance):
+        if instance.is_shipping_company:
+            return "كل المدن"
+        return instance.service_city.name if instance.service_city_id else None
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        if self.instance is not None and self.instance.is_shipping_company:
+            attrs.update(
+                service_city=None,
+                delivery_area=None,
+                max_active_orders=None,
+                vehicle_type="شركة شحن",
+                plate_number="شركة شحن",
+            )
+            return attrs
         existing_service_city = getattr(self.instance, "service_city", None)
         service_city = attrs.get(
             "service_city",

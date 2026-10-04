@@ -917,6 +917,7 @@ class AdminUserListCreateView(APIView):
                 "market_region_service_city",
                 "courier_profile__delivery_area",
                 "courier_profile__service_city",
+                "shipping_company",
             )
             .order_by("-created_at", "-id")
         )
@@ -949,6 +950,7 @@ class AdminRepresentativeListView(APIView):
             .select_related(
                 "courier_profile__delivery_area",
                 "courier_profile__service_city",
+                "shipping_company",
                 "market_region_service_city",
             )
             .order_by("-created_at", "-id")

@@ -303,23 +303,37 @@ class ShippingCompanyListCreateView(generics.ListCreateAPIView):
     serializer_class = ShippingCompanySerializer
 
     def get_queryset(self):
-        queryset = ShippingCompany.objects.prefetch_related(
-            "service_cities",
-        ).order_by("name", "id")
+        queryset = (
+            ShippingCompany.objects.prefetch_related(
+                "service_cities",
+            )
+            .select_related("courier_account")
+            .order_by("name", "id")
+        )
         if self.request.user.role != self.request.user.Role.ADMIN:
-            queryset = queryset.filter(
-                is_active=True,
-                archived_at__isnull=True,
-                service_cities__is_active=True,
-                service_cities__archived_at__isnull=True,
-            ).distinct()
+            queryset = (
+                queryset.filter(
+                    is_active=True,
+                    archived_at__isnull=True,
+                )
+                .filter(
+                    Q(courier_account__isnull=False)
+                    | Q(
+                        service_cities__is_active=True,
+                        service_cities__archived_at__isnull=True,
+                    )
+                )
+                .distinct()
+            )
         elif self.request.query_params.get("archived") in {"true", "1"}:
             queryset = queryset.filter(archived_at__isnull=False)
         else:
             queryset = queryset.filter(archived_at__isnull=True)
         city_id = self.request.query_params.get("service_city_id")
         if city_id:
-            queryset = queryset.filter(service_cities__id=city_id).distinct()
+            queryset = queryset.filter(
+                Q(service_cities__id=city_id) | Q(courier_account__isnull=False)
+            ).distinct()
         return queryset
 
 
@@ -329,14 +343,24 @@ class ShippingCompanyDetailView(generics.RetrieveUpdateDestroyAPIView):
     lookup_url_kwarg = "company_id"
 
     def get_queryset(self):
-        queryset = ShippingCompany.objects.prefetch_related("service_cities")
+        queryset = ShippingCompany.objects.prefetch_related(
+            "service_cities"
+        ).select_related("courier_account")
         if self.request.user.role != self.request.user.Role.ADMIN:
-            queryset = queryset.filter(
-                is_active=True,
-                archived_at__isnull=True,
-                service_cities__is_active=True,
-                service_cities__archived_at__isnull=True,
-            ).distinct()
+            queryset = (
+                queryset.filter(
+                    is_active=True,
+                    archived_at__isnull=True,
+                )
+                .filter(
+                    Q(courier_account__isnull=False)
+                    | Q(
+                        service_cities__is_active=True,
+                        service_cities__archived_at__isnull=True,
+                    )
+                )
+                .distinct()
+            )
         return queryset
 
     def patch(self, request, *args, **kwargs):
@@ -355,16 +379,23 @@ class ShippingCompanyDetailView(generics.RetrieveUpdateDestroyAPIView):
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         company = generics.get_object_or_404(
-            self.get_queryset().select_for_update(),
+            self.get_queryset().select_for_update(of=("self",)),
             pk=kwargs[self.lookup_url_kwarg],
         )
-        if company.orders.exists():
+        if company.get_deletion_mode() == "blocked":
             return Response(
                 {"detail": "لا يمكن حذف شركة الشحن لأنها مرتبطة بطلبات."},
                 status=status.HTTP_409_CONFLICT,
             )
         logo = company.logo
+        if company.courier_account_id:
+            user = company.courier_account
+            user.is_active = False
+            user.auth_token_version += 1
+            user.save(update_fields=["is_active", "auth_token_version", "updated_at"])
         company.delete()
+        if company.courier_account_id:
+            CourierProfile.objects.filter(user_id=company.courier_account_id).delete()
         if logo and logo.name:
             logo.delete(save=False)
         return Response(status=status.HTTP_204_NO_CONTENT)

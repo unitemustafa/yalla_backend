@@ -1,4 +1,4 @@
-from django.db.models import Count, IntegerField, OuterRef, Prefetch, Subquery, Sum
+from django.db.models import Count, IntegerField, OuterRef, Prefetch, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
 
 from accounts.models import User
@@ -88,7 +88,14 @@ def active_available_representatives():
             deleted_at__isnull=True,
             courier_profile__is_available=True,
         )
-        .select_related("courier_profile__service_city")
+        .filter(
+            Q(shipping_company__isnull=True)
+            | Q(
+                shipping_company__is_active=True,
+                shipping_company__archived_at__isnull=True,
+            )
+        )
+        .select_related("courier_profile__service_city", "shipping_company")
         .order_by("first_name", "last_name", "username", "id")
     )
 
@@ -97,7 +104,8 @@ def same_city_representatives(service_city):
     if service_city is None:
         return User.objects.none()
     return active_available_representatives().filter(
-        courier_profile__service_city=service_city,
+        Q(courier_profile__service_city=service_city)
+        | Q(shipping_company__isnull=False),
     )
 
 
