@@ -9,6 +9,7 @@ from orders.models import Order
 from orders.selectors import eligible_representatives_for_order
 
 from .models import ServiceCity, ShippingCompany
+from .tests import shipping_logo_upload
 
 
 class ShippingCourierAccountTests(TestCase):
@@ -33,15 +34,16 @@ class ShippingCourierAccountTests(TestCase):
             name="Market", classification=classification
         )
 
-    def create_company(self):
+    def create_company(self, *, request_format="json", **extra):
         response = self.client.post(
             self.base,
             {
                 "name": "Global Shipping",
                 "email": " Company@Example.com ",
                 "password": "CompanyPass1!",
+                **extra,
             },
-            format="json",
+            format=request_format,
         )
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["email"], "company@example.com")
@@ -73,6 +75,38 @@ class ShippingCourierAccountTests(TestCase):
         self.assertEqual(profile["vehicle_type"], "شركة شحن")
         self.assertEqual(profile["plate_number"], "شركة شحن")
 
+    def test_create_global_company_from_multipart_without_cities(self):
+        company = self.create_company(request_format="multipart")
+        self.assertFalse(company.service_cities.exists())
+        self.assertIsNone(company.courier_account.courier_profile.service_city_id)
+
+    def test_create_global_company_with_logo_and_without_cities(self):
+        company = self.create_company(
+            request_format="multipart", logo=shipping_logo_upload()
+        )
+        self.assertFalse(company.service_cities.exists())
+        self.assertTrue(company.logo.storage.exists(company.logo.name))
+        self.assertIsNotNone(company.courier_account_id)
+
+    def test_create_global_company_accepts_explicit_empty_cities(self):
+        company = self.create_company(service_city_ids=[])
+        self.assertFalse(company.service_cities.exists())
+        self.assertIsNotNone(company.courier_account_id)
+
+    def test_update_global_company_with_logo_and_without_cities(self):
+        company = self.create_company()
+        response = self.client.patch(
+            f"{self.base}{company.pk}/",
+            {"name": "Updated Shipping", "logo": shipping_logo_upload()},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        company.refresh_from_db()
+        self.assertEqual(company.name, "Updated Shipping")
+        self.assertTrue(company.logo.storage.exists(company.logo.name))
+        self.assertFalse(company.service_cities.exists())
+        self.assertIsNone(company.courier_account.courier_profile.service_city_id)
+
     def test_company_can_login_in_courier_app_and_read_assigned_order(self):
         company = self.create_company()
         order = self.order(self.other_city)
@@ -94,18 +128,50 @@ class ShippingCourierAccountTests(TestCase):
             format="json",
         )
         self.assertEqual(login.status_code, 200, login.data)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['accessToken']}")
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {login.data['accessToken']}"
+        )
         detail = self.client.get(f"/api/v1/courier/orders/{order.pk}/")
         self.assertEqual(detail.status_code, 200, detail.data)
         self.assertEqual(detail.data["id"], order.pk)
 
     def test_company_is_eligible_in_every_city_and_general_orders(self):
         company = self.create_company()
+        regular_couriers = {}
+        for city in (self.city, self.other_city):
+            courier = User.objects.create_user(
+                username=f"regular-courier-{city.pk}",
+                email=f"regular-courier-{city.pk}@example.com",
+                role=User.Role.REPRESENTATIVE,
+            )
+            CourierProfile.objects.create(
+                user=courier,
+                vehicle_type="Bike",
+                plate_number=f"plate-{city.pk}",
+                service_city=city,
+            )
+            regular_couriers[city.pk] = courier.pk
         for city in (self.city, self.other_city, None):
             order = self.order(city)
-            self.assertIn(
-                company.courier_account_id,
-                eligible_representatives_for_order(order).values_list("id", flat=True),
+            expected_ids = {company.courier_account_id}
+            expected_ids.update(
+                [regular_couriers[city.pk]] if city else regular_couriers.values()
+            )
+            self.assertEqual(
+                set(
+                    eligible_representatives_for_order(order).values_list(
+                        "id", flat=True
+                    )
+                ),
+                expected_ids,
+            )
+            options = self.client.get(
+                f"/api/v1/admin/orders/{order.pk}/service-city-representatives/"
+            )
+            self.assertEqual(options.status_code, 200, options.data)
+            self.assertEqual(
+                {row["representative_id"] for row in options.data["representatives"]},
+                expected_ids,
             )
             assignment = self.client.patch(
                 f"/api/v1/orders/{order.pk}/assignment/",

@@ -153,7 +153,7 @@ class ShippingCompanySerializer(
         ),
         source="service_cities",
         many=True,
-        allow_empty=False,
+        allow_empty=True,
         required=False,
     )
     service_cities = ShippingCompanyServiceCitySummarySerializer(
