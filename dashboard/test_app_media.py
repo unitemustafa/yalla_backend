@@ -107,7 +107,7 @@ class AppLaunchMediaTests(APITestCase):
 
     def test_small_images_of_any_ratio_can_be_uploaded_to_every_slot(self):
         self.client.force_authenticate(self.admin)
-        for field in ("market_login", "delivery_login", "onboarding_one", "onboarding_two", "onboarding_three"):
+        for field in ("market_login", "delivery_login"):
             for size in ((1, 1), (32, 96), (96, 32)):
                 with self.subTest(field=field, size=size):
                     response = self.client.patch(URL, {
@@ -119,19 +119,44 @@ class AppLaunchMediaTests(APITestCase):
                     with stored.open("rb") as content, Image.open(content) as image:
                         self.assertEqual(image.size, size)
 
-    def test_image_upload_replaces_video_and_onboarding_images_are_public(self):
+    def test_image_upload_replaces_video_and_is_public(self):
         self.client.force_authenticate(self.admin)
         with self.captureOnCommitCallbacks(execute=True):
             self.assertEqual(self.client.patch(URL, {"market_login_video": self.real_video()}, format="multipart").status_code, 200)
         response = self.client.patch(URL, {
             "market_login": small_png("login.png"),
-            "onboarding_one": small_png("first.png"),
             "market_login_focus": '{"x":0.25,"y":0.75}',
         }, format="multipart")
         self.assertEqual(response.status_code, 200, response.data)
         self.assertTrue(response.data["market_login_url"].endswith(".webp"))
-        self.assertIsNotNone(response.data["onboarding_one_url"])
+        self.assertIsNone(response.data["onboarding_one_url"])
         self.assertEqual(response.data["market_login_focus"], {"x": 0.25, "y": 0.75})
         self.assertFalse(AppLaunchMedia.objects.get(pk=1).market_login_video)
         self.client.force_authenticate(user=None)
         self.assertEqual(self.client.get(URL).data["onboarding_one_url"], response.data["onboarding_one_url"])
+
+    def test_admin_cannot_change_or_remove_bundled_onboarding_images(self):
+        self.client.force_authenticate(self.admin)
+        for field in ("onboarding_one", "onboarding_two", "onboarding_three"):
+            with self.subTest(field=field):
+                response = self.client.patch(URL, {
+                    field: small_png("onboarding.png"),
+                    "delivery_login": small_png("delivery.png"),
+                }, format="multipart")
+                self.assertEqual(response.status_code, 400, response.data)
+                self.assertIn(field, response.data)
+                self.assertFalse(getattr(AppLaunchMedia.objects.get(pk=1), field))
+                self.assertFalse(AppLaunchMedia.objects.get(pk=1).delivery_login)
+                response = self.client.patch(URL, {field: None}, format="json")
+                self.assertEqual(response.status_code, 400, response.data)
+                self.assertIn(field, response.data)
+
+    def test_legacy_onboarding_uploads_are_not_served_to_apps(self):
+        media = AppLaunchMedia.objects.create(pk=1)
+        for field in ("onboarding_one", "onboarding_two", "onboarding_three"):
+            setattr(media, field, small_png(f"{field}.png"))
+        media.save()
+        response = self.client.get(URL)
+        self.assertEqual(response.status_code, 200)
+        for field in ("onboarding_one", "onboarding_two", "onboarding_three"):
+            self.assertIsNone(response.data[f"{field}_url"])

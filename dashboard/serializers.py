@@ -30,7 +30,6 @@ class AppLaunchMediaSerializer(serializers.ModelSerializer):
     class Meta:
         model = AppLaunchMedia
         fields = (
-            "onboarding_one", "onboarding_two", "onboarding_three",
             "market_login", "market_login_video", "delivery_login", "onboarding_one_url",
             "onboarding_two_url", "onboarding_three_url", "market_login_url",
             "delivery_login_url", "updated_at",
@@ -38,7 +37,7 @@ class AppLaunchMediaSerializer(serializers.ModelSerializer):
         )
         extra_kwargs = {
             key: {"write_only": True, "required": False}
-            for key in ("onboarding_one", "onboarding_two", "onboarding_three", "market_login", "market_login_video", "delivery_login", "market_login_poster")
+            for key in ("market_login", "market_login_video", "delivery_login", "market_login_poster")
         }
         read_only_fields = ("updated_at",)
 
@@ -49,14 +48,15 @@ class AppLaunchMediaSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         return request.build_absolute_uri(file.url) if request else file.url
 
+    # Keep null URLs for older apps so they use their bundled artwork.
     def get_onboarding_one_url(self, obj):
-        return self._url(obj, "onboarding_one")
+        return None
 
     def get_onboarding_two_url(self, obj):
-        return self._url(obj, "onboarding_two")
+        return None
 
     def get_onboarding_three_url(self, obj):
-        return self._url(obj, "onboarding_three")
+        return None
 
     def get_market_login_url(self, obj):
         return self._url(obj, "market_login_video") or self._url(obj, "market_login")
@@ -80,7 +80,14 @@ class AppLaunchMediaSerializer(serializers.ModelSerializer):
         return validate_focal_point(value)
 
     def validate(self, attrs):
-        image_fields = {"onboarding_one": "onboarding", "onboarding_two": "onboarding", "onboarding_three": "onboarding", "market_login": "marketLogin", "delivery_login": "deliveryLogin", "market_login_poster": "marketLogin"}
+        retired_fields = ("onboarding_one", "onboarding_two", "onboarding_three")
+        errors = {
+            field: "Onboarding images are bundled with the app and cannot be changed."
+            for field in retired_fields if field in self.initial_data
+        }
+        if errors:
+            raise serializers.ValidationError(errors)
+        image_fields = {"market_login": "marketLogin", "delivery_login": "deliveryLogin", "market_login_poster": "marketLogin"}
         for field, spec in image_fields.items():
             file = attrs.get(field)
             if file is not None:
