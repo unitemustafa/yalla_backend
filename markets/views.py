@@ -409,6 +409,23 @@ class MarketClassificationSummaryView(APIView):
                     many=True,
                     context=serializer_context,
                 ).data,
+                "popular_markets": HomeMarketSerializer(
+                    Market.objects.filter(
+                        id__in=market_ids,
+                        is_popular=True,
+                        classification__is_active=True,
+                    )
+                    .with_client_metrics(request.user)
+                    .prefetch_related(
+                        "service_cities",
+                        "delivery_areas",
+                        "subcategory_assignments__subcategory",
+                        "market_types",
+                    )
+                    .order_by("name", "id"),
+                    many=True,
+                    context={"request": request},
+                ).data,
             },
             status=status.HTTP_200_OK,
         )

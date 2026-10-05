@@ -1586,6 +1586,7 @@ class HomeAPITests(APITestCase):
                 "common_market_classifications",
                 "market_classifications",
                 "latest_markets",
+                "popular_markets",
             },
         )
         self.assertEqual(len(response.data["common_market_classifications"]), 4)
@@ -1652,6 +1653,52 @@ class HomeAPITests(APITestCase):
                 for product in market["products"]
             )
         )
+
+    def test_summary_returns_all_popular_markets_across_classification_types(self):
+        popular_markets = [
+            self._create_market(
+                f"Popular Market {index}",
+                self.local_classification,
+                self.local_area,
+            )
+            for index in range(7)
+        ]
+        popular_markets.append(self.second_local_market)
+        Market.objects.filter(
+            pk__in=[market.pk for market in popular_markets] + [self.remote_market.pk]
+        ).update(is_popular=True)
+        disabled_market = self._create_market(
+            "Disabled popular market", self.local_classification, self.local_area
+        )
+        disabled_market.is_popular = True
+        disabled_market.status = Market.Status.INACTIVE
+        disabled_market.save(update_fields=["is_popular", "status"])
+        disabled_classification = MarketClassification.objects.create(
+            name="Disabled classification", is_active=False
+        )
+        hidden_market = self._create_market(
+            "Hidden popular market", disabled_classification, self.local_area
+        )
+        hidden_market.is_popular = True
+        hidden_market.save(update_fields=["is_popular"])
+
+        self.authenticate()
+        response = self.client.get(f"{HOME_BASE}/classifications/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            {market["id"] for market in response.data["popular_markets"]},
+            {market.pk for market in popular_markets},
+        )
+        self.assertTrue(
+            all(market["is_popular"] for market in response.data["popular_markets"])
+        )
+        # The category preview remains bounded, independently of popular discovery.
+        classification = next(
+            item for item in response.data["market_classifications"]
+            if item["id"] == self.local_classification.pk
+        )
+        self.assertEqual(len(classification["markets"]), 5)
 
     def test_typed_classification_endpoints_return_only_requested_type(self):
         normal_classification = MarketClassification.objects.create(
