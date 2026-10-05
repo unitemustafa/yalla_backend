@@ -43,7 +43,7 @@ def validate_offer_image_upload(value):
     return validate_media_image(value, "offerBanner")
 
 
-def replace_offer_image(offer_id, upload):
+def replace_offer_image(offer_id, upload, *, image_focus=None):
     """Store a new image without coupling the upload to the full offer update."""
     offer = None
     old_name = ""
@@ -56,7 +56,11 @@ def replace_offer_image(offer_id, upload):
                 old_storage = offer.image.storage
 
             offer.image = upload
-            offer.save(update_fields=["image", "updated_at"])
+            fields = ["image", "updated_at"]
+            if image_focus is not None:
+                offer.image_focus = image_focus
+                fields.append("image_focus")
+            offer.save(update_fields=fields)
 
             if old_name and old_name != offer.image.name:
                 schedule_storage_cleanup(old_storage, old_name)

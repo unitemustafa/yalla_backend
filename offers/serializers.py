@@ -17,6 +17,7 @@ from markets.serializers import AdminMarketSerializer, ServiceCitySummarySeriali
 
 from .images import validate_offer_image_upload
 from .models import Offer, OfferItem
+from config.media_specs import validate_focal_point
 
 
 class PrimaryKeyListField(serializers.Field):
@@ -138,6 +139,7 @@ class OfferItemSerializer(serializers.ModelSerializer):
 
 
 class AdminOfferSerializer(serializers.ModelSerializer):
+    image_focus = serializers.JSONField(required=False, validators=[validate_focal_point])
     image = serializers.ImageField(
         required=False,
         allow_null=True,
@@ -192,6 +194,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "image",
+            "image_focus",
             "type",
             "discount",
             "start_time",
@@ -646,6 +649,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
 
 
 class OfferImageUploadSerializer(serializers.Serializer):
+    image_focus = serializers.JSONField(required=False, validators=[validate_focal_point])
     image = serializers.ImageField(
         validators=[validate_offer_image_upload],
     )

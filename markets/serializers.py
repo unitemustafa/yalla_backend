@@ -796,6 +796,7 @@ class MarketWithCommonProductsSerializer(HomeMarketSerializer):
 
 
 class HomeOfferSerializer(serializers.ModelSerializer):
+    image_focus = serializers.JSONField(read_only=True)
     is_multi_market = serializers.SerializerMethodField()
     market_count = serializers.SerializerMethodField()
     markets = serializers.SerializerMethodField()
@@ -813,6 +814,7 @@ class HomeOfferSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "image",
+            "image_focus",
             "type",
             "discount",
             "start_time",

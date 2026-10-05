@@ -444,7 +444,8 @@ def update_offer_image_response(request, offer_id):
     serializer.is_valid(raise_exception=True)
     request_id = str(uuid.uuid4())
     try:
-        replace_offer_image(offer.id, serializer.validated_data["image"])
+        replace_offer_image(offer.id, serializer.validated_data["image"],
+                            image_focus=serializer.validated_data.get("image_focus"))
     except OfferImageStorageError:
         logger.exception(
             "Offer image storage failed offer_id=%s request_id=%s",

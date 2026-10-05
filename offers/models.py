@@ -2,6 +2,7 @@ from django.db import models
 from django.utils import timezone
 
 from config.media import raw_public_media_storage
+from config.media_specs import center_focus
 
 
 class Offer(models.Model):
@@ -40,6 +41,7 @@ class Offer(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     image = models.ImageField(upload_to="offers/", blank=True, null=True)
+    image_focus = models.JSONField(default=center_focus)
 
     type = models.CharField(
         max_length=30,
