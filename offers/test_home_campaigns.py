@@ -29,6 +29,7 @@ from dashboard.models import MediaCleanup, MediaJob
 from dashboard.tasks import cleanup_due_media
 from PIL import Image
 from .models import HomeCampaign, HomeCampaignImage
+from .campaign_serializers import ClientHomeCampaignSerializer
 
 
 User = get_user_model()
@@ -122,6 +123,46 @@ class HomeCampaignAPITests(APITestCase):
             price=Decimal("100.00"),
             sku="CAMPAIGN-1",
         )
+
+    def test_new_campaign_uses_fixed_medium_centered_hero_layout(self):
+        self.assertEqual(HomeCampaign().sheet_size, HomeCampaign.SheetSize.MEDIUM)
+        self.authenticate(self.admin)
+        payload = self.payload()
+        for field in HomeCampaign.DEFAULT_LAYOUT:
+            payload.pop(field)
+        response = self.client.post(CAMPAIGNS_BASE, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        campaign = HomeCampaign.objects.get(pk=response.data["id"])
+        for field, value in HomeCampaign.DEFAULT_LAYOUT.items():
+            self.assertEqual(response.data[field], value)
+            self.assertEqual(getattr(campaign, field), value)
+
+    def test_legacy_layout_is_normalized_for_admin_client_and_updates(self):
+        campaign = self.create_campaign(
+            template=HomeCampaign.Template.SPLIT,
+            sheet_size=HomeCampaign.SheetSize.NEAR_FULL,
+            content_alignment=HomeCampaign.Alignment.START,
+        )
+        self.authenticate(self.admin)
+        url = f"{CAMPAIGNS_BASE}{campaign.pk}/"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        for field, value in HomeCampaign.DEFAULT_LAYOUT.items():
+            self.assertEqual(response.data[field], value)
+        sheet = ClientHomeCampaignSerializer(campaign).data["sheet"]
+        self.assertEqual(sheet["template"], "hero")
+        self.assertEqual(sheet["size"], "medium")
+        self.assertEqual(sheet["alignment"], "center")
+
+        response = self.client.patch(url, {
+            "template": "media_focus", "sheet_size": "large",
+            "content_alignment": "start", "title": "Updated title",
+        }, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        campaign.refresh_from_db()
+        self.assertEqual(campaign.title, "Updated title")
+        for field, value in HomeCampaign.DEFAULT_LAYOUT.items():
+            self.assertEqual(getattr(campaign, field), value)
 
     def authenticate(self, user):
         refresh = RefreshToken.for_user(user)

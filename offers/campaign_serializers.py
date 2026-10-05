@@ -111,6 +111,9 @@ class AdminHomeCampaignSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             "id",
+            "template",
+            "sheet_size",
+            "content_alignment",
             "effective_status",
             "teaser_image",
             "sheet_image",
@@ -121,6 +124,11 @@ class AdminHomeCampaignSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data.update(HomeCampaign.DEFAULT_LAYOUT)
+        return data
 
     def get_effective_status(self, instance):
         return instance.get_effective_status()
@@ -149,6 +157,7 @@ class AdminHomeCampaignSerializer(serializers.ModelSerializer):
         return {"id": target.id, "name": name}
 
     def validate(self, attrs):
+        attrs.update(HomeCampaign.DEFAULT_LAYOUT)
         instance = self.instance
         value = lambda name, default=None: attrs.get(
             name, getattr(instance, name, default) if instance is not None else default
@@ -340,9 +349,9 @@ class ClientHomeCampaignSerializer(serializers.ModelSerializer):
         return {
             "title": instance.title,
             "description": instance.description,
-            "template": instance.template,
-            "size": instance.sheet_size,
-            "alignment": instance.content_alignment,
+            "template": HomeCampaign.DEFAULT_LAYOUT["template"],
+            "size": HomeCampaign.DEFAULT_LAYOUT["sheet_size"],
+            "alignment": HomeCampaign.DEFAULT_LAYOUT["content_alignment"],
             "use_theme_colors": instance.use_theme_colors,
             "background_color": instance.sheet_background_color,
             "text_color": instance.sheet_text_color,

@@ -162,6 +162,12 @@ class HomeCampaign(models.Model):
         START = "start", "Start"
         CENTER = "center", "Center"
 
+    DEFAULT_LAYOUT = {
+        "template": Template.HERO,
+        "sheet_size": SheetSize.MEDIUM,
+        "content_alignment": Alignment.CENTER,
+    }
+
     class MediaType(models.TextChoices):
         NONE = "none", "None"
         IMAGE = "image", "Image"
@@ -210,7 +216,7 @@ class HomeCampaign(models.Model):
     sheet_size = models.CharField(
         max_length=24,
         choices=SheetSize.choices,
-        default=SheetSize.LARGE,
+        default=SheetSize.MEDIUM,
     )
     content_alignment = models.CharField(
         max_length=12,
