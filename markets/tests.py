@@ -1943,6 +1943,92 @@ class HomeAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
+    def test_catalog_search_returns_all_three_types_and_preserves_product_pagination(self):
+        self.authenticate()
+        response = self.client.get(
+            f"{HOME_BASE}/search/", {"q": "Local", "include": "all"}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 10)
+        self.assertEqual(len(response.data["results"]), 4)
+        self.assertIsNotNone(response.data["next"])
+        self.assertEqual(
+            {market["id"] for market in response.data["markets"]},
+            {self.local_market.id, self.second_local_market.id},
+        )
+        self.assertEqual(
+            {category["id"] for category in response.data["categories"]},
+            {self.local_classification.id, self.second_local_classification.id},
+        )
+        for category in response.data["categories"]:
+            self.assertEqual(category["market_count"], 1)
+            self.assertEqual(category["product_count"], 5)
+        next_page = self.client.get(
+            f"{HOME_BASE}/search/", {"q": "Local", "include": "all", "page": 2}
+        )
+        self.assertEqual(next_page.status_code, status.HTTP_200_OK)
+        self.assertNotIn("markets", next_page.data)
+        self.assertNotIn("categories", next_page.data)
+
+    def test_catalog_search_finds_empty_market_and_its_category(self):
+        category = MarketClassification.objects.create(name="مطاعم")
+        market = self._create_market("مطاعم النور", category, self.local_area)
+        self.authenticate()
+        response = self.client.get(
+            f"{HOME_BASE}/search/", {"q": "مطاعم", "include": "all"}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["results"], [])
+        self.assertEqual([item["id"] for item in response.data["markets"]], [market.id])
+        self.assertEqual([item["id"] for item in response.data["categories"]], [category.id])
+        self.assertEqual(response.data["categories"][0]["market_count"], 1)
+        self.assertEqual(response.data["categories"][0]["product_count"], 0)
+
+    def test_catalog_search_excludes_remote_inactive_and_archived_markets(self):
+        self.local_market.status = Market.Status.INACTIVE
+        self.local_market.save(update_fields=["status"])
+        self.second_local_market.archived_at = timezone.now()
+        self.second_local_market.save(update_fields=["archived_at"])
+        self.authenticate()
+        for query in ("Local", "Remote"):
+            response = self.client.get(
+                f"{HOME_BASE}/search/", {"q": query, "include": "all"}
+            )
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(response.data["markets"], [])
+            self.assertEqual(response.data["categories"], [])
+            self.assertEqual(response.data["results"], [])
+
+    def test_catalog_search_excludes_inactive_classifications_and_archived_products(self):
+        self.local_classification.is_active = False
+        self.local_classification.save(update_fields=["is_active"])
+        product = self.local_products[1]
+        product.archived_at = timezone.now()
+        product.save(update_fields=["archived_at"])
+        self.authenticate()
+        response = self.client.get(
+            f"{HOME_BASE}/search/", {"q": "Local", "include": "all"}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 4)
+        self.assertEqual([item["id"] for item in response.data["markets"]], [self.second_local_market.id])
+        self.assertEqual([item["id"] for item in response.data["categories"]], [self.second_local_classification.id])
+        self.assertEqual(response.data["categories"][0]["product_count"], 4)
+
+    def test_catalog_category_counts_exclude_remote_markets_in_same_category(self):
+        market = self._create_market(
+            "Remote shared market", self.local_classification, self.remote_area
+        )
+        self._create_product("Remote shared product", market, 800)
+        self.authenticate()
+        response = self.client.get(
+            f"{HOME_BASE}/search/", {"q": "supermarkets", "include": "all"}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        category = response.data["categories"][0]
+        self.assertEqual(category["market_count"], 1)
+        self.assertEqual(category["product_count"], 5)
+
     def test_product_search_requires_saved_market_region(self):
         self.user.market_region_mode = None
         self.user.market_region_service_city = None

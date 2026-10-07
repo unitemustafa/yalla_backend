@@ -616,6 +616,12 @@ class ProductSearchView(APIView):
         products = visible_product_queryset(request.user).filter(
             market__status=Market.Status.ACTIVE,
         )
+        if request.query_params.get("include") == "all":
+            products = products.filter(
+                archived_at__isnull=True,
+                market__archived_at__isnull=True,
+                market__classification__is_active=True,
+            )
         if search_query:
             products = products.filter(
                 Q(name__icontains=search_query)
@@ -647,7 +653,57 @@ class ProductSearchView(APIView):
             many=True,
             context={"request": request},
         )
-        return paginator.get_paginated_response(serializer.data)
+        response = paginator.get_paginated_response(serializer.data)
+        if request.query_params.get("include") == "all" and paginator.page.number == 1:
+            # Search the complete visible catalog, not the home category previews.
+            visible_markets = visible_market_queryset(request.user).filter(
+                status=Market.Status.ACTIVE,
+                archived_at__isnull=True,
+                classification__is_active=True,
+            )
+            market_ids = visible_markets.values_list("id", flat=True)
+            classifications = (
+                MarketClassification.objects.filter(
+                    is_active=True,
+                    markets__id__in=market_ids,
+                    name__icontains=search_query,
+                )
+                .annotate(
+                    market_count=Count(
+                        "markets", filter=Q(markets__id__in=market_ids), distinct=True
+                    ),
+                    product_count=Count(
+                        "markets__products",
+                        filter=Q(
+                            markets__id__in=market_ids,
+                            markets__products__archived_at__isnull=True,
+                        ),
+                        distinct=True,
+                    ),
+                )
+                .distinct()
+                .order_by("name", "id")
+            )
+            markets = (
+                visible_markets.filter(name__icontains=search_query)
+                .with_client_metrics(request.user)
+                .select_related("classification")
+                .prefetch_related(
+                    "service_cities",
+                    "delivery_areas",
+                    "subcategory_assignments__subcategory",
+                    "market_types",
+                )
+                .distinct()
+                .order_by("name", "id")
+            )
+            response.data["markets"] = HomeMarketSerializer(
+                markets, many=True, context={"request": request}
+            ).data
+            response.data["categories"] = MarketClassificationCountSerializer(
+                classifications, many=True, context={"request": request}
+            ).data
+        return response
 
 
 class AddressProductListView(APIView):
