@@ -471,10 +471,27 @@ class SocialTokenSerializer(RequiredFieldMessagesMixin, serializers.Serializer):
         return value
 
 
-class SocialSignupSerializer(SocialTokenSerializer):
+class SocialEmailSerializer(SocialTokenSerializer):
+    email = serializers.EmailField(required=False)
+
+    def validate(self, attrs):
+        # A manually supplied address is only a contact address. It never
+        # changes the verification status of the signed provider identity.
+        email = self.social_identity.email or attrs.get("email", "")
+        if not email:
+            raise serializers.ValidationError({"email": "This field is required."})
+        attrs["email"] = normalize_email(email)
+        return attrs
+
+
+class SocialSignupSerializer(SocialEmailSerializer):
+    defer_profile = serializers.BooleanField(required=False, default=False)
     first_name = serializers.CharField(
         max_length=150,
         validators=[no_whitespace_validator],
+        required=False,
+        allow_blank=True,
+        default="",
     )
     last_name = serializers.CharField(
         max_length=150,
@@ -485,8 +502,13 @@ class SocialSignupSerializer(SocialTokenSerializer):
     username = serializers.CharField(
         max_length=150,
         validators=[no_whitespace_validator, UnicodeUsernameValidator()],
+        required=False,
+        allow_blank=True,
+        default="",
     )
-    phone = serializers.CharField(max_length=30)
+    phone = serializers.CharField(
+        max_length=30, required=False, allow_null=True, default=None
+    )
     city = serializers.CharField(
         max_length=100,
         allow_blank=True,
@@ -495,12 +517,26 @@ class SocialSignupSerializer(SocialTokenSerializer):
     )
     terms_accepted = serializers.BooleanField()
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if not attrs["defer_profile"]:
+            errors = {
+                name: "This field is required."
+                for name in ("first_name", "username", "phone")
+                if not attrs.get(name)
+            }
+            if errors:
+                raise serializers.ValidationError(errors)
+        return attrs
+
     def validate_username(self, value):
         username = value.strip()
         reject_whitespace(username)
         return username
 
     def validate_phone(self, value):
+        if value is None:
+            return None
         reject_whitespace(value)
         return normalize_egyptian_phone(value)
 
@@ -512,7 +548,7 @@ class SocialSignupSerializer(SocialTokenSerializer):
         return value
 
 
-class SocialLinkSerializer(SocialTokenSerializer):
+class SocialLinkSerializer(SocialEmailSerializer):
     password = serializers.CharField(write_only=True, trim_whitespace=False)
 
 

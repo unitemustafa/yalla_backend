@@ -244,6 +244,7 @@ class RegisterView(APIView):
         registration.firebase_uid = None
         registration.auth_provider = ""
         registration.avatar_url = None
+        registration.profile_username_pending = False
         try:
             with transaction.atomic():
                 registration.save()
@@ -376,6 +377,7 @@ class VerifyRegistrationOTPView(APIView):
             terms_accepted_at=registration.terms_accepted_at,
             privacy_policy_version=registration.privacy_policy_version,
             avatar_url=registration.avatar_url,
+            profile_username_pending=registration.profile_username_pending,
         )
         try:
             with transaction.atomic():
@@ -517,10 +519,14 @@ class SocialSessionView(APIView):
                 }
             )
 
-        existing_user = User.objects.filter(
-            email__iexact=identity.email,
-            deleted_at__isnull=True,
-        ).first()
+        existing_user = (
+            User.objects.filter(
+                email__iexact=identity.email,
+                deleted_at__isnull=True,
+            ).first()
+            if identity.email
+            else None
+        )
         if existing_user is not None:
             if existing_user.role != User.Role.CLIENT:
                 return _invalid_social_sign_in_response()
@@ -576,6 +582,15 @@ class SocialSignupView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         identity = serializer.social_identity
+        email = data["email"]
+        if data["defer_profile"]:
+            data.update(
+                first_name=identity.first_name,
+                last_name=identity.last_name,
+                username=_new_social_username(),
+                phone=None,
+                city="",
+            )
 
         linked = (
             SocialIdentity.objects.select_for_update()
@@ -599,24 +614,23 @@ class SocialSignupView(APIView):
             User.objects.select_for_update()
             .filter(deleted_at__isnull=True)
             .filter(
-                Q(email__iexact=identity.email)
+                Q(email__iexact=email)
                 | Q(username__iexact=data["username"])
                 | Q(phone__in=phone_candidates(data["phone"]))
             )
         )
-        errors = _social_duplicate_errors(identity.email, data, matching_users)
+        errors = _social_duplicate_errors(email, data, matching_users)
         if errors:
-            if set(errors) == {"email"}:
+            if set(errors) == {"email"} or (not identity.email and "email" in errors):
                 if any(
-                    user.email.lower() == identity.email
-                    and user.role != User.Role.CLIENT
+                    user.email.lower() == email and user.role != User.Role.CLIENT
                     for user in matching_users
                 ):
                     return _invalid_social_sign_in_response()
                 return Response(
                     {
                         "status": "account_link_required",
-                        "email": identity.email,
+                        "email": email,
                         "provider": identity.provider,
                     }
                 )
@@ -641,7 +655,8 @@ class SocialSignupView(APIView):
 
         pending_conflicts = list(
             PendingRegistration.objects.select_for_update().filter(
-                Q(email__iexact=identity.email)
+                Q(firebase_uid=identity.firebase_uid)
+                | Q(email__iexact=email)
                 | Q(username__iexact=data["username"])
                 | Q(phone__in=phone_candidates(data["phone"]))
             )
@@ -650,7 +665,8 @@ class SocialSignupView(APIView):
             (
                 item
                 for item in pending_conflicts
-                if item.email.lower() == identity.email
+                if item.firebase_uid == identity.firebase_uid
+                or item.email.lower() == email
             ),
             None,
         )
@@ -661,7 +677,14 @@ class SocialSignupView(APIView):
                 {"detail": "Another pending registration uses these details."}
             )
         if registration is None:
-            registration = PendingRegistration(email=identity.email)
+            registration = PendingRegistration(email=email)
+        if registration.email != email:
+            # A code sent to the previous address cannot verify a new address,
+            # including when the new address is currently on OTP cooldown.
+            registration.otp_code_hash = ""
+            registration.otp_expires_at = None
+            registration.otp_attempts = 0
+        registration.email = email
         registration.first_name = data["first_name"]
         registration.last_name = data["last_name"]
         registration.username = data["username"]
@@ -672,6 +695,7 @@ class SocialSignupView(APIView):
         registration.firebase_uid = identity.firebase_uid
         registration.auth_provider = identity.provider
         registration.avatar_url = identity.avatar_url
+        registration.profile_username_pending = data["defer_profile"]
         registration.save()
         try:
             registration, code, cooldown_data = issue_registration_otp(registration)
@@ -705,7 +729,7 @@ class SocialLinkView(APIView):
         user = (
             User.objects.select_for_update()
             .filter(
-                email__iexact=identity.email,
+                email__iexact=data["email"],
                 deleted_at__isnull=True,
             )
             .first()
@@ -766,20 +790,25 @@ def _create_social_user(identity, data):
         is_verified=True,
         terms_accepted=True,
         terms_accepted_at=timezone.now(),
+        profile_username_pending=data["defer_profile"],
     )
     user.set_unusable_password()
     user.save()
     return user
 
 
-def _create_incomplete_social_user(identity):
+def _new_social_username():
     while True:
         username = f"yalla_{uuid4().hex[:16]}"
-        if not User.objects.filter(username__iexact=username).exists():
-            break
+        if not User.objects.filter(username__iexact=username).exists() and not (
+            PendingRegistration.objects.filter(username__iexact=username).exists()
+        ):
+            return username
 
+
+def _create_incomplete_social_user(identity):
     user = User(
-        username=username,
+        username=_new_social_username(),
         email=identity.email,
         phone=None,
         city="",

@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from firebase_admin import auth
 
 from config.firebase_admin import FirebaseConfigurationError, get_firebase_app
@@ -54,8 +56,17 @@ def verify_social_id_token(id_token):
     provider_id = str(firebase_claims.get("sign_in_provider") or "").strip()
     provider = SUPPORTED_PROVIDER_IDS.get(provider_id)
     email = normalize_email(str(claims.get("email") or ""))
-    if not firebase_uid or provider is None or not email:
+    if not firebase_uid or provider is None:
+        raise SocialTokenError("The social sign-in token is invalid.")
+    if not email and provider != "facebook":
         raise SocialTokenError("The social account must provide a valid email address.")
+    if email:
+        try:
+            validate_email(email)
+        except ValidationError:
+            raise SocialTokenError(
+                "The social account must provide a valid email address."
+            ) from None
 
     first_name, last_name = _names_from_claims(claims)
     picture = str(claims.get("picture") or "").strip() or None
@@ -63,7 +74,7 @@ def verify_social_id_token(id_token):
         firebase_uid=firebase_uid,
         provider=provider,
         email=email,
-        email_verified=bool(claims.get("email_verified")),
+        email_verified=bool(email) and claims.get("email_verified") is True,
         first_name=first_name,
         last_name=last_name,
         avatar_url=picture,
