@@ -25,7 +25,11 @@ MEDIA_SPECS = {
     "storeCover": _spec("store-cover", 1600, 900, "contain"),
     "classification": _spec("classification", 1200, 1200, "contain"),
     "marketType": _spec("market-type", 1000, 1000, "contain"),
-    "offerBanner": _spec("offer-banner", 1600, 600, "cover"),
+    "offerBanner": {
+        **_spec("offer-banner", 1600, 700, "cover"),
+        "safeWidth": 1200,
+        "safeHeight": 525,
+    },
     "campaignTeaser": _spec("campaign-teaser", 800, 800, "cover"),
     "campaignMedia": _spec("campaign-media", 1600, 900, "cover"),
     "avatar": _spec("avatar", 800, 800, "cover"),

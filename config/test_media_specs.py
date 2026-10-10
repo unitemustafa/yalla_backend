@@ -46,6 +46,16 @@ class MediaSpecsValidationTests(SimpleTestCase):
     def test_empty_optional_image_is_accepted(self):
         self.assertIsNone(validate_media_image(None, "product"))
 
+    def test_offer_banner_contract_matches_the_taller_app_viewport(self):
+        spec = media_contract()["images"]["offerBanner"]
+        self.assertEqual((spec["width"], spec["height"]), (1600, 700))
+        self.assertEqual((spec["safeWidth"], spec["safeHeight"]), (1200, 525))
+        self.assertEqual(spec["fit"], "cover")
+        for size in [(1600, 700), (1600, 600)]:
+            with self.subTest(size=size):
+                upload = image_upload(size=size)
+                self.assertIs(validate_media_image(upload, "offerBanner"), upload)
+
     def test_store_cover_contract_preserves_the_complete_image_and_other_ratios(self):
         spec = media_contract()["images"]["storeCover"]
         self.assertEqual(spec["fit"], "contain")
