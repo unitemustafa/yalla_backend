@@ -17,6 +17,7 @@ from .views import (
     MarketLikeListView,
     MarketLikeToggleView,
     MarketStorefrontDetailView,
+    MarketStorefrontProductsView,
     MarketUnlikeView,
     NormalMarketClassificationSummaryView,
     PopularMarketClassificationSummaryView,
@@ -80,6 +81,11 @@ urlpatterns = [
         "markets/<int:market_id>/storefront/",
         MarketStorefrontDetailView.as_view(),
         name="market-storefront-detail",
+    ),
+    path(
+        "markets/<int:market_id>/storefront/products/",
+        MarketStorefrontProductsView.as_view(),
+        name="market-storefront-products",
     ),
     path(
         "markets/<int:market_id>/",

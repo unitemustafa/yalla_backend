@@ -694,6 +694,23 @@ class MarketClassificationProductSerializer(serializers.ModelSerializer):
         )
 
 
+class StorefrontProductSerializer(MarketClassificationProductSerializer):
+    market = serializers.SerializerMethodField()
+
+    class Meta(MarketClassificationProductSerializer.Meta):
+        fields = MarketClassificationProductSerializer.Meta.fields + ("market",)
+
+    def get_market(self, product) -> dict:
+        return self.context["storefront_market"]
+
+
+class StorefrontProductsPageSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    next = serializers.URLField(allow_null=True)
+    previous = serializers.URLField(allow_null=True)
+    results = StorefrontProductSerializer(many=True)
+
+
 class MarketClassificationWithProductsSerializer(MarketClassificationCountSerializer):
     products = serializers.SerializerMethodField()
 

@@ -3,12 +3,13 @@ from datetime import datetime, time, timedelta
 from django.db.models import ProtectedError
 from django.db.models import Count, Exists, Max, Min, OuterRef, Prefetch, Q
 from django.utils import timezone
-from rest_framework import status
+from rest_framework import status, serializers
 from rest_framework.generics import get_object_or_404
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from drf_spectacular.utils import extend_schema
 
 from accounts.models import User
 from accounts.permissions import IsMarketAdminRole, IsMarketClientRole
@@ -52,6 +53,8 @@ from .serializers import (
     MarketWithStoreProductsSerializer,
     ProductDetailSerializer,
     StoreMarketClassificationSerializer,
+    StorefrontProductSerializer,
+    StorefrontProductsPageSerializer,
 )
 
 
@@ -498,42 +501,103 @@ class MarketClassificationMarketsView(APIView):
         )
 
 
+def storefront_market(request, market_id):
+    return get_object_or_404(
+        visible_market_queryset(request.user)
+        .filter(status=Market.Status.ACTIVE, archived_at__isnull=True)
+        .with_client_metrics(request.user)
+        .select_related("classification")
+        .prefetch_related(
+            "service_cities", "delivery_areas",
+            "subcategory_assignments__subcategory", "market_types",
+        ),
+        id=market_id,
+    )
+
+
+def storefront_products(market):
+    return (
+        Product.objects.filter(
+            market=market, archived_at__isnull=True,
+            is_available=True, variants__isnull=False,
+        )
+        .select_related("subcategory")
+        .prefetch_related(
+            "subcategories", "images",
+            Prefetch("variants", queryset=ProductVariant.objects.order_by("price", "id")),
+        )
+        .distinct()
+    )
+
+
+class StorefrontProductsPagination(PageNumberPagination):
+    page_size = 30
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class StorefrontProductsQuerySerializer(serializers.Serializer):
+    page = serializers.IntegerField(min_value=1, default=1)
+    page_size = serializers.IntegerField(min_value=1, max_value=100, default=30)
+    subcategory_id = serializers.IntegerField(min_value=1, required=False)
+    q = serializers.CharField(allow_blank=True, default="")
+    sort = serializers.ChoiceField(
+        choices=("name", "price_asc", "price_desc", "newest"), required=False,
+    )
+
+
+class MarketStorefrontProductsView(APIView):
+    permission_classes = [IsAuthenticated, IsClientRole]
+
+    @extend_schema(parameters=[StorefrontProductsQuerySerializer],
+                   responses=StorefrontProductsPageSerializer)
+    def get(self, request, market_id):
+        params = StorefrontProductsQuerySerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+        query = params.validated_data
+        market = storefront_market(request, market_id)
+        products = storefront_products(market)
+        category_id = query.get("subcategory_id")
+        if category_id:
+            products = products.filter(
+                Q(subcategory_id=category_id) | Q(subcategories__id=category_id)
+            )
+        search = query["q"].strip()
+        if search and search.lower() not in market.name.lower():
+            products = products.filter(
+                Q(name__icontains=search) | Q(description__icontains=search)
+            )
+        ordering = query.get("sort", "newest" if search else "name")
+        if ordering in ("price_asc", "price_desc"):
+            products = products.annotate(storefront_price=Min("variants__price"))
+            products = products.order_by(
+                "-storefront_price" if ordering == "price_desc" else "storefront_price", "id"
+            )
+        elif ordering == "newest":
+            products = products.order_by("-created_at", "-id")
+        else:
+            products = products.order_by("name", "id")
+        paginator = StorefrontProductsPagination()
+        page = paginator.paginate_queryset(products, request, view=self)
+        data = StorefrontProductSerializer(page, many=True, context={
+            "request": request,
+            "storefront_market": {
+                "id": market.id, "name": market.name,
+                "classification_id": market.classification_id,
+            },
+        }).data
+        return paginator.get_paginated_response(data)
+
+
 class MarketStorefrontDetailView(APIView):
     permission_classes = [IsAuthenticated, IsClientRole]
 
     def get(self, request, market_id):
-        market = get_object_or_404(
-            visible_market_queryset(request.user)
-            .filter(status=Market.Status.ACTIVE, archived_at__isnull=True)
-            .with_client_metrics(request.user)
-            .select_related("classification")
-            .prefetch_related(
-                "service_cities",
-                "delivery_areas",
-                "subcategory_assignments__subcategory",
-                "market_types",
-            ),
-            id=market_id,
+        options = serializers.BooleanField().run_validation(
+            request.query_params.get("include_products", True)
         )
-        products = list(
-            Product.objects.filter(
-                market=market,
-                archived_at__isnull=True,
-                is_available=True,
-                variants__isnull=False,
-            )
-            .select_related("market__classification", "subcategory")
-            .prefetch_related(
-                "subcategories",
-                "images",
-                Prefetch(
-                    "variants",
-                    queryset=ProductVariant.objects.order_by("price", "id"),
-                ),
-            )
-            .distinct()
-            .order_by("-created_at", "-id")
-        )
+        market = storefront_market(request, market_id)
+        products = list(storefront_products(market).order_by("-created_at", "-id")) if options else []
         return Response(
             MarketWithCommonProductsSerializer(
                 market,
