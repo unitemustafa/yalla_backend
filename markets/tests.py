@@ -2123,6 +2123,30 @@ class HomeAPITests(APITestCase):
             )
         )
 
+        # Follow the actual next links: every matching local product must occur
+        # once, including the final partial page, with no remote products.
+        expected_ids = {
+            product.id
+            for product in Product.objects.filter(
+                market__in=[self.local_market, self.second_local_market],
+                name__icontains="Product",
+            )
+        }
+        seen_ids = []
+        page_count = 0
+        while True:
+            page_count += 1
+            self.assertLessEqual(page_count, 6, "Search pagination did not terminate")
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(response.data["count"], 21)
+            seen_ids.extend(product["id"] for product in response.data["results"])
+            if response.data["next"] is None:
+                break
+            response = self.client.get(response.data["next"])
+        self.assertEqual(len(seen_ids), len(set(seen_ids)))
+        self.assertSetEqual(set(seen_ids), expected_ids)
+        self.assertEqual(page_count, 6)
+
     def test_address_products_requires_client_role(self):
         self.authenticate(self.admin)
 

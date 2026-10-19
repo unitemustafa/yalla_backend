@@ -25,4 +25,6 @@ private-media/
 staticfiles/
 additions/
 docs/API_REPORT.md
+tools/performance/artifacts/
+tools/performance/.env.local
 docs/Yalla System APIs.postman_collection.json
