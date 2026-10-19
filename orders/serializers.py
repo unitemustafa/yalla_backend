@@ -1,4 +1,5 @@
 from decimal import Decimal, ROUND_HALF_UP
+from functools import cached_property
 
 from django.contrib.auth import get_user_model
 from django.db.models import Q
@@ -1193,7 +1194,9 @@ def user_summary(user, request=None):
     }
 
 
-def order_delivery_address_data(address):
+def order_delivery_address_data(
+    address, *, service_city_serializer=None, delivery_area_serializer=None
+):
     if address is None:
         return None
     return {
@@ -1218,12 +1221,20 @@ def order_delivery_address_data(address):
         "manual_city": address.manual_city,
         "manual_area": address.manual_area,
         "service_city": (
-            ServiceCitySummarySerializer(address.service_city).data
+            (
+                service_city_serializer.to_representation(address.service_city)
+                if service_city_serializer is not None
+                else ServiceCitySummarySerializer(address.service_city).data
+            )
             if address.service_city_id
             else None
         ),
         "delivery_area": (
-            DeliveryAreaSummarySerializer(address.delivery_area).data
+            (
+                delivery_area_serializer.to_representation(address.delivery_area)
+                if delivery_area_serializer is not None
+                else DeliveryAreaSummarySerializer(address.delivery_area).data
+            )
             if address.delivery_area_id
             else None
         ),
@@ -1520,8 +1531,20 @@ class OrderSerializer(
 
     def get_delivery_address(self, instance) -> dict | None:
         return instance.delivery_address_snapshot or order_delivery_address_data(
-            instance.delivery_address
+            instance.delivery_address,
+            service_city_serializer=self._address_city_serializer,
+            delivery_area_serializer=self._address_area_serializer,
         )
+
+    # ListSerializer reuses this serializer across orders. Reuse address field
+    # definitions too, without caching .data or any customer's address values.
+    @cached_property
+    def _address_city_serializer(self):
+        return ServiceCitySummarySerializer()
+
+    @cached_property
+    def _address_area_serializer(self):
+        return DeliveryAreaSummarySerializer()
 
     def get_delivery_price_status(self, instance) -> str:
         if (

@@ -1781,6 +1781,90 @@ class OrderAPITests(APITestCase):
         self.assertIn("payment_method", response.data[0])
         self.assertIn("shipping_company", response.data[0])
 
+    def test_order_list_reuses_address_fields_without_reusing_order_data(self):
+        from .selectors import order_detail_queryset
+        from .serializers import ServiceCitySummarySerializer, OrderSerializer
+
+        first_id = self.create_order().data["id"]
+        second_id = self.create_order().data["id"]
+        Order.objects.filter(pk__in=[first_id, second_id]).update(
+            delivery_address_snapshot={}
+        )
+        other_city = ServiceCity.objects.create(
+            name="Oran", center_latitude=Decimal("35.7000000"),
+            center_longitude=Decimal("-0.6000000"), radius_km=Decimal("20.00"),
+            delivery_price=Decimal("80.00"),
+        )
+        other_area = DeliveryArea.objects.create(
+            service_city=other_city, name="Oran center",
+            center_latitude=Decimal("35.7000000"),
+            center_longitude=Decimal("-0.6000000"), radius_km=Decimal("5.00"),
+            delivery_price=Decimal("80.00"),
+        )
+        other_address = Address.objects.create(
+            user=self.customer, name="Office", service_city=other_city,
+            delivery_area=other_area,
+            latitude=Decimal("35.7000000"), longitude=Decimal("-0.6000000"),
+            delivery_type=Address.DeliveryType.FIXED_AREA,
+        )
+        Order.objects.filter(pk=second_id).update(
+            description="Distinct second order", delivery_address=other_address,
+            service_city=other_city,
+        )
+        orders = list(order_detail_queryset().filter(pk__in=[first_id, second_id]))
+        expected = [OrderSerializer(order).data for order in orders]
+        field_builds = []
+        original = ServiceCitySummarySerializer.get_fields
+
+        def counted_fields(serializer):
+            field_builds.append(1)
+            return original(serializer)
+
+        with patch.object(ServiceCitySummarySerializer, "get_fields", counted_fields):
+            actual = OrderSerializer(orders, many=True).data
+
+        self.assertEqual(actual, expected)
+        self.assertEqual([row["id"] for row in actual], [second_id, first_id])
+        self.assertEqual(actual[0]["description"], "Distinct second order")
+        self.assertEqual(actual[0]["delivery_address"]["service_city"]["name"], "Oran")
+        self.assertEqual(actual[1]["delivery_address"]["service_city"]["name"], "Algiers")
+        self.assertEqual(actual[0]["delivery_address"]["delivery_area"]["id"], other_area.id)
+        self.assertEqual(actual[1]["delivery_address"]["delivery_area"]["id"], self.delivery_area.id)
+        # One top-level city field set, one for the fallback address, regardless
+        # of the number of orders. The values themselves must stay independent.
+        self.assertEqual(len(field_builds), 2)
+        for row in actual:
+            self.assertEqual(
+                row["grouped_items"],
+                [{"market": section["market"], "items": section["items"]}
+                 for section in row["market_sections"]],
+            )
+            self.assertEqual(
+                row["grouped_offers"],
+                [{"market": section["market"], "offers": section["offers"]}
+                 for section in row["market_sections"]],
+            )
+
+    def test_order_address_snapshot_survives_live_address_changes(self):
+        from .selectors import order_detail_queryset
+        from .serializers import OrderSerializer
+
+        order_id = self.create_order().data["id"]
+        snapshot = {
+            "name": "Saved address",
+            "service_city": {"id": self.service_city.id, "name": "Saved city"},
+            "delivery_area": {"id": self.delivery_area.id, "name": "Saved area"},
+        }
+        Order.objects.filter(pk=order_id).update(delivery_address_snapshot=snapshot)
+        Address.objects.filter(pk=self.address.id).update(name="Changed live address")
+        ServiceCity.objects.filter(pk=self.service_city.id).update(name="Changed city")
+        DeliveryArea.objects.filter(pk=self.delivery_area.id).update(name="Changed area")
+        order = order_detail_queryset().get(pk=order_id)
+        with patch("orders.serializers.order_delivery_address_data", side_effect=AssertionError):
+            data = OrderSerializer(order).data
+        self.assertEqual(data["delivery_address"], snapshot)
+        self.assertEqual(data["service_city"]["name"], "Changed city")
+
     def test_client_order_list_supports_status_filter(self):
         confirmed_order_id = self.create_order().data["id"]
         Order.objects.filter(id=confirmed_order_id).update(
