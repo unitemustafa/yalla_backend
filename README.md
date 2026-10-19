@@ -168,7 +168,6 @@ requested page size of 100.
 | `dashboard/` | Administrative summaries, reporting, and demo data |
 | `partners/` | Partnership application workflow |
 | `config/` | Settings, routing, rate limits, request limits, schema, health, and observability |
-| `docs/` | Maintained API and operational references |
 
 Business mutations belong in app-level services or focused write modules.
 Reusable read queries belong in selectors, while serializers and views own the
@@ -182,8 +181,8 @@ plus a single beat scheduler. Redis is the private broker; PostgreSQL retains
 notification delivery state. Enqueueing occurs after the business transaction
 commits, and delivery tasks use bounded retries and deduplication. Keep the
 workers healthy as well as the web process: a successful HTTP response alone
-does not prove OTP or push delivery. See `compose.yaml` and
-`docs/RELEASE_OPERATIONS.md` for verification and backup procedures.
+does not prove OTP or push delivery. Service definitions are in `compose.yaml`;
+backup and verification scripts are in `deploy/`.
 
 ## Environment configuration
 
@@ -214,9 +213,7 @@ request-size, Gunicorn, and rate-policy variables have safe defaults in
 | `GUNICORN_MAX_REQUESTS` / `GUNICORN_MAX_REQUESTS_JITTER` | Worker recycling limits |
 
 Production must use exact HTTPS origins, must not enable debug mode, and must
-never enable `AUTH_OTP_INCLUDE_IN_RESPONSE`. See
-[`docs/RATE_LIMITING.md`](docs/RATE_LIMITING.md) for the rate-limiter rollout
-and rollback procedure.
+never enable `AUTH_OTP_INCLUDE_IN_RESPONSE`.
 
 ## Testing and verification
 
@@ -251,8 +248,8 @@ The provided `Dockerfile` starts only the web process and intentionally does
 not run migrations.
 
 For the production Docker stack, copy `.env.production.example` to
-`.env.production`, replace every placeholder, install the TLS files described
-in `docs/HOSTINGER_KVM_DEPLOYMENT.md`, and run:
+`.env.production`, replace every placeholder, install the TLS files for the
+reverse proxy, and run:
 
 ```bash
 ./deploy/production-up.sh
@@ -312,7 +309,4 @@ application image for rollback.
 
 ## Additional documentation
 
-- [`docs/API_REPORT.md`](docs/API_REPORT.md) — detailed endpoint and integration reference
-- [`docs/RATE_LIMITING.md`](docs/RATE_LIMITING.md) — optional application rate-limiter internals
-- [`docs/Yalla System APIs.postman_collection.json`](docs/Yalla%20System%20APIs.postman_collection.json) — Postman collection
 - [`openapi.yml`](openapi.yml) — generated OpenAPI contract

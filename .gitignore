@@ -28,7 +28,6 @@ private-media/
 additions/
 
 # Local tool state
-.serena/
 .pg_data/
 /tools/performance/artifacts/
 /tools/performance/.env.local
