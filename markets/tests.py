@@ -766,7 +766,7 @@ class HomeAPITests(APITestCase):
             farther_city.id,
         )
 
-    def test_market_region_detect_nearest_center_wins_over_broad_neighbour_radius(self):
+    def test_market_region_detect_excludes_nearer_city_outside_its_coverage(self):
         broad_city = ServiceCity.objects.create(
             name="Broad GPS City",
             center_latitude=Decimal("10.0000000"),
@@ -794,11 +794,11 @@ class HomeAPITests(APITestCase):
         self.assertEqual(response.data["action"], "suggest_switch")
         self.assertEqual(
             response.data["detected_region"]["service_city"]["id"],
-            nearer_city.id,
+            broad_city.id,
         )
         self.assertNotEqual(
             response.data["detected_region"]["service_city"]["id"],
-            broad_city.id,
+            nearer_city.id,
         )
 
     def test_home_requires_saved_market_region(self):

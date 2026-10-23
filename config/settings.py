@@ -82,6 +82,11 @@ ALLOWED_HOSTS = _environment_list(
     "ALLOWED_HOSTS",
     "localhost,127.0.0.1" if not IS_PRODUCTION else "",
 )
+# Keep these empty before publication; share pages still support installed test builds.
+ANDROID_APP_STORE_URL = os.environ.get("ANDROID_APP_STORE_URL", "").strip()
+IOS_APP_STORE_URL = os.environ.get("IOS_APP_STORE_URL", "").strip()
+ANDROID_APP_LINK_FINGERPRINTS = _environment_list("ANDROID_APP_LINK_FINGERPRINTS")
+IOS_APP_LINK_APP_IDS = _environment_list("IOS_APP_LINK_APP_IDS")
 CSRF_TRUSTED_ORIGINS = _environment_list("CSRF_TRUSTED_ORIGINS")
 CORS_ALLOWED_ORIGINS = _environment_list("CORS_ALLOWED_ORIGINS")
 CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")

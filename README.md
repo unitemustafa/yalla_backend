@@ -201,6 +201,9 @@ request-size, Gunicorn, and rate-policy variables have safe defaults in
 | `API_CACHE_ENABLED` | Keep `False` in the multi-worker production stack |
 | `PUBLIC_MEDIA_ROOT` / `PRIVATE_MEDIA_ROOT` | Persistent public and protected media directories |
 | `MEDIA_URL` | Public media base URL under the API domain |
+| `ANDROID_APP_STORE_URL` / `IOS_APP_STORE_URL` | Optional real HTTPS store listings; leave blank before publication |
+| `ANDROID_APP_LINK_FINGERPRINTS` | Comma-separated SHA-256 fingerprints of installed Android builds; use the Play App Signing certificate for Play installs |
+| `IOS_APP_LINK_APP_IDS` | Comma-separated Apple application identifiers, e.g. `APP_ID_PREFIX.com.yallamarket.app` |
 | `FIREBASE_SERVICE_ACCOUNT_BASE64` | Preferred Base64-encoded Firebase service-account JSON |
 | `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS` | SMTP relay connection used for OTP email |
 | `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | SMTP login and secret used for OTP email |

@@ -3,7 +3,13 @@ from django.conf.urls.static import static
 from django.urls import path, include
 from .schema_views import AdminDocsView, AdminSchemaView
 
-from .share_views import market_share, offer_share, product_share
+from .share_views import (
+    android_asset_links,
+    apple_app_site_association,
+    market_share,
+    offer_share,
+    product_share,
+)
 from .health import liveness, readiness
 from accounts.legal_views import (
     AccountDeletionView,
@@ -12,6 +18,14 @@ from accounts.legal_views import (
 )
 
 urlpatterns = [
+    path(
+        ".well-known/assetlinks.json", android_asset_links, name="android-asset-links"
+    ),
+    path(
+        ".well-known/apple-app-site-association",
+        apple_app_site_association,
+        name="apple-app-site-association",
+    ),
     path("privacy/", PrivacyPolicyView.as_view(), name="privacy-policy"),
     path("terms/", TermsOfUseView.as_view(), name="terms-of-use"),
     path(

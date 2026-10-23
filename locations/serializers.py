@@ -737,6 +737,14 @@ class AddressWriteSerializer(serializers.Serializer):
         region_service_city = getattr(user, "market_region_service_city", None)
         is_general_region = region_mode == User.MarketRegionMode.GENERAL
         is_service_city_region = region_mode == User.MarketRegionMode.SERVICE_CITY
+        if (
+            self.instance is not None
+            and self.instance.service_city_id == getattr(service_city, "id", None)
+        ):
+            # Address-book edits retain their own region after browsing changes.
+            # Creating or moving an address still requires the selected region.
+            is_general_region = service_city is None
+            is_service_city_region = False
 
         if service_city is None and not is_general_region:
             service_city = self._matching_service_city(attrs, name)

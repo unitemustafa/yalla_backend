@@ -18,6 +18,7 @@ from markets.region import (
 from offers.models import Offer
 
 from .media import protected_order_media_url
+from .address_snapshot import address_snapshot
 from .models import Order, OrderEvent, OrderItem, OrderMarketSection, OrderOffer
 from .pricing import calculate_multi_market_fee, ordered_market_ids
 from .services import allowed_statuses_for_order
@@ -1644,6 +1645,13 @@ class OrderSerializer(
     def update(self, instance, validated_data):
         items = validated_data.pop("items", None)
         offers = validated_data.pop("order_offers", None)
+        if (
+            "delivery_address" in validated_data
+            and validated_data["delivery_address"] != instance.delivery_address
+        ):
+            validated_data["delivery_address_snapshot"] = address_snapshot(
+                validated_data["delivery_address"]
+            )
         instance = super().update(instance, validated_data)
         if items is not None or offers is not None:
             market_order = [

@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from accounts.models import User
 from catalog.models import Product
 from locations.models import ServiceCity
+from locations.coverage import contains_point, coverage_is_configured
 from offers.models import Offer
 
 from .models import Market
@@ -32,6 +33,8 @@ def service_city_payload(service_city):
         "center_latitude": service_city.center_latitude,
         "center_longitude": service_city.center_longitude,
         "radius_km": service_city.radius_km,
+        "boundary_geojson": service_city.boundary_geojson,
+        "boundary_bbox": service_city.boundary_bbox,
         "delivery_price": service_city.delivery_price,
         "is_active": service_city.is_active,
     }
@@ -105,33 +108,25 @@ def current_market_region_selection(user):
 
 def detect_service_city(latitude, longitude):
     city_distances = []
-    has_coverage = False
-    cities = ServiceCity.objects.filter(
-        is_active=True,
-        center_latitude__isnull=False,
-        center_longitude__isnull=False,
-        radius_km__isnull=False,
-        radius_km__gt=0,
-    ).order_by("id")
+    cities = ServiceCity.objects.filter(is_active=True).order_by("id")
 
     for city in cities:
-        distance_km = haversine_distance_km(
-            latitude,
-            longitude,
-            city.center_latitude,
-            city.center_longitude,
+        if not coverage_is_configured(city) or not contains_point(
+            city, latitude=latitude, longitude=longitude
+        ):
+            continue
+        distance_km = (
+            haversine_distance_km(
+                latitude, longitude, city.center_latitude, city.center_longitude
+            )
+            if city.center_latitude is not None and city.center_longitude is not None
+            else float("inf")
         )
         city_distances.append((distance_km, city.id, city))
-        if distance_km <= float(city.radius_km):
-            has_coverage = True
 
-    if not has_coverage:
+    if not city_distances:
         return None
-    # Circular coverage areas can overlap, especially when a provider returns
-    # a broad administrative radius for one city. Treat their union as the
-    # supported service area, then assign the point to its nearest city center.
-    # This gives adjacent cities a stable Voronoi-style boundary instead of
-    # allowing one large circle to swallow its neighbours.
+    # Only choose among cities whose configured coverage accepts the address.
     return min(city_distances, key=lambda item: (item[0], item[1]))[2]
 
 

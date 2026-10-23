@@ -1713,6 +1713,64 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v1/home/markets/{market_id}/storefront/products/:
+    get:
+      operationId: v1_home_markets_storefront_products_retrieve_by_market_id
+      parameters:
+      - in: path
+        name: market_id
+        schema:
+          type: integer
+        required: true
+      - in: query
+        name: page
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 30
+      - in: query
+        name: q
+        schema:
+          type: string
+          default: ''
+      - in: query
+        name: sort
+        schema:
+          enum:
+          - name
+          - price_asc
+          - price_desc
+          - newest
+          type: string
+          minLength: 1
+        description: |-
+          * `name` - name
+          * `price_asc` - price_asc
+          * `price_desc` - price_desc
+          * `newest` - newest
+      - in: query
+        name: subcategory_id
+        schema:
+          type: integer
+          minimum: 1
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorefrontProductsPage'
+          description: ''
   /api/v1/home/markets/{market_id}/unlike/:
     delete:
       operationId: v1_home_markets_unlike_destroy_by_market_id
@@ -4700,6 +4758,64 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v2/home/markets/{market_id}/storefront/products/:
+    get:
+      operationId: v2_home_markets_storefront_products_retrieve_by_market_id
+      parameters:
+      - in: path
+        name: market_id
+        schema:
+          type: integer
+        required: true
+      - in: query
+        name: page
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 30
+      - in: query
+        name: q
+        schema:
+          type: string
+          default: ''
+      - in: query
+        name: sort
+        schema:
+          enum:
+          - name
+          - price_asc
+          - price_desc
+          - newest
+          type: string
+          minLength: 1
+        description: |-
+          * `name` - name
+          * `price_asc` - price_asc
+          * `price_desc` - price_desc
+          * `newest` - newest
+      - in: query
+        name: subcategory_id
+        schema:
+          type: integer
+          minimum: 1
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorefrontProductsPage'
+          description: ''
   /api/v2/home/markets/{market_id}/unlike/:
     delete:
       operationId: v2_home_markets_unlike_destroy_by_market_id
@@ -6712,6 +6828,19 @@ components:
       description: |-
         * `direct` - Direct delivery
         * `external_shipping` - External shipping
+    HomeVariant:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+      required:
+      - id
+      - price
     Login:
       type: object
       properties:
@@ -7758,6 +7887,15 @@ components:
           type: string
           minLength: 1
           maxLength: 150
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 254
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
         logo:
           type: string
           format: binary
@@ -7771,6 +7909,57 @@ components:
             type: integer
         is_active:
           type: boolean
+    ProductImage:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        url:
+          type: string
+          readOnly: true
+        image:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+        is_primary:
+          type: boolean
+        sort_order:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+      required:
+      - id
+      - image
+      - url
+    ProductSubcategory:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name_ar:
+          type: string
+          maxLength: 100
+        name_en:
+          type: string
+          maxLength: 100
+        description_ar:
+          type: string
+        description_en:
+          type: string
+        image:
+          type: string
+          format: uri
+          nullable: true
+        is_active:
+          type: boolean
+      required:
+      - id
+      - name_ar
+      - name_en
     RepresentativeLogin:
       type: object
       description: Courier-app session choice; omitted values are temporary by default.
@@ -7945,6 +8134,13 @@ components:
         name:
           type: string
           maxLength: 150
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        courier_account_id:
+          type: integer
+          readOnly: true
         logo_url:
           type: string
           nullable: true
@@ -7978,13 +8174,13 @@ components:
           readOnly: true
       required:
       - archived_at
+      - courier_account_id
       - created_at
       - deletion_mode
       - id
       - logo_url
       - name
       - service_cities
-      - service_city_ids
       - updated_at
     ShippingCompanyRequest:
       type: object
@@ -7993,6 +8189,15 @@ components:
           type: string
           minLength: 1
           maxLength: 150
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 254
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
         logo:
           type: string
           format: binary
@@ -8008,7 +8213,6 @@ components:
           type: boolean
       required:
       - name
-      - service_city_ids
     ShippingCompanyServiceCitySummary:
       type: object
       properties:
@@ -8088,6 +8292,92 @@ components:
         * `processing` - processing
         * `ready` - ready
         * `failed` - failed
+    StorefrontProduct:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        image:
+          type: string
+          format: uri
+          nullable: true
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductImage'
+          readOnly: true
+        discount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        theme:
+          $ref: '#/components/schemas/ThemeEnum'
+        is_popular:
+          type: boolean
+        subcategory:
+          allOf:
+          - $ref: '#/components/schemas/ProductSubcategory'
+          readOnly: true
+        subcategories:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductSubcategory'
+          readOnly: true
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/HomeVariant'
+          readOnly: true
+        market:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+      required:
+      - id
+      - images
+      - market
+      - name
+      - subcategories
+      - subcategory
+      - variants
+    StorefrontProductsPage:
+      type: object
+      properties:
+        count:
+          type: integer
+        next:
+          type: string
+          format: uri
+          nullable: true
+        previous:
+          type: string
+          format: uri
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/StorefrontProduct'
+      required:
+      - count
+      - next
+      - previous
+      - results
+    ThemeEnum:
+      enum:
+      - clothing
+      - consumer
+      - other
+      type: string
+      description: |-
+        * `clothing` - Clothing
+        * `consumer` - Consumer
+        * `other` - Other
     TypeEnum:
       enum:
       - package

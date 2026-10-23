@@ -31,7 +31,9 @@ class OrderWriteValidationBranchTests(SimpleTestCase):
         )
 
     def test_assignment_requires_approval_matching_courier_and_profile(self):
-        representative = SimpleNamespace(courier_profile=SimpleNamespace(service_city_id=4))
+        representative = SimpleNamespace(
+            courier_profile=SimpleNamespace(service_city_id=4, is_shipping_company=False)
+        )
         attrs = {"assigned_representative": representative}
         with self.assertRaisesMessage(serializers.ValidationError, "approved"):
             self.probe._validate_assignment(attrs, representative, Order.Scope.SERVICE_CITY, self.city)
@@ -44,7 +46,7 @@ class OrderWriteValidationBranchTests(SimpleTestCase):
 
         with self.assertRaises(serializers.ValidationError):
             self.probe._validate_assignment(
-                attrs, SimpleNamespace(courier_profile=SimpleNamespace(service_city_id=9)),
+                attrs, SimpleNamespace(courier_profile=SimpleNamespace(service_city_id=9, is_shipping_company=False)),
                 Order.Scope.SERVICE_CITY, self.city,
             )
 
