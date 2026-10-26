@@ -96,11 +96,14 @@ class NotificationListView(APIView):
             .select_related("offer__market")
             .order_by("-created_at", "-id")
         )
-        return paginated_list_response(
+        response = paginated_list_response(
             request,
             notifications,
             NotificationSerializer,
         )
+        if isinstance(response.data, dict):
+            response.data["unread_count"] = visible_notifications(request.user).filter(is_read=False).count()
+        return response
 
 
 class NotificationReadView(APIView):

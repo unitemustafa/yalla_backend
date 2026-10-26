@@ -9,7 +9,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.http import FileResponse, HttpResponse, HttpResponseRedirect
 from django.utils import timezone
-from rest_framework import generics, status
+from rest_framework import generics, status, serializers
 from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -219,10 +219,26 @@ class ClientOrderListView(generics.ListAPIView):
 
     def get_queryset(self):
         queryset = order_detail_queryset().filter(user=self.request.user)
+        order_id = self.request.query_params.get("order_id")
+        if order_id is not None:
+            queryset = queryset.filter(pk=serializers.IntegerField(min_value=1).run_validation(order_id))
         order_status = self.request.query_params.get("status")
         if order_status:
             queryset = queryset.filter(status=order_status)
+        for param, lookup in (("from_date", "created_at__date__gte"), ("to_date", "created_at__date__lte")):
+            value = self.request.query_params.get(param)
+            if value:
+                queryset = queryset.filter(**{lookup: serializers.DateField().run_validation(value)})
         return queryset
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is None:
+            return Response(self.get_serializer(queryset, many=True).data)
+        response = self.get_paginated_response(self.get_serializer(page, many=True).data)
+        response.data["delivered_count"] = queryset.filter(status=Order.Status.DELIVERED).count()
+        return response
 
 
 class OrderPreviewView(APIView):

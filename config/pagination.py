@@ -27,6 +27,7 @@ def paginated_list_response(
     serializer_class,
     *,
     context=None,
+    include_membership=False,
 ):
     serializer_context = context or {"request": request}
     if not request.path.startswith("/api/v2/"):
@@ -48,4 +49,7 @@ def paginated_list_response(
         many=True,
         context=serializer_context,
     ).data
-    return paginator.get_paginated_response(data)
+    response = paginator.get_paginated_response(data)
+    if include_membership and request.query_params.get("include_ids") == "true":
+        response.data["liked_ids"] = list(queryset.values_list("id", flat=True))
+    return response

@@ -760,6 +760,7 @@ class ProductLikeListView(APIView):
             request,
             products,
             LikedProductSerializer,
+            include_membership=True,
         )
 
 

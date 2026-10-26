@@ -1,7 +1,8 @@
 from datetime import datetime, time, timedelta
 
 from django.db.models import ProtectedError
-from django.db.models import Count, Exists, Max, Min, OuterRef, Prefetch, Q
+from django.db.models import Count, Exists, Max, Min, OuterRef, Prefetch, Q, F, Window
+from django.db.models.functions import RowNumber
 from django.utils import timezone
 from rest_framework import status, serializers
 from rest_framework.generics import get_object_or_404
@@ -64,6 +65,8 @@ IsClientRole = IsMarketClientRole
 
 class ProductSearchPagination(PageNumberPagination):
     page_size = 4
+    page_size_query_param = "page_size"
+    max_page_size = 50
 
 
 class AddressProductPagination(PageNumberPagination):
@@ -241,6 +244,9 @@ class MarketClassificationSummaryView(APIView):
     classification_type = None
 
     def get(self, request):
+        include_products = serializers.BooleanField().run_validation(
+            request.query_params.get("include_products", True)
+        )
         current_selection = current_market_region_selection(request.user)
         if current_selection is None:
             return no_market_region_selection_response()
@@ -311,24 +317,17 @@ class MarketClassificationSummaryView(APIView):
             .distinct()
             .order_by("name")
         )
-        markets_by_classification = {
-            classification.id: list(
-                Market.objects.filter(
-                    id__in=market_ids,
-                    classification=classification,
-                    status=Market.Status.ACTIVE,
-                )
-                .with_client_metrics(request.user)
-                .prefetch_related(
-                    "service_cities",
-                    "delivery_areas",
-                    "subcategory_assignments__subcategory",
-                    "market_types",
-                )
-                .order_by("-is_popular", "-product_count", "name", "id")[:5]
-            )
-            for classification in all_classifications
-        }
+        markets_by_classification = {c.id: [] for c in all_classifications}
+        previews = (Market.objects.filter(id__in=market_ids,
+                classification_id__in=markets_by_classification, status=Market.Status.ACTIVE)
+            .with_client_metrics(request.user)
+            .annotate(_preview_rank=Window(expression=RowNumber(), partition_by=[F("classification_id")],
+                order_by=[F("is_popular").desc(), F("product_count").desc(), F("name").asc(), F("id").asc()]))
+            .filter(_preview_rank__lte=5)
+            .prefetch_related("service_cities", "delivery_areas", "subcategory_assignments__subcategory", "market_types")
+            .order_by("classification_id", "-is_popular", "-product_count", "name", "id"))
+        for market in previews:
+            markets_by_classification[market.classification_id].append(market)
         latest_markets = list(
             Market.objects.filter(
                 id__in=market_ids,
@@ -374,13 +373,20 @@ class MarketClassificationSummaryView(APIView):
                 .order_by("-created_at", "-id")
                 .distinct()
             )
-            for market_id in market_ids_for_response
+            for market_id in (market_ids_for_response if include_products else [])
         }
         serializer_context = {
             "request": request,
             "markets_by_classification": markets_by_classification,
             "products_by_market": products_by_market,
         }
+
+        popular_markets = (Market.objects.filter(id__in=market_ids, is_popular=True, classification__is_active=True)
+            .with_client_metrics(request.user)
+            .prefetch_related("service_cities", "delivery_areas", "subcategory_assignments__subcategory", "market_types")
+            .order_by("name", "id"))
+        if not include_products:
+            popular_markets = popular_markets[:6]
 
         if self.classification_type is not None:
             return Response(
@@ -413,19 +419,7 @@ class MarketClassificationSummaryView(APIView):
                     context=serializer_context,
                 ).data,
                 "popular_markets": HomeMarketSerializer(
-                    Market.objects.filter(
-                        id__in=market_ids,
-                        is_popular=True,
-                        classification__is_active=True,
-                    )
-                    .with_client_metrics(request.user)
-                    .prefetch_related(
-                        "service_cities",
-                        "delivery_areas",
-                        "subcategory_assignments__subcategory",
-                        "market_types",
-                    )
-                    .order_by("name", "id"),
+                    popular_markets,
                     many=True,
                     context={"request": request},
                 ).data,
@@ -499,6 +493,54 @@ class MarketClassificationMarketsView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class MarketListingPagination(PageNumberPagination):
+    page_size = 30
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class MarketListingView(APIView):
+    permission_classes = [IsAuthenticated, IsClientRole]
+
+    def get(self, request):
+        if current_market_region_selection(request.user) is None:
+            return no_market_region_selection_response()
+        markets = visible_market_queryset(request.user).filter(
+            status=Market.Status.ACTIVE, archived_at__isnull=True,
+            classification__is_active=True,
+        )
+        classification_id = request.query_params.get("classification_id", "")
+        if classification_id:
+            classification_id = serializers.IntegerField(min_value=1).run_validation(classification_id)
+            markets = markets.filter(classification_id=classification_id)
+        if serializers.BooleanField().run_validation(request.query_params.get("popular", False)):
+            markets = markets.filter(is_popular=True)
+        types = list(MarketType.objects.filter(
+            id__in=markets.values_list("market_types__id", flat=True), is_active=True,
+        ).order_by("sort_order", "id")) if classification_id else []
+        total_count = markets.count()
+        selected_type = request.query_params.get("market_type_id")
+        if selected_type:
+            selected_type = serializers.IntegerField(min_value=1).run_validation(selected_type)
+        elif types:
+            selected_type = types[0].id
+        if selected_type:
+            markets = markets.filter(market_types__id=selected_type)
+        query = request.query_params.get("q", "").strip()
+        if query:
+            markets = markets.filter(Q(name__icontains=query) | Q(branch__icontains=query))
+        latest = serializers.BooleanField().run_validation(request.query_params.get("latest", False))
+        markets = (markets.with_client_metrics(request.user).distinct()
+            .prefetch_related("service_cities", "delivery_areas", "subcategory_assignments__subcategory", "market_types")
+            .order_by(*(("-created_at", "-id") if latest else ("-is_popular", "name", "id"))))
+        paginator = MarketListingPagination()
+        page = paginator.paginate_queryset(markets, request, view=self)
+        response = paginator.get_paginated_response(HomeMarketSerializer(page, many=True, context={"request": request}).data)
+        response.data.update({"market_types": ClientMarketTypeSerializer(types, many=True, context={"request": request}).data,
+            "selected_type_id": selected_type, "total_count": total_count})
+        return response
 
 
 def storefront_market(request, market_id):
@@ -636,6 +678,7 @@ class MarketLikeListView(APIView):
             request,
             markets,
             HomeMarketSerializer,
+            include_membership=True,
         )
 
 
@@ -710,6 +753,8 @@ class ProductSearchView(APIView):
             .distinct()
             .order_by("-created_at", "-id")
         )
+        if request.query_params.get("paged") == "true":
+            return catalog_search_page(request, products, search_query)
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(products, request, view=self)
         serializer = HomeProductSerializer(
@@ -768,6 +813,42 @@ class ProductSearchView(APIView):
                 classifications, many=True, context={"request": request}
             ).data
         return response
+
+
+def catalog_search_page(request, products, query):
+    section = serializers.ChoiceField(choices=("all", "products", "markets", "categories")).run_validation(
+        request.query_params.get("section", "all")
+    )
+    visible = visible_market_queryset(request.user).filter(
+        status=Market.Status.ACTIVE, archived_at__isnull=True, classification__is_active=True,
+    )
+    payload = {"results": [], "markets": [], "categories": [], "next": None,
+        "markets_next": None, "categories_next": None}
+    if section in ("all", "products"):
+        paginator = MarketListingPagination()
+        page = paginator.paginate_queryset(products, request)
+        payload.update(paginator.get_paginated_response(HomeProductSerializer(
+            page, many=True, context={"request": request}).data).data)
+    if section in ("all", "markets"):
+        markets = (visible.filter(name__icontains=query).with_client_metrics(request.user)
+            .select_related("classification")
+            .prefetch_related("service_cities", "delivery_areas", "subcategory_assignments__subcategory", "market_types")
+            .distinct().order_by("name", "id"))
+        paginator = MarketListingPagination()
+        page = paginator.paginate_queryset(markets, request)
+        payload.update({"markets": HomeMarketSerializer(page, many=True, context={"request": request}).data,
+            "markets_next": paginator.get_next_link(), "markets_count": paginator.page.paginator.count})
+    if section in ("all", "categories"):
+        ids = visible.values_list("id", flat=True)
+        categories = (MarketClassification.objects.filter(is_active=True, markets__id__in=ids, name__icontains=query)
+            .annotate(market_count=Count("markets", filter=Q(markets__id__in=ids), distinct=True),
+                product_count=Count("markets__products", filter=Q(markets__id__in=ids, markets__products__archived_at__isnull=True), distinct=True))
+            .distinct().order_by("name", "id"))
+        paginator = MarketListingPagination()
+        page = paginator.paginate_queryset(categories, request)
+        payload.update({"categories": MarketClassificationCountSerializer(page, many=True, context={"request": request}).data,
+            "categories_next": paginator.get_next_link(), "categories_count": paginator.page.paginator.count})
+    return Response(payload)
 
 
 class AddressProductListView(APIView):

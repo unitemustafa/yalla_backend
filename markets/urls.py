@@ -15,6 +15,7 @@ from .views import (
     MarketClassificationMarketsView,
     MarketClassificationSummaryView,
     MarketLikeListView,
+    MarketListingView,
     MarketLikeToggleView,
     MarketStorefrontDetailView,
     MarketStorefrontProductsView,
@@ -26,6 +27,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path("store-list/", MarketListingView.as_view(), name="market-listing"),
     path("", HomeView.as_view(), name="home"),
     path(
         "login-dashboard-snapshot/",

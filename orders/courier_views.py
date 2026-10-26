@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import Count, Sum
+from django.db.models import Count, Q, Sum
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 from rest_framework import generics, status
@@ -77,6 +77,7 @@ class CourierOrderListView(APIView):
                 count=Count("pk"),
                 total_value=Sum("total_price"),
                 total_delivery_fees=Sum("delivery_price"),
+                pickup_required_count=Count("pk", filter=Q(status=Order.Status.ASSIGNED)),
             )
             paginator = YallaPageNumberPagination()
             # Scoped responses always paginate, including callers without page.
@@ -93,6 +94,8 @@ class CourierOrderListView(APIView):
                 "total_value": f"{totals['total_value'] or 0:.2f}",
                 "total_delivery_fees": f"{totals['total_delivery_fees'] or 0:.2f}",
             }
+            if scope == "active":
+                response.data["summary"]["pickup_required_count"] = totals["pickup_required_count"]
             return response
         return paginated_list_response(
             request,

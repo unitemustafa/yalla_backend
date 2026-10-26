@@ -22,7 +22,8 @@ from markets.region import (
     no_market_region_selection_response,
     visible_offer_queryset,
 )
-from markets.serializers import HomeOfferSerializer
+from markets.serializers import HomeOfferSerializer, HomeOfferSummarySerializer
+from .client_catalog import client_offer_catalog
 
 from .models import HomeCampaign, HomeCampaignImage, Offer
 from .campaign_media import validate_campaign_image
@@ -257,35 +258,10 @@ class OfferListCreateView(APIView):
         if current_market_region_selection(request.user) is None:
             return no_market_region_selection_response()
 
-        offers = (
-            visible_offer_queryset(request.user)
-            .select_related("market__classification")
-            .prefetch_related(
-                "market__service_cities",
-                "market__delivery_areas",
-                "service_cities",
-                "products__category__classification",
-                "products__market__classification",
-                "products__market__service_cities",
-                "products__market__delivery_areas",
-                "products__variants",
-                "products__images",
-                "items__variant__product__market__classification",
-                "items__variant__product__market__service_cities",
-                "items__variant__product__market__delivery_areas",
-                "items__variant__product__attributes__options",
-                "items__variant__product__images",
-                "items__variant__attribute_values__attribute",
-                "items__variant__attribute_values__option",
-                "items__variant__attribute_values__product_attribute",
-                "items__variant__attribute_values__product_attribute_option",
-            )
-            .order_by("-announcement_priority", "-created_at", "-id")
-        )
+        summary = request.query_params.get('summary') == 'true'
+        offers = client_offer_catalog(request.user, summary=summary)
         return paginated_list_response(
-            request,
-            offers,
-            HomeOfferSerializer,
+            request, offers, HomeOfferSummarySerializer if summary else HomeOfferSerializer,
         )
 
     def post(self, request):
@@ -342,28 +318,7 @@ class OfferDetailView(APIView):
             if current_market_region_selection(request.user) is None:
                 return no_market_region_selection_response()
             offer = get_object_or_404(
-                visible_offer_queryset(request.user)
-                .select_related("market__classification")
-                .prefetch_related(
-                    "market__service_cities",
-                    "market__delivery_areas",
-                    "service_cities",
-                    "products__category__classification",
-                    "products__market__classification",
-                    "products__market__service_cities",
-                    "products__market__delivery_areas",
-                    "products__variants",
-                    "products__images",
-                    "items__variant__product__market__classification",
-                    "items__variant__product__market__service_cities",
-                    "items__variant__product__market__delivery_areas",
-                    "items__variant__product__attributes__options",
-                    "items__variant__product__images",
-                    "items__variant__attribute_values__attribute",
-                    "items__variant__attribute_values__option",
-                    "items__variant__attribute_values__product_attribute",
-                    "items__variant__attribute_values__product_attribute_option",
-                ),
+                client_offer_catalog(request.user),
                 id=offer_id,
             )
             return Response(

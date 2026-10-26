@@ -908,3 +908,18 @@ class HomeOfferSerializer(serializers.ModelSerializer):
 
     def get_market_names_summary(self, instance):
         return "، ".join(market.name for market in self._markets(instance))
+
+
+class HomeOfferSummarySerializer(HomeOfferSerializer):
+    is_summary = serializers.SerializerMethodField()
+
+    class Meta(HomeOfferSerializer.Meta):
+        fields = HomeOfferSerializer.Meta.fields + ('is_summary',)
+
+    def get_is_summary(self, instance):
+        return True
+
+    def get_products(self, instance):
+        # The banner renders title/discount/market. Product prices, variants and
+        # complete product details are fetched only when the customer opens it.
+        return []
