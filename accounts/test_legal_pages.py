@@ -21,4 +21,4 @@ class LegalPagesTests(SimpleTestCase):
         response = self.client.get(reverse("account-deletion"))
 
         self.assertContains(response, "Request deletion on WhatsApp")
-        self.assertContains(response, "wa.me/201016487371")
+        self.assertContains(response, "wa.me/201500355776")
