@@ -472,6 +472,9 @@ STORAGES = {
 AUTH_USER_MODEL = "accounts.User"
 
 REST_FRAMEWORK = {
+    # Keep existing clients' list validation error format after the DRF security
+    # upgrade. Revisit before DRF 3.20 removes the compatibility setting.
+    "LIST_SERIALIZER_ERRORS_AS_DICT": False,
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "accounts.authentication.DatabaseStateJWTAuthentication",
     ),
