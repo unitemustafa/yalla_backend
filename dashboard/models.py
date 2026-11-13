@@ -6,6 +6,29 @@ from django.conf import settings
 import uuid
 
 
+def delivery_apk_path(instance, filename):
+    return f"app-updates/delivery/{instance.version_code}/{uuid.uuid4().hex}.apk"
+
+
+class DeliveryAppRelease(models.Model):
+    version_code = models.PositiveIntegerField(unique=True)
+    version_name = models.CharField(max_length=40)
+    release_notes = models.TextField(blank=True, max_length=4000)
+    apk = models.FileField(upload_to=delivery_apk_path, storage=raw_public_media_storage)
+    sha256 = models.CharField(max_length=64, editable=False)
+    file_size = models.PositiveBigIntegerField(editable=False)
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-version_code"]
+        constraints = [models.CheckConstraint(
+            condition=models.Q(version_code__gte=1, version_code__lte=2_100_000_000),
+            name="delivery_release_valid_version_code",
+        )]
+
+
 class MediaJob(models.Model):
     class State(models.TextChoices):
         PENDING = "pending"

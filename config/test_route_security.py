@@ -9,6 +9,7 @@ from accounts.permissions import HasRole
 
 
 PUBLIC_API_ROUTE_NAMES = {
+    "latest-delivery-app-release",
     "signup",
     "signup-slash",
     "verify-email",

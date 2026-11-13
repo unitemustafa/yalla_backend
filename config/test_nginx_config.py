@@ -17,6 +17,7 @@ class NginxProtectedMediaTests(SimpleTestCase):
             ("catalog/products/|offers/home-campaigns/[^/]+/media/", "55m"),
             ("dashboard/media-jobs/", "32m"),
             ("dashboard/app-media/", "57m"),
+            ("dashboard/app-updates/", "101m"),
             ("home/markets/", "12m"),
         ):
             with self.subTest(route=route):
