@@ -59,6 +59,7 @@ class ShippingCourierAccountTests(TestCase):
             order_scope=Order.Scope.SERVICE_CITY if city else Order.Scope.GENERAL,
             status=Order.Status.CONFIRMED,
             review_status=Order.ReviewStatus.APPROVED,
+            delivery_price="25.00",
         )
 
     def test_create_company_provisions_verified_courier_and_fixed_profile(self):
