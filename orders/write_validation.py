@@ -296,6 +296,10 @@ class OrderWriteValidationMixin:
                     )
                 }
             )
+        if attrs.get("delivery_price", getattr(self.instance, "delivery_price", None)) is None:
+            raise serializers.ValidationError(
+                {"assigned_representative_id": "يجب تحديد سعر التوصيل أولًا قبل إسناد الطلب."}
+            )
         profile = getattr(representative, "courier_profile", None)
         if profile is None:
             raise serializers.ValidationError(

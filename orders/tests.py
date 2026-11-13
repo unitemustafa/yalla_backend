@@ -1582,6 +1582,77 @@ class OrderAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("service_city_id", response.data)
 
+    def test_assignment_requires_saved_delivery_price(self):
+        order_id = self.create_order().data["id"]
+        self.client.post(f"/api/v1/admin/orders/{order_id}/approve/", format="json")
+        Order.objects.filter(pk=order_id).update(
+            delivery_type=Order.DeliveryType.DELIVERY,
+            delivery_area=None,
+            delivery_price=None,
+        )
+        events_before = OrderEvent.objects.count()
+        notifications_before = Notification.objects.count()
+
+        response = self.client.patch(
+            f"{ORDERS_BASE}/{order_id}/assignment/",
+            {"representative_id": self.representative.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["detail"], "يجب تحديد سعر التوصيل أولًا قبل إسناد الطلب.")
+        order = Order.objects.get(pk=order_id)
+        self.assertEqual(order.status, Order.Status.CONFIRMED)
+        self.assertIsNone(order.assigned_representative_id)
+        self.assertIsNone(order.assigned_at)
+        self.assertEqual(OrderEvent.objects.count(), events_before)
+        self.assertEqual(Notification.objects.count(), notifications_before)
+
+        for price in ("0.00", "75.50"):
+            with self.subTest(price=price):
+                quote = self.client.patch(
+                    f"{ORDERS_BASE}/{order_id}/delivery-price/",
+                    {"delivery_price": price}, format="json",
+                )
+                self.assertEqual(quote.status_code, status.HTTP_200_OK, quote.data)
+                assigned = self.client.patch(
+                    f"{ORDERS_BASE}/{order_id}/assignment/",
+                    {"representative_id": self.representative.id}, format="json",
+                )
+                self.assertEqual(assigned.status_code, status.HTTP_200_OK, assigned.data)
+                self.assertEqual(assigned.data["order"]["status"], Order.Status.ASSIGNED)
+                self.client.patch(
+                    f"{ORDERS_BASE}/{order_id}/assignment/",
+                    {"representative_id": None}, format="json",
+                )
+
+    def test_unpriced_order_cannot_be_reassigned_but_can_be_unassigned(self):
+        order_id = self.create_order().data["id"]
+        Order.objects.filter(pk=order_id).update(
+            status=Order.Status.ASSIGNED,
+            review_status=Order.ReviewStatus.APPROVED,
+            assigned_representative=self.representative,
+            assigned_at=timezone.now(),
+            delivery_type=Order.DeliveryType.DELIVERY,
+            delivery_area=None,
+            delivery_price=None,
+        )
+        response = self.client.patch(
+            f"{ORDERS_BASE}/{order_id}/assignment/",
+            {"representative_id": self.representative.id}, format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        order = Order.objects.get(pk=order_id)
+        self.assertEqual(order.assigned_representative_id, self.representative.id)
+        response = self.client.patch(
+            f"{ORDERS_BASE}/{order_id}/assignment/",
+            {"representative_id": None}, format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        order.refresh_from_db()
+        self.assertIsNone(order.assigned_representative_id)
+        self.assertEqual(order.status, Order.Status.CONFIRMED)
+
     def test_assignment_sets_order_status_to_assigned(self):
         order_id = self.create_order().data["id"]
         approve_response = self.client.post(
@@ -2781,6 +2852,11 @@ class OrderAPITests(APITestCase):
         self.assertIn(self.representative.id, representative_ids)
         self.assertNotIn(remote_representative.id, representative_ids)
 
+        price_response = self.client.patch(
+            f"{ORDERS_BASE}/{order.id}/delivery-price/",
+            {"delivery_price": "75.50"}, format="json",
+        )
+        self.assertEqual(price_response.status_code, status.HTTP_200_OK)
         mismatch_response = self.client.patch(
             f"{ORDERS_BASE}/{order.id}/assignment/",
             {"representative_id": remote_representative.id},
@@ -3205,6 +3281,11 @@ class OrderAPITests(APITestCase):
         representatives_response = self.client.get(
             f"/api/v1/admin/orders/{order.id}/service-city-representatives/"
         )
+        price_response = self.client.patch(
+            f"{ORDERS_BASE}/{order.id}/delivery-price/",
+            {"delivery_price": "75.50"}, format="json",
+        )
+        self.assertEqual(price_response.status_code, status.HTTP_200_OK)
         assignment_response = self.client.patch(
             f"{ORDERS_BASE}/{order.id}/assignment/",
             {"representative_id": remote_representative.id},

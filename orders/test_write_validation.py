@@ -39,6 +39,7 @@ class OrderWriteValidationBranchTests(SimpleTestCase):
             self.probe._validate_assignment(attrs, representative, Order.Scope.SERVICE_CITY, self.city)
 
         attrs["review_status"] = Order.ReviewStatus.APPROVED
+        attrs["delivery_price"] = Decimal("12.50")
         with self.assertRaisesMessage(serializers.ValidationError, "courier profile"):
             self.probe._validate_assignment(
                 attrs, SimpleNamespace(courier_profile=None), Order.Scope.SERVICE_CITY, self.city
@@ -53,6 +54,26 @@ class OrderWriteValidationBranchTests(SimpleTestCase):
         self.probe._validate_assignment(attrs, representative, Order.Scope.SERVICE_CITY, self.city)
         self.assertEqual(attrs["status"], Order.Status.ASSIGNED)
         self.assertIsNotNone(attrs["assigned_at"])
+
+    def test_assignment_requires_a_supplied_or_saved_delivery_price(self):
+        representative = SimpleNamespace(
+            courier_profile=SimpleNamespace(service_city_id=4, is_shipping_company=False)
+        )
+        attrs = {
+            "assigned_representative": representative,
+            "review_status": Order.ReviewStatus.APPROVED,
+        }
+        with self.assertRaisesMessage(serializers.ValidationError, "سعر التوصيل"):
+            self.probe._validate_assignment(attrs, representative, Order.Scope.SERVICE_CITY, self.city)
+        self.probe.instance = SimpleNamespace(delivery_price=Decimal("12.50"))
+        self.probe._validate_assignment(attrs, representative, Order.Scope.SERVICE_CITY, self.city)
+        self.assertEqual(attrs["status"], Order.Status.ASSIGNED)
+        attrs["delivery_price"] = None
+        with self.assertRaisesMessage(serializers.ValidationError, "سعر التوصيل"):
+            self.probe._validate_assignment(attrs, representative, Order.Scope.SERVICE_CITY, self.city)
+        attrs["delivery_price"] = Decimal("0.00")
+        self.probe._validate_assignment(attrs, representative, Order.Scope.SERVICE_CITY, self.city)
+        self.assertEqual(attrs["status"], Order.Status.ASSIGNED)
 
     def test_unassignment_clears_assignment_and_restores_confirmed_status(self):
         self.probe.instance = SimpleNamespace(assigned_representative_id=7)

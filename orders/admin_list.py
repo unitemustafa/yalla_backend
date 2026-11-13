@@ -95,7 +95,11 @@ def order_counts(queryset):
         total=Count("pk", distinct=True),
         assignmentReady=Count(
             "pk",
-            filter=Q(status=Order.Status.CONFIRMED, assigned_representative=None),
+            filter=Q(
+                status=Order.Status.CONFIRMED,
+                assigned_representative=None,
+                delivery_price__isnull=False,
+            ),
             distinct=True,
         ),
         assigned=Count(

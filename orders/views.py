@@ -693,6 +693,11 @@ class OrderAssignmentView(APIView):
                 {"detail": "Only confirmed or assigned orders can be assigned."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if order.delivery_price is None:
+            return Response(
+                {"detail": "يجب تحديد سعر التوصيل أولًا قبل إسناد الطلب."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         profile = (
             CourierProfile.objects.select_related("service_city")
             .filter(user=representative)

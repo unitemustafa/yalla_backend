@@ -61,6 +61,19 @@ class AdminOrderPaginationTests(APITestCase):
         )
         self.assertEqual(response.data["summary"]["total_value"], "300.00")
 
+    def test_assignment_ready_count_requires_delivery_price(self):
+        unpriced = self.order(Order.Status.CONFIRMED)
+        Order.objects.filter(pk=unpriced.pk).update(
+            delivery_type=Order.DeliveryType.DELIVERY,
+            delivery_area=None,
+            delivery_price=None,
+        )
+        free_delivery = self.order(Order.Status.CONFIRMED)
+        Order.objects.filter(pk=free_delivery.pk).update(delivery_price=Decimal("0.00"))
+        response = self.client.get("/api/v1/orders/", {"page": 1, "page_size": 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["metrics"]["assignmentReady"], 1)
+
     def test_history_filter_search_and_totals_are_server_side(self):
         wanted = self.order(
             Order.Status.DELIVERED,
