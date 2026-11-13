@@ -81,6 +81,7 @@ class DeliveryAppUpdateTests(APITestCase):
         self.assertEqual(release.sha256, hashlib.sha256(raw_bytes).hexdigest())
         self.assertEqual(release.file_size, len(raw_bytes))
         self.assertEqual(release.apk.read(), raw_bytes)
+        self.assertTrue(release.apk.name.endswith(".apk"), release.apk.name)
         self.assertTrue(response.data["download_url"].endswith(release.apk.name))
 
     def test_given_newer_active_release_when_public_client_checks_then_highest_newer_integer_is_returned(self):

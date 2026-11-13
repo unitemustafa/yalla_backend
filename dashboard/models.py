@@ -1,5 +1,5 @@
 from django.db import models
-from config.media import raw_public_media_storage
+from config.media import apk_public_media_storage, raw_public_media_storage
 from config.media import raw_private_media_storage, private_media_storage
 from config.media_specs import top_focus
 from django.conf import settings
@@ -14,7 +14,7 @@ class DeliveryAppRelease(models.Model):
     version_code = models.PositiveIntegerField(unique=True)
     version_name = models.CharField(max_length=40)
     release_notes = models.TextField(blank=True, max_length=4000)
-    apk = models.FileField(upload_to=delivery_apk_path, storage=raw_public_media_storage)
+    apk = models.FileField(upload_to=delivery_apk_path, storage=apk_public_media_storage)
     sha256 = models.CharField(max_length=64, editable=False)
     file_size = models.PositiveBigIntegerField(editable=False)
     is_active = models.BooleanField(default=True)

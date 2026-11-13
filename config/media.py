@@ -191,6 +191,10 @@ class OptimizedPublicMediaStorage(
 class RawPublicMediaStorage(DelegatingStorage):
     """Public storage for validated non-image media such as campaign MP4s."""
 
+    def __init__(self, *, extension="mp4", **kwargs):
+        super().__init__(**kwargs)
+        self.extension = extension
+
     def _create_backend(self, backend_type: str, **kwargs):
         if backend_type == "s3":
             return _create_s3_public_storage(**kwargs)
@@ -199,7 +203,7 @@ class RawPublicMediaStorage(DelegatingStorage):
         return FileSystemStorage(**local_kwargs)
 
     def save(self, name, content, max_length=None):
-        name = _uuid_name(name, extension="mp4")
+        name = _uuid_name(name, extension=self.extension)
         return super().save(name, content, max_length=max_length)
 
 
@@ -221,6 +225,7 @@ class OptimizedPrivateMediaStorage(
 
 private_media_storage = OptimizedPrivateMediaStorage()
 raw_public_media_storage = RawPublicMediaStorage()
+apk_public_media_storage = RawPublicMediaStorage(extension="apk")
 
 
 @deconstructible
