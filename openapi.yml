@@ -6747,15 +6747,13 @@ components:
           pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
         eta_min_minutes:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
           nullable: true
         eta_max_minutes:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
           nullable: true
         is_active:
           type: boolean
@@ -6810,15 +6808,13 @@ components:
           pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
         eta_min_minutes:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
           nullable: true
         eta_max_minutes:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
           nullable: true
         is_active:
           type: boolean
@@ -7447,9 +7443,8 @@ components:
           readOnly: true
         quantity:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
         unit_price:
           type: string
           format: decimal
@@ -7472,9 +7467,8 @@ components:
           type: integer
         quantity:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
         unit_price:
           type: string
           format: decimal
@@ -7888,15 +7882,13 @@ components:
           pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
         eta_min_minutes:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
           nullable: true
         eta_max_minutes:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
           nullable: true
         is_active:
           type: boolean
@@ -8037,9 +8029,8 @@ components:
           type: boolean
         sort_order:
           type: integer
-          maximum: 9223372036854775807
+          maximum: 2147483647
           minimum: 0
-          format: int64
       required:
       - id
       - image
