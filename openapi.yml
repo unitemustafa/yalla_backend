@@ -1261,6 +1261,51 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v1/dashboard/app-updates/:
+    get:
+      operationId: v1_dashboard_app_updates_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_dashboard_app_updates_create
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/dashboard/app-updates/{release_id}/:
+    patch:
+      operationId: v1_dashboard_app_updates_partial_update_by_release_id
+      parameters:
+      - in: path
+        name: release_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/dashboard/app-updates/latest/:
+    get:
+      operationId: v1_dashboard_app_updates_latest_retrieve
+      tags:
+      - v1
+      security:
+      - {}
+      responses:
+        '200':
+          description: No response body
   /api/v1/dashboard/media-jobs/:
     post:
       operationId: v1_dashboard_media_jobs_create
@@ -1826,6 +1871,16 @@ paths:
   /api/v1/home/search/:
     get:
       operationId: v1_home_search_retrieve
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/home/store-list/:
+    get:
+      operationId: v1_home_store_list_retrieve
       tags:
       - v1
       security:
@@ -4306,6 +4361,51 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v2/dashboard/app-updates/:
+    get:
+      operationId: v2_dashboard_app_updates_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v2_dashboard_app_updates_create
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/dashboard/app-updates/{release_id}/:
+    patch:
+      operationId: v2_dashboard_app_updates_partial_update_by_release_id
+      parameters:
+      - in: path
+        name: release_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/dashboard/app-updates/latest/:
+    get:
+      operationId: v2_dashboard_app_updates_latest_retrieve
+      tags:
+      - v2
+      security:
+      - {}
+      responses:
+        '200':
+          description: No response body
   /api/v2/dashboard/media-jobs/:
     post:
       operationId: v2_dashboard_media_jobs_create
@@ -4871,6 +4971,16 @@ paths:
   /api/v2/home/search/:
     get:
       operationId: v2_home_search_retrieve
+      tags:
+      - v2
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v2/home/store-list/:
+    get:
+      operationId: v2_home_store_list_retrieve
       tags:
       - v2
       security:
