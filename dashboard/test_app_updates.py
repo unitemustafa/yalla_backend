@@ -20,11 +20,13 @@ LATEST_URL = "/api/v1/dashboard/app-updates/latest/"
 User = get_user_model()
 
 
-def apk_upload(name="yalla-delivery.apk"):
+def apk_upload(name="yalla-delivery.apk", *, payload_size=0):
     content = BytesIO()
     with zipfile.ZipFile(content, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("AndroidManifest.xml", b"manifest")
         archive.writestr("classes.dex", b"dex")
+        if payload_size:
+            archive.writestr("assets/payload.bin", b"\0" * payload_size, compress_type=zipfile.ZIP_STORED)
     return SimpleUploadedFile(
         name, content.getvalue(), content_type="application/vnd.android.package-archive"
     )
@@ -83,6 +85,14 @@ class DeliveryAppUpdateTests(APITestCase):
         self.assertEqual(release.apk.read(), raw_bytes)
         self.assertTrue(release.apk.name.endswith(".apk"), release.apk.name)
         self.assertTrue(response.data["download_url"].endswith(release.apk.name))
+
+    def test_admin_can_publish_an_apk_larger_than_eight_mb(self):
+        self.client.force_authenticate(self.admin)
+        response = self.publish(apk=apk_upload(payload_size=9 * 1024 * 1024))
+        self.assertEqual(response.status_code, 201, response.json())
+        self.assertGreater(response.data["file_size"], 8 * 1024 * 1024)
+        release = DeliveryAppRelease.objects.get(version_code=4016)
+        self.assertEqual(release.apk.size, response.data["file_size"])
 
     def test_given_newer_active_release_when_public_client_checks_then_highest_newer_integer_is_returned(self):
         self.client.force_authenticate(self.admin)

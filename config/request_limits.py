@@ -54,6 +54,9 @@ class RequestBodyLimitMiddleware:
             )
         ):
             return settings.API_PRODUCT_UPLOAD_REQUEST_SIZE
+        if path.startswith(("/api/v1/dashboard/app-updates/", "/api/v2/dashboard/app-updates/")):
+            # One APK (up to 100 MB) plus multipart metadata; matches Nginx.
+            return 101 * 1024 * 1024
         if path.startswith(("/api/v1/dashboard/media-jobs/", "/api/v2/dashboard/media-jobs/")):
             return 32 * 1024 * 1024
         if path.startswith(("/api/v1/dashboard/app-media/", "/api/v2/dashboard/app-media/")):

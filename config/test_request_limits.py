@@ -63,6 +63,34 @@ class RequestBodyLimitMiddlewareTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 413)
 
+    def test_app_update_multipart_allows_apks_above_the_single_upload_limit(self):
+        for version in ("v1", "v2"):
+            with self.subTest(version=version):
+                request = self.factory.post(f"/api/{version}/dashboard/app-updates/", data={})
+                request.META["CONTENT_TYPE"] = "multipart/form-data; boundary=test"
+                request.META["CONTENT_LENGTH"] = str(100_000_000 + 10_000)
+                self.assertIsNone(self.middleware(request))
+                request.META["CONTENT_LENGTH"] = str(101 * 1024 * 1024 + 1)
+                self.assertEqual(self.middleware(request).status_code, 413)
+
+    @override_settings(
+        CORS_ALLOWED_ORIGINS=["https://dashboard.example.test"],
+        CORS_ALLOW_ALL_ORIGINS=False,
+    )
+    def test_early_size_rejection_preserves_cors_for_allowed_origins(self):
+        for origin, expected in (
+            ("https://dashboard.example.test", "https://dashboard.example.test"),
+            ("https://untrusted.example.test", None),
+        ):
+            with self.subTest(origin=origin):
+                response = self.client.post(
+                    "/api/v1/orders/preview/", data=b"{}",
+                    content_type="application/json", CONTENT_LENGTH="101",
+                    HTTP_ORIGIN=origin,
+                )
+                self.assertEqual(response.status_code, 413)
+                self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), expected)
+
     def test_media_routes_use_their_explicit_launch_and_campaign_limits(self):
         cases = (
             ("/api/v1/dashboard/media-jobs/", 32 * 1024 * 1024),
