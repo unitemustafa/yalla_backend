@@ -186,6 +186,11 @@ backup and verification scripts are in `deploy/`.
 
 ## Environment configuration
 
+Android App Links target the market application `com.yallamarket.app.com`.
+After deploying this backend, configure `ANDROID_APP_LINK_FINGERPRINTS` for the
+installed build's signing certificate. Leave `ANDROID_APP_STORE_URL` blank until
+the new package has a published Google Play listing.
+
 The most important production variables are listed below. Optional timeout,
 request-size, Gunicorn, and rate-policy variables have safe defaults in
 `config/settings.py`.

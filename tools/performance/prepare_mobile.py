@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-PACKAGE = "com.yallamarket.app.performance"
+PACKAGE = "com.yallamarket.app.com.performance"
 
 
 def main():

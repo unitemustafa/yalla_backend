@@ -97,14 +97,14 @@ class MeasurementTests(unittest.TestCase):
             {
                 "time": 1,
                 "memory": "TOTAL PSS: 204800",
-                "cpu": "12% com.yallamarket.app.performance",
+                "cpu": "12% com.yallamarket.app.com.performance",
                 "battery": "temperature: 324",
             },
             {
                 "time": 6,
                 "memory": "TOTAL PSS: 307200",
                 "cpu_method": "top second 1-second window",
-                "cpu": "123 u0_a1979 10 -10 10G 287M 143M R 9.0 3.7 0:42.29 com.yallamarket.app.performance",
+                "cpu": "123 u0_a1979 10 -10 10G 287M 143M R 9.0 3.7 0:42.29 com.yallamarket.app.com.performance",
             },
         ]
         result = summarize_resources(rows)

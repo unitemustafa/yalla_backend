@@ -11,7 +11,7 @@ def summarize_resources(rows):
             pss.append(int(match[1]) / 1024)
         if row.get("cpu_method", "").startswith("top second"):
             for line in row.get("cpu", "").splitlines():
-                if line.strip().endswith("com.yallamarket.app.performance"):
+                if line.strip().endswith("com.yallamarket.app.com.performance"):
                     fields = line.split()
                     if len(fields) >= 12:
                         cpu.append(float(fields[8]))

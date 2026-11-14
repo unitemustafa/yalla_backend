@@ -173,7 +173,7 @@ class ShareLandingViewTests(TestCase):
                 self.assertNotContains(response, "?variant=")
 
     @override_settings(
-        ANDROID_APP_STORE_URL="https://play.google.com/store/apps/details?id=com.yallamarket.app",
+        ANDROID_APP_STORE_URL="https://play.google.com/store/apps/details?id=com.yallamarket.app.com",
         IOS_APP_STORE_URL="https://apps.apple.com/app/id123456789",
     )
     def test_published_store_links_are_shown_only_when_configured(self):
@@ -207,7 +207,7 @@ class AppAssociationTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/json")
         entry = response.json()[0]
-        self.assertEqual(entry["target"]["package_name"], "com.yallamarket.app")
+        self.assertEqual(entry["target"]["package_name"], "com.yallamarket.app.com")
         self.assertEqual(
             entry["target"]["sha256_cert_fingerprints"], [":".join(["AA"] * 32)]
         )
