@@ -6,6 +6,8 @@ venv/
 !.env.production.example
 __pycache__/
 *.py[cod]
+*.log
+*.log.*
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
