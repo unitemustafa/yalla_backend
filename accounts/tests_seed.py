@@ -8,6 +8,7 @@ from locations.models import Address, DeliveryArea, ServiceCity
 
 
 EPHEMERAL_MODEL_LABELS = {
+    "accounts.FirebaseAccountDeletion",
     "accounts.OTPCooldown",
     "accounts.SocialIdentity",
     "locations.ShippingCompany",

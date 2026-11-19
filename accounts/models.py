@@ -167,6 +167,13 @@ class SocialIdentity(models.Model):
         ]
 
 
+class FirebaseAccountDeletion(models.Model):
+    """Durable cleanup receipt, removed after the external identity is erased."""
+
+    firebase_uid = models.CharField(max_length=128, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+
 class CourierProfile(models.Model):
     user = models.OneToOneField(
         User,

@@ -365,6 +365,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "accounts.tasks.cleanup_unverified_users_task",
         "schedule": 3600.0,
     },
+    "cleanup-deleted-firebase-accounts": {
+        "task": "accounts.tasks.cleanup_firebase_accounts_task",
+        "schedule": 300.0,
+    },
 }
 CELERY_TIMEZONE = "UTC"
 CELERY_ENABLE_UTC = True

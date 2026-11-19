@@ -223,6 +223,25 @@ request-size, Gunicorn, and rate-policy variables have safe defaults in
 Production must use exact HTTPS origins, must not enable debug mode, and must
 never enable `AUTH_OTP_INCLUDE_IN_RESPONSE`.
 
+### Account deletion and Firebase cleanup
+
+Customer deletion anonymizes local data and commits a durable
+`FirebaseAccountDeletion` receipt before removing social identity links.
+`accounts.tasks.cleanup_firebase_accounts_task` deletes the linked Firebase
+Authentication profile, then removes the receipt. Provider failures leave the
+receipt available for retry; a newly linked account or pending registration
+prevents an old receipt from deleting that identity.
+
+Deploy migration `accounts/0020_firebaseaccountdeletion.py` with this code, and
+restart the default-queue Celery worker and Celery Beat. Beat retries pending
+receipts every five minutes, including when immediate enqueueing failed.
+The configured Firebase Admin service account must have permission to delete
+Authentication users. Monitor the number and age of pending receipts; they
+should drain after provider recovery. Existing deleted identities whose UIDs
+were already removed before this change need a separate orphan-data review.
+The public privacy/deletion templates describe this behavior and must be
+published with the backend change. No production migration is run by local tests.
+
 ## Testing and verification
 
 The fast local suite uses isolated in-memory SQLite, local media directories,

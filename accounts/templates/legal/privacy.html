@@ -2,7 +2,7 @@
 {% block title %}Privacy Policy — Yalla Market{% endblock %}
 {% block content %}
   <h1>Privacy Policy</h1>
-  <p class="muted">Effective 27 July 2026</p>
+  <p class="muted">Effective 20 November 2026</p>
   <p>This policy explains how Yalla Market collects, uses, shares, and protects personal information when you use our mobile application and related services.</p>
 
   <h2>Information we collect</h2>
@@ -18,9 +18,12 @@
 
   <h2>When information is shared</h2>
   <p>We share only what is necessary with participating markets, delivery representatives, infrastructure and notification providers, professional advisers, and authorities where legally required. Providers must handle information for the services they perform for us.</p>
+  <p>Google Firebase provides social authentication, push notifications (Cloud Messaging), and crash diagnostics (Crashlytics). These services process authentication identifiers and, as applicable, device or installation identifiers, notification tokens, crash reports, and technical diagnostics. If you choose Google or Facebook sign-in, the selected provider supplies account identity information for authentication. MapTiler supplies map tiles and receives technical connection information, including your IP address, when maps load.</p>
+  <p>Location access is optional and requested when you choose location features; you can select a delivery area manually. Photos are accessed when you choose a profile image. We do not use background location or collect advertising identifiers for advertising.</p>
 
   <h2>Retention</h2>
   <p>Account and saved-delivery data is kept while your account is active. After account deletion, direct identifiers and saved addresses are deleted or anonymized. Limited transaction records may be retained in anonymized form where needed for accounting, disputes, fraud prevention, or legal obligations. Backup copies expire through normal retention cycles.</p>
+  <p>Deletion includes the Firebase Authentication profile linked to your Yalla Market account. If the provider is temporarily unavailable, deletion is queued and retried. This does not delete your separate Google or Facebook account.</p>
 
   <h2>Your choices and rights</h2>
   <p>You can review or update profile details in the app and control notification permission in device settings. You may delete your account from Account → Delete Account. You may also use our <a href="{% url 'account-deletion' %}">web deletion instructions</a>. Depending on applicable law, you may ask to access, correct, delete, or restrict use of your personal information.</p>

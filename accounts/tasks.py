@@ -205,3 +205,66 @@ def cleanup_unverified_users_task(self):
         "cleaned_registrations": registration_count,
         "cleaned_otps": expired_otp_count,
     }
+
+
+@shared_task(
+    name="accounts.tasks.cleanup_firebase_accounts_task",
+    queue="default",
+    soft_time_limit=120,
+    time_limit=180,
+)
+def cleanup_firebase_accounts_task():
+    """Erase provider profiles too; retain receipts across outages for retry."""
+    from firebase_admin import auth
+
+    from accounts.models import (
+        FirebaseAccountDeletion,
+        PendingRegistration,
+        SocialIdentity,
+    )
+    from config.firebase_admin import get_firebase_app
+
+    receipt_ids = list(
+        FirebaseAccountDeletion.objects.order_by("created_at", "pk").values_list(
+            "pk", flat=True
+        )[:100]
+    )
+    if not receipt_ids:
+        return {"deleted": 0, "pending": 0}
+    app = get_firebase_app()
+    deleted = 0
+    for receipt_id in receipt_ids:
+        try:
+            with transaction.atomic():
+                receipt = (
+                    FirebaseAccountDeletion.objects.select_for_update()
+                    .filter(pk=receipt_id)
+                    .first()
+                )
+                if receipt is None:
+                    continue
+                # A deliberate new registration supersedes the old deletion.
+                # Do not erase a Firebase identity linked to a current account.
+                in_use = (
+                    SocialIdentity.objects.filter(
+                        firebase_uid=receipt.firebase_uid
+                    ).exists()
+                    or PendingRegistration.objects.filter(
+                        firebase_uid=receipt.firebase_uid
+                    ).exists()
+                )
+                if not in_use:
+                    try:
+                        auth.delete_user(receipt.firebase_uid, app=app)
+                    except auth.UserNotFoundError:
+                        pass
+                    deleted += 1
+                receipt.delete()
+        except Exception as exc:
+            logger.warning(
+                "Firebase account cleanup deferred (%s).", type(exc).__name__
+            )
+    return {
+        "deleted": deleted,
+        "pending": FirebaseAccountDeletion.objects.count(),
+    }

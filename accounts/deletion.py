@@ -1,3 +1,5 @@
+import logging
+
 from config.media_cleanup import schedule_storage_cleanup
 import uuid
 
@@ -10,7 +12,10 @@ from orders.models import Order
 from partners.models import PartnerApplication
 
 from .deactivation import revoke_user_sessions
-from .models import OneTimePassword, User
+from .models import FirebaseAccountDeletion, OneTimePassword, User
+
+
+logger = logging.getLogger(__name__)
 
 
 ACTIVE_ORDER_STATUSES = (
@@ -74,7 +79,14 @@ def permanently_delete_client_account(user):
 
     user.notifications.all().delete()
     user.client_devices.all().delete()
+    firebase_uids = list(user.social_identities.values_list("firebase_uid", flat=True))
+    FirebaseAccountDeletion.objects.bulk_create(
+        [FirebaseAccountDeletion(firebase_uid=uid) for uid in firebase_uids],
+        ignore_conflicts=True,
+    )
     user.social_identities.all().delete()
+    if firebase_uids:
+        transaction.on_commit(_dispatch_firebase_deletions)
     OneTimePassword.objects.filter(user=user).delete()
     user.liked_products.clear()
     PartnerApplication.objects.filter(applicant=user).update(
@@ -122,3 +134,14 @@ def permanently_delete_client_account(user):
         )
 
     return user
+
+
+def _dispatch_firebase_deletions():
+    from .tasks import cleanup_firebase_accounts_task
+
+    try:
+        cleanup_firebase_accounts_task.delay()
+    except Exception:
+        # The committed receipts are picked up by the periodic task if the
+        # broker is unavailable. Never log provider identifiers or credentials.
+        logger.warning("Firebase deletion enqueue unavailable; periodic retry pending.")
