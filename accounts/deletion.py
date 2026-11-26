@@ -26,10 +26,7 @@ ACTIVE_ORDER_STATUSES = (
 )
 
 
-@transaction.atomic
-def permanently_delete_client_account(user):
-    """Anonymize a client while retaining non-personal transactional records."""
-    user = User.objects.select_for_update().get(pk=user.pk)
+def validate_client_account_deletion(user):
     if user.role != User.Role.CLIENT or user.deleted_at is not None:
         raise ValidationError({"detail": "This account cannot be deleted."})
 
@@ -43,6 +40,12 @@ def permanently_delete_client_account(user):
             }
         )
 
+
+@transaction.atomic
+def permanently_delete_client_account(user):
+    """Anonymize a client while retaining non-personal transactional records."""
+    user = User.objects.select_for_update().get(pk=user.pk)
+    validate_client_account_deletion(user)
     deletion_key = f"{user.pk}-{uuid.uuid4().hex[:12]}"
     old_avatar = user.avatar_image if user.avatar_image else None
 

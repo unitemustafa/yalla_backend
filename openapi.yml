@@ -199,6 +199,32 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/auth/client/profile/deletion-check/:
+    post:
+      operationId: v1_auth_client_profile_deletion_check_create
+      description: Check whether account deletion is allowed and requires Apple confirmation.
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteAccountRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DeleteAccountRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DeleteAccountRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientAccountDeletionCheck'
+          description: ''
   /api/v1/auth/forgot-password/:
     post:
       operationId: v1_auth_forgot_password_create
@@ -3299,6 +3325,32 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v2/auth/client/profile/deletion-check/:
+    post:
+      operationId: v2_auth_client_profile_deletion_check_create
+      description: Check whether account deletion is allowed and requires Apple confirmation.
+      tags:
+      - v2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteAccountRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DeleteAccountRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DeleteAccountRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientAccountDeletionCheck'
+          description: ''
   /api/v2/auth/forgot-password/:
     post:
       operationId: v2_auth_forgot_password_create
@@ -6679,6 +6731,13 @@ components:
     BlankEnum:
       enum:
       - ''
+    ClientAccountDeletionCheck:
+      type: object
+      properties:
+        requires_apple_confirmation:
+          type: boolean
+      required:
+      - requires_apple_confirmation
     ClientLogin:
       type: object
       description: Client-only session choice; omitted values are temporary by default.
@@ -6708,6 +6767,15 @@ components:
           default: false
       required:
       - password
+    DeleteAccountRequest:
+      type: object
+      properties:
+        password:
+          type: string
+          writeOnly: true
+        id_token:
+          type: string
+          writeOnly: true
     DeliveryArea:
       type: object
       properties:

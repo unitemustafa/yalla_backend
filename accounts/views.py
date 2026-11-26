@@ -7,7 +7,8 @@ from django.db import IntegrityError, transaction
 from django.db.models import Q
 from rest_framework.exceptions import ValidationError
 from django.utils import timezone
-from rest_framework import status
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import serializers, status
 from rest_framework.generics import get_object_or_404
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -933,6 +934,37 @@ class ClientProfileView(APIView):
             {"detail": "Account deleted successfully."},
             status=status.HTTP_200_OK,
         )
+
+
+class ClientAccountDeletionCheckView(APIView):
+    permission_classes = [IsAuthenticated, IsClientRole]
+
+    @extend_schema(
+        request=DeleteAccountSerializer,
+        responses=inline_serializer(
+            name="ClientAccountDeletionCheck",
+            fields={"requires_apple_confirmation": serializers.BooleanField()},
+        ),
+        description="Check whether account deletion is allowed and requires Apple confirmation.",
+    )
+    def post(self, request):
+        from .deletion import validate_client_account_deletion
+
+        validate_client_account_deletion(request.user)
+        apple_provider = SocialIdentity.Provider.APPLE
+        apple_linked = request.user.social_identities.filter(
+            provider=apple_provider,
+        ).exists()
+        if request.data:
+            serializer = DeleteAccountSerializer(
+                data=request.data,
+                context={
+                    "request": request,
+                    "required_social_provider": apple_provider,
+                },
+            )
+            serializer.is_valid(raise_exception=True)
+        return Response({"requires_apple_confirmation": apple_linked})
 
 
 class AdminUserListCreateView(APIView):

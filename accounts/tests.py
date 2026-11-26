@@ -34,8 +34,10 @@ from .models import (
     OTPCooldown,
     OneTimePassword,
     PendingRegistration,
+    SocialIdentity,
 )
 from .services import issue_otp
+from .social_auth import VerifiedSocialIdentity
 
 User = get_user_model()
 AUTH_BASE = "/api/v1/auth"
@@ -2580,6 +2582,40 @@ class AuthenticationAPITests(APITestCase):
         self.assertTrue(user.is_active)
         self.assertIsNone(user.deleted_at)
 
+    def test_apple_deletion_check_confirms_link_without_deleting_account(self):
+        user = self.create_active_user()
+        self.client.force_authenticate(user=user)
+        url = f"{AUTH_BASE}/client/profile/deletion-check/"
+        self.assertEqual(
+            self.client.post(url, {}, format="json").data,
+            {"requires_apple_confirmation": False},
+        )
+        SocialIdentity.objects.create(user=user, provider="apple", firebase_uid="apple-uid")
+        SocialIdentity.objects.create(user=user, provider="google", firebase_uid="google-uid")
+        self.assertEqual(
+            self.client.post(url, {"password": self.password}, format="json").data,
+            {"requires_apple_confirmation": True},
+        )
+        with patch("accounts.serializers.verify_social_id_token") as verify_token:
+            verify_token.return_value = VerifiedSocialIdentity(
+                firebase_uid="google-uid", provider="google", email=user.email,
+                email_verified=True, first_name="", last_name="", avatar_url=None,
+            )
+            self.assertEqual(
+                self.client.post(url, {"id_token": "test-token"}, format="json").status_code,
+                status.HTTP_400_BAD_REQUEST,
+            )
+            verify_token.return_value = VerifiedSocialIdentity(
+                firebase_uid="apple-uid", provider="apple", email=user.email,
+                email_verified=True, first_name="", last_name="", avatar_url=None,
+            )
+            self.assertEqual(
+                self.client.post(url, {"id_token": "test-token"}, format="json").data,
+                {"requires_apple_confirmation": True},
+            )
+        user.refresh_from_db()
+        self.assertIsNone(user.deleted_at)
+
     def test_client_can_permanently_delete_account(self):
         user = self.create_active_user()
         original_email = user.email
@@ -2689,6 +2725,11 @@ class AuthenticationAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("active order", response.data["detail"])
+        check = self.client.post(
+            f"{AUTH_BASE}/client/profile/deletion-check/", {}, format="json"
+        )
+        self.assertEqual(check.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("active order", check.data["detail"])
         user.refresh_from_db()
         self.assertTrue(user.is_active)
         self.assertIsNone(user.deleted_at)

@@ -664,9 +664,12 @@ class DeleteAccountSerializer(RequiredFieldMessagesMixin, serializers.Serializer
                 identity = verify_social_id_token(id_token)
             except SocialTokenError as exc:
                 raise serializers.ValidationError({"id_token": str(exc)}) from exc
-            if not user.social_identities.filter(
+            identities = user.social_identities.filter(
                 firebase_uid=identity.firebase_uid,
-            ).exists():
+            )
+            if provider := self.context.get("required_social_provider"):
+                identities = identities.filter(provider=provider)
+            if not identities.exists():
                 raise serializers.ValidationError(
                     {"id_token": "Social reauthentication does not match this account."}
                 )

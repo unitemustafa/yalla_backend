@@ -20,6 +20,7 @@ CONSUMER_ROUTES = {
         ("get", "/api/v1/auth/me"),
         ("patch", "/api/v1/auth/client/profile/"),
         ("delete", "/api/v1/auth/client/profile/"),
+        ("post", "/api/v1/auth/client/profile/deletion-check/"),
         ("get", "/api/v1/home/"),
         ("get", "/api/v1/home/classifications/"),
         ("get", "/api/v1/home/classifications/1/markets/"),
