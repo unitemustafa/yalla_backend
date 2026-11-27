@@ -36,7 +36,9 @@ def _mark_push_dispatched(notification_ids):
     ):
         data = dict(notification.data or {})
         data["push_dispatched"] = True
-        Notification.objects.filter(pk=notification.id).update(data=data)
+        Notification.objects.filter(pk=notification.id).update(
+            data=data, push_pending_device_ids=None
+        )
 
 
 @shared_task(
@@ -273,6 +275,14 @@ def send_notifications_multicast_batch_task(
             high_priority=high_priority,
             android_channel_id=android_channel_id,
         )
+        if result.pending_device_ids:
+            Notification.objects.bulk_update(
+                [
+                    Notification(pk=notification_id, push_pending_device_ids=device_ids)
+                    for notification_id, device_ids in result.pending_device_ids.items()
+                ],
+                ["push_pending_device_ids"],
+            )
         dispatched_ids = result.dispatched_notification_ids
         if not result.failed_tokens:
             dispatched_ids = frozenset(pending_ids)

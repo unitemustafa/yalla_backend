@@ -226,6 +226,8 @@ class Notification(models.Model):
         null=True,
     )
     data = models.JSONField(default=dict, blank=True)
+    # Null means delivery has not yet been narrowed to devices that failed.
+    push_pending_device_ids = models.JSONField(null=True, blank=True, editable=False)
     recipient = models.ForeignKey(
         "accounts.User",
         on_delete=models.CASCADE,

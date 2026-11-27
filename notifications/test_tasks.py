@@ -3,10 +3,11 @@ from unittest.mock import patch
 import requests
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 
 from config.firebase_admin import FirebaseConfigurationError
 from config.test_fakes import InMemoryRedis
-from notifications.models import Notification
+from notifications.models import ClientDevice, Notification
 from notifications.push import PushDeliveryResult
 from notifications.tasks import (
     send_account_disabled_event_task,
@@ -215,6 +216,67 @@ class NotificationsCeleryTasksTests(TestCase):
         self.assertEqual(mock_multicast.call_args.args[0], [another.id])
         another.refresh_from_db()
         self.assertTrue(another.data["push_dispatched"])
+
+    @patch("notifications.push._send_tokens")
+    def test_product_push_retries_only_devices_that_still_failed(self, mock_send):
+        notification = Notification.objects.create(
+            recipient=self.user,
+            audience=Notification.Audience.CLIENT,
+            type=Notification.Type.PRODUCT_CREATED,
+            title="New product",
+            message="A new product is available.",
+            data={"event": "product_created", "product_id": 23, "dispatch_id": 42},
+        )
+        first, second, third = [
+            ClientDevice.objects.create(
+                user=self.user,
+                token=token,
+                platform=ClientDevice.Platform.ANDROID,
+                last_seen_at=timezone.now(),
+            )
+            for token in ("works", "recovers", "slow")
+        ]
+        accepted_tokens = iter(
+            [{first.token}, {second.token}, set(), set(), {third.token}]
+        )
+
+        def send(tokens, *_args, **_kwargs):
+            accepted = frozenset(next(accepted_tokens))
+            return PushDeliveryResult(
+                accepted, frozenset(), frozenset(tokens) - accepted
+            )
+
+        mock_send.side_effect = send
+        task = send_notifications_multicast_batch_task
+        args = [[notification.id]]
+        kwargs = {"high_priority": True, "android_channel_id": "product_updates"}
+        expected_pending = [[second.id, third.id], [third.id], [third.id], [third.id]]
+        with patch.object(task, "retry", side_effect=RuntimeError("retry_invoked")):
+            for pending_ids in expected_pending:
+                with self.assertRaisesMessage(RuntimeError, "retry_invoked"):
+                    task.apply(args=args, kwargs=kwargs)
+                notification.refresh_from_db()
+                self.assertCountEqual(notification.push_pending_device_ids, pending_ids)
+                self.assertFalse(notification.data.get("push_dispatched", False))
+
+        result = task.apply(args=args, kwargs=kwargs).get()
+        self.assertEqual(result["status"], "success")
+        notification.refresh_from_db()
+        self.assertTrue(notification.data["push_dispatched"])
+        self.assertIsNone(notification.push_pending_device_ids)
+        self.assertEqual(
+            task.apply(args=args, kwargs=kwargs).get()["reason"], "already_sent"
+        )
+        self.assertEqual(
+            [set(call.args[0]) for call in mock_send.call_args_list],
+            [
+                {first.token, second.token, third.token},
+                {second.token, third.token},
+                {third.token},
+                {third.token},
+                {third.token},
+            ],
+        )
 
     @patch("notifications.tasks._send_account_disabled_event_now")
     def test_send_account_disabled_event_task(self, mock_send):

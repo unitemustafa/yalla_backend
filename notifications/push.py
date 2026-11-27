@@ -1,6 +1,6 @@
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import lru_cache
 
@@ -21,6 +21,7 @@ class PushDeliveryResult:
     stale_tokens: frozenset
     failed_tokens: frozenset
     dispatched_notification_ids: frozenset = frozenset()
+    pending_device_ids: dict[int, list[int]] = field(default_factory=dict)
 
 
 def _string_data(data):
@@ -164,17 +165,18 @@ def send_notifications_push(
         return PushDeliveryResult(frozenset(), frozenset(), frozenset())
 
     recipient_ids = {notification.recipient_id for notification in notifications}
-    tokens_by_user = {}
-    for user_id, token in ClientDevice.objects.filter(
+    devices_by_user = {}
+    for user_id, device_id, token in ClientDevice.objects.filter(
         user_id__in=recipient_ids,
         is_active=True,
-    ).values_list("user_id", "token"):
-        tokens_by_user.setdefault(user_id, []).append(token)
+    ).values_list("user_id", "id", "token"):
+        devices_by_user.setdefault(user_id, {})[device_id] = token
 
     successful_tokens = set()
     stale_tokens = set()
     failed_tokens = set()
     dispatched_notification_ids = set()
+    pending_device_ids = {}
 
     payload_groups = {}
     for notification in notifications:
@@ -204,11 +206,18 @@ def send_notifications_push(
                 "message": notification.message,
                 "data": data,
                 "tokens": [],
-                "notifications": [],
+                "devices_by_notification": {},
             },
         )
-        group["tokens"].extend(tokens_by_user.get(notification.recipient_id, ()))
-        group["notifications"].append(notification)
+        devices = devices_by_user.get(notification.recipient_id, {})
+        if notification.push_pending_device_ids is not None:
+            devices = {
+                device_id: devices[device_id]
+                for device_id in notification.push_pending_device_ids
+                if device_id in devices
+            }
+        group["tokens"].extend(devices.values())
+        group["devices_by_notification"][notification.id] = devices
 
     for group in payload_groups.values():
         tokens = list(dict.fromkeys(group["tokens"]))
@@ -223,16 +232,23 @@ def send_notifications_push(
         successful_tokens.update(result.successful_tokens)
         stale_tokens.update(result.stale_tokens)
         failed_tokens.update(result.failed_tokens)
-        for notification in group["notifications"]:
-            recipient_tokens = tokens_by_user.get(notification.recipient_id, ())
-            if not any(token in result.failed_tokens for token in recipient_tokens):
-                dispatched_notification_ids.add(notification.id)
+        for notification_id, devices in group["devices_by_notification"].items():
+            failed_device_ids = [
+                device_id
+                for device_id, token in devices.items()
+                if token in result.failed_tokens
+            ]
+            if failed_device_ids:
+                pending_device_ids[notification_id] = failed_device_ids
+            else:
+                dispatched_notification_ids.add(notification_id)
 
     return PushDeliveryResult(
         frozenset(successful_tokens),
         frozenset(stale_tokens),
         frozenset(failed_tokens),
         frozenset(dispatched_notification_ids),
+        pending_device_ids,
     )
 
 
